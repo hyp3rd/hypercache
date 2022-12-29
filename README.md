@@ -1,5 +1,7 @@
 # HyperCache
 
+[![Go](https://github.com/hyp3rd/hypercache/actions/workflows/go.yml/badge.svg)][def]
+
 ## Synopsis
 
 HyperCache is an in-memory cache implementation in Go that supports the expiration and eviction of items. The package consists of a struct called **HyperCache**, which represents the cache itself and several functions that operate on it.
@@ -160,3 +162,5 @@ The code and documentation in this project are released under the Mozilla Public
 ## Author
 
 I'm a surfer, a crypto trader, and a software architect with 15 years of experience designing highly available distributed production environments and developing cloud-native apps in public and private clouds. Feel free to hook me up on [LinkedIn](https://www.linkedin.com/in/francesco-cosentino/).
+
+[def]: https://github.com/hyp3rd/hypercache/actions/workflows/go.yml
