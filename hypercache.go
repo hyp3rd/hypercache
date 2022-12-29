@@ -102,31 +102,31 @@ func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) 
 		return nil
 	}
 
-	var wg sync.WaitGroup
-	if c.lru.Len() >= c.capacity {
+	// var wg sync.WaitGroup
+	// if c.lru.Len() >= c.capacity {
 
-		select {
-		case c.evictCh <- true:
-			// Wait for eviction to complete
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				<-c.evictCh
-			}()
+	// 	select {
+	// 	case c.evictCh <- true:
+	// 		// Wait for eviction to complete
+	// 		wg.Add(1)
+	// 		go func() {
+	// 			defer wg.Done()
+	// 			<-c.evictCh
+	// 		}()
 
-			go func() {
-				wg.Wait()
-			}()
-		case <-c.stop:
-			return nil
-		}
-	}
+	// 		go func() {
+	// 			wg.Wait()
+	// 		}()
+	// 	case <-c.stop:
+	// 		return nil
+	// 	}
+	// }
 
 	// Check if the cache is at capacity
-	// if c.lru.Len() >= c.capacity {
-	// 	// Signal the eviction loop to start
-	// 	c.evictCh <- true
-	// }
+	if c.lru.Len() >= c.capacity {
+		// Signal the eviction loop to start
+		c.evictCh <- true
+	}
 
 	// Create a new item and add it to the front of the lru list and itemsByKey map
 	ee := c.lru.PushFront(&item{key, value, time.Now(), duration})
