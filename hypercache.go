@@ -13,17 +13,6 @@ import (
 	"github.com/hyp3rd/hypercache/stats"
 )
 
-// StatsCollector is an interface for collecting cache statistics.
-// It has four methods for incrementing the number of cache hits, misses, evictions, and expirations, and a method for getting the cache statistics.
-// It is used by the HyperCache struct to allow users to collect cache statistics using their own implementation.
-type StatsCollector interface {
-	IncrementHits()
-	IncrementMisses()
-	IncrementEvictions()
-	IncrementExpirations()
-	GetStats() stats.Stats
-}
-
 // cacheItem represents an item in the cache. It stores the key, value, last accessed time, and duration.
 type cacheItem struct {
 	key                string
@@ -338,6 +327,6 @@ func (c *HyperCache) removeElement(e *list.Element) {
 }
 
 // Stats returns the statistics collected by the stats collector.
-func (c *HyperCache) Stats() stats.Stats {
+func (c *HyperCache) Stats() any {
 	return c.statsCollector.GetStats()
 }
