@@ -27,36 +27,48 @@ type cacheItem struct {
 // and a capacity field that limits the number of items that can be stored in the cache.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
 type HyperCache struct {
-	mu             sync.RWMutex             // mutex to protect concurrent access to the cache
-	lru            *list.List               // doubly-linked list to store the items in the cache
-	itemsByKey     map[string]*list.Element // map to quickly look up items by their key
-	capacity       int                      // capacity of the cache, limits the number of items that can be stored in the cache
-	stop           chan bool                // channel to signal the expiration and eviction loops to stop
-	evictCh        chan bool                // channel to signal the eviction loop to start
-	once           sync.Once                // used to ensure that the expiration and eviction loops are only started once
-	statsCollector StatsCollector           // stats collector to collect cache statistics
+	mu                 sync.RWMutex             // mutex to protect concurrent access to the cache
+	lru                *list.List               // doubly-linked list to store the items in the cache
+	itemsByKey         map[string]*list.Element // map to quickly look up items by their key
+	capacity           int                      // capacity of the cache, limits the number of items that can be stored in the cache
+	stop               chan bool                // channel to signal the expiration and eviction loops to stop
+	evictCh            chan bool                // channel to signal the eviction loop to start
+	once               sync.Once                // used to ensure that the expiration and eviction loops are only started once
+	statsCollector     StatsCollector           // stats collector to collect cache statistics
+	expirationInterval time.Duration            // interval at which the expiration loop should run
+	evictionInterval   time.Duration            // interval at which the eviction loop should run
 }
 
 // NewHyperCache creates a new in-memory cache with the given capacity.
 // If the capacity is negative, it returns an error.
 // The function initializes the lru list and itemsByKey map, and starts the expiration and eviction loops in separate goroutines.
-func NewHyperCache(capacity int) (cache *HyperCache, err error) {
+func NewHyperCache(capacity int, expirationInterval, evictionInterval time.Duration) (cache *HyperCache, err error) {
 	if capacity < 0 {
 		return nil, fmt.Errorf("invalid capacity: %d", capacity)
 	}
+
+	if expirationInterval < 0 {
+		expirationInterval = time.Minute
+	}
+	if evictionInterval < 0 {
+		evictionInterval = 0
+	}
+
 	cache = &HyperCache{
-		lru:            list.New(),
-		itemsByKey:     make(map[string]*list.Element),
-		capacity:       capacity,
-		stop:           make(chan bool, 1),
-		evictCh:        make(chan bool, 1),
-		statsCollector: stats.NewCollector(), // initialize the default stats collector field
+		lru:                list.New(),
+		itemsByKey:         make(map[string]*list.Element),
+		capacity:           capacity,
+		stop:               make(chan bool, 1),
+		evictCh:            make(chan bool, 1),
+		statsCollector:     stats.NewCollector(), // initialize the default stats collector field
+		expirationInterval: expirationInterval,
+		evictionInterval:   evictionInterval,
 	}
 
 	// Start expiration and eviction loops if capacity is greater than zero
 	if capacity > 0 {
 		cache.once.Do(func() {
-			tick := time.NewTicker(time.Minute)
+			tick := time.NewTicker(cache.expirationInterval)
 			go func() {
 				for {
 					select {
@@ -69,6 +81,19 @@ func NewHyperCache(capacity int) (cache *HyperCache, err error) {
 					}
 				}
 			}()
+			if cache.evictionInterval > 0 {
+				tick := time.NewTicker(cache.evictionInterval)
+				go func() {
+					for {
+						select {
+						case <-tick.C:
+							cache.evictionLoop()
+						case <-cache.stop:
+							return
+						}
+					}
+				}()
+			}
 		})
 	}
 
@@ -81,6 +106,8 @@ func NewHyperCache(capacity int) (cache *HyperCache, err error) {
 // This function takes a pointer to a Collector as an argument, so that the original Collector can be modified.
 // If a different type of StatsCollector is needed, the statsCollector field of the HyperCache struct can be set to a different type that implements the StatsCollector interface.
 func (c *HyperCache) SetStatsCollector(collector *stats.Collector) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.statsCollector = collector
 }
 
@@ -130,6 +157,7 @@ func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) 
 
 			go func() {
 				wg.Wait()
+				c.statsCollector.IncrementEvictions()
 			}()
 		case <-c.stop:
 			return nil
@@ -143,8 +171,7 @@ func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) 
 	// }
 
 	// Create a new item and add it to the front of the lru list and itemsByKey map
-	ee := c.lru.PushFront(&cacheItem{key, value, time.Now(), duration})
-	c.itemsByKey[key] = ee
+	c.itemsByKey[key] = c.lru.PushFront(&cacheItem{key, value, time.Now(), duration})
 	go c.statsCollector.IncrementMisses() // increment misses in stats collector
 	return nil
 }
@@ -298,24 +325,47 @@ func (c *HyperCache) evictionLoop() {
 			break
 		}
 		c.removeElement(ee)
-		go c.statsCollector.IncrementEvictions() // increment evictions in stats collector
+		c.statsCollector.IncrementEvictions() // increment evictions in stats collector
 	}
 
 	// Signal that eviction is complete
 	c.evictCh <- false
 }
 
-// expirationLoop is a goroutine that runs every minute and removes expired items from the cache.
+// // expirationLoop is a goroutine that runs every minute and removes expired items from the cache.
+// func (c *HyperCache) expirationLoop() {
+// 	c.mu.Lock()
+// 	defer c.mu.Unlock()
+
+// 	now := time.Now()
+// 	for ee := c.lru.Back(); ee != nil; ee = ee.Prev() {
+// 		i := ee.Value.(*cacheItem)
+// 		if i.lastAccessedBefore.Add(i.duration).Before(now) {
+// 			c.removeElement(ee)
+// 			go c.statsCollector.IncrementExpirations() // increment expirations in stats collector
+// 		}
+// 	}
+// }
+
+// TriggerEviction sends a signal to the eviction loop to start.
+func (c *HyperCache) TriggerEviction() {
+	c.evictCh <- true
+}
+
+// expirationLoop is a goroutine that runs in the background and checks for expired items in the cache.
+// If an item has expired, it removes the item from the cache.
 func (c *HyperCache) expirationLoop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	now := time.Now()
-	for ee := c.lru.Back(); ee != nil; ee = ee.Prev() {
-		i := ee.Value.(*cacheItem)
-		if i.lastAccessedBefore.Add(i.duration).Before(now) {
-			c.removeElement(ee)
-			go c.statsCollector.IncrementExpirations() // increment expirations in stats collector
+	for e := c.lru.Back(); e != nil; e = c.lru.Back() {
+		item := e.Value.(*cacheItem)
+		if time.Now().After(item.lastAccessedBefore.Add(item.duration)) {
+			c.lru.Remove(e)
+			delete(c.itemsByKey, item.key)
+			c.statsCollector.IncrementExpirations()
+		} else {
+			break
 		}
 	}
 }

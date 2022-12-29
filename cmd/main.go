@@ -9,7 +9,7 @@ import (
 
 func main() {
 	// Create a new cache with a capacity of 100 items
-	cache, err := hypercache.NewHyperCache(5)
+	cache, err := hypercache.NewHyperCache(5, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
 	if err != nil {
 		fmt.Println(err)
 		return

@@ -8,7 +8,7 @@ import (
 
 func TestNewHyperCache(t *testing.T) {
 	// Test with valid capacity
-	cache, err := NewHyperCache(10)
+	cache, err := NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -29,14 +29,14 @@ func TestNewHyperCache(t *testing.T) {
 	}
 
 	// Test with invalid capacity
-	_, err = NewHyperCache(-1)
+	_, err = NewHyperCache(-1, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
 	if err == nil {
 		t.Error("expected error for invalid capacity, got nil")
 	}
 }
 
 func TestHyperCache_Set(t *testing.T) {
-	cache, _ := NewHyperCache(10)
+	cache, _ := NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
 
 	// Test with empty key
 	err := cache.Set("", "value", time.Minute)
@@ -140,7 +140,7 @@ func TestHyperCache_Set(t *testing.T) {
 }
 
 func TestHyperCache_Get(t *testing.T) {
-	cache, _ := NewHyperCache(10)
+	cache, _ := NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
 
 	// Test with non-existent key
 	_, ok := cache.Get("key")
@@ -185,7 +185,7 @@ func TestHyperCache_Get(t *testing.T) {
 }
 
 func TestHyperCache_Delete(t *testing.T) {
-	cache, _ := NewHyperCache(10)
+	cache, _ := NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
 
 	// Test with non-existent key
 	err := cache.Delete("key")
@@ -208,7 +208,7 @@ func TestHyperCache_Delete(t *testing.T) {
 }
 
 func TestHyperCache_Clear(t *testing.T) {
-	cache, _ := NewHyperCache(10)
+	cache, _ := NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
 
 	// Test with empty cache
 	cache.Clear()
@@ -228,7 +228,7 @@ func TestHyperCache_Clear(t *testing.T) {
 }
 
 func TestHyperCache_Capacity(t *testing.T) {
-	cache, _ := NewHyperCache(10)
+	cache, _ := NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
 
 	// Test with valid capacity
 	cache.SetCapacity(5)
@@ -247,7 +247,8 @@ func TestHyperCache_Capacity(t *testing.T) {
 }
 
 func TestHyperCache_Len(t *testing.T) {
-	cache, _ := NewHyperCache(10)
+	cache, _ := NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
+
 	// Test with empty cache
 	if cache.Len() != 0 {
 		t.Errorf("unexpected number of items in cache: %d", cache.Len())
@@ -261,7 +262,8 @@ func TestHyperCache_Len(t *testing.T) {
 }
 
 func TestHyperCache_expirationLoop(t *testing.T) {
-	cache, _ := NewHyperCache(10)
+	cache, _ := NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
+
 	// Test with empty cache
 	cache.expirationLoop()
 	if len(cache.itemsByKey) != 0 {
@@ -321,14 +323,16 @@ func TestHyperCache_expirationLoop(t *testing.T) {
 // }
 
 func TestHyperCache_Close(t *testing.T) {
-	cache, _ := NewHyperCache(10)
+	cache, _ := NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
+
 	// Test with empty cache
 	cache.Close()
 	if len(cache.itemsByKey) != 0 {
 		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
 	}
 
-	cache, _ = NewHyperCache(10)
+	cache, _ = NewHyperCache(10, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
+
 	// Test with non-empty cache
 	cache.Set("key", "value", time.Minute)
 	cache.Close()
