@@ -2,22 +2,47 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/hyp3rd/hypercache"
 )
 
 func main() {
-	// Create a new cache with a capacity of 100 items
-	// onItemExpire := func(key string, value interface{}) {
-	// 	fmt.Printf("item expired: %s\n", key)
-	// }
 
-	cache, err := hypercache.NewHyperCache(100, hypercache.WithExpirationInterval(time.Hour), hypercache.WithEvictionInterval(time.Minute))
+	onItemExpire := func(key string, value interface{}) {
+		// create the file
+		f, err := os.Create("test.txt")
+		if err != nil {
+			fmt.Println(err)
+		}
+		// close the file with defer
+		defer f.Close()
+	}
+
+	cache, err := hypercache.NewHyperCache(100, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(30*time.Second))
 
 	if err != nil {
 		fmt.Println(err)
 		return
+	}
+
+	cacheItem := hypercache.CacheItem{
+		Key:           "NewKey",
+		Value:         "hello, there",
+		Duration:      2 * time.Second,
+		OnItemExpired: onItemExpire,
+	}
+	err = cache.Add(cacheItem)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Try to retrieve the expired item from the cache
+	_, ok := cache.Get(cacheItem.Key)
+	if !ok {
+		fmt.Println("item expired")
 	}
 
 	// Add an item to the cache with a key "key" and a value "value" that expires in 5 seconds
@@ -86,6 +111,8 @@ func main() {
 	time.Sleep(5 * time.Second)
 	fmt.Println(stats)
 	fmt.Println(cache.Capacity())
+
+	time.Sleep(35 * time.Second)
 
 	// Stop the expiration and eviction loops
 	cache.Stop()

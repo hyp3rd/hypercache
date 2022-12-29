@@ -167,8 +167,14 @@ func (c *HyperCache) Add(cacheItem CacheItem) error {
 	}
 
 	// Create a new item and add it to the front of the lru list and itemsByKey map
-	c.itemsByKey[cacheItem.Key] = c.lru.PushFront(&cacheItem)
-	// c.itemsByKey[key] = ee
+	newItem := &CacheItem{
+		Key:                cacheItem.Key,
+		Value:              cacheItem.Value,
+		LastAccessedBefore: time.Now(),
+		Duration:           cacheItem.Duration,
+		OnItemExpired:      cacheItem.OnItemExpired,
+	}
+	c.itemsByKey[cacheItem.Key] = c.lru.PushFront(newItem)
 	go c.statsCollector.IncrementMisses() // increment misses in stats collector
 	return nil
 }
@@ -410,7 +416,7 @@ func (c *HyperCache) evictionLoop() {
 	}
 
 	// Signal that eviction is complete
-	c.evictCh <- false
+	c.evictCh <- true
 }
 
 // expirationLoop is a loop that runs at the expiration interval and removes expired items from the cache.
