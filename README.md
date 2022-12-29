@@ -114,7 +114,7 @@ import (
     "fmt"
     "time"
 
-    "github.com/user/hypercache"
+    "github.com/hyp3rd/hypercache"
 )
 
 func main() {
@@ -125,8 +125,8 @@ func main() {
         return
     }
 
-    // Add an item to the cache with a key "key" and a value "value" that expires in 1 hour
-    err = cache.Set("key", "value", time.Hour)
+    // Add an item to the cache with a key "key" and a value "value" that expires in 5 seconds
+    err = cache.Set("key", "value", 5*time.Second)
     if err != nil {
         fmt.Println(err)
         return
@@ -141,7 +141,7 @@ func main() {
     fmt.Println(value) // "value"
 
     // Wait for the item to expire
-    time.Sleep(time.Hour)
+    time.Sleep(5*time.Second)
 
     // Try to retrieve the expired item from the cache
     _, ok = cache.Get("key")

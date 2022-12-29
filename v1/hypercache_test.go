@@ -1,4 +1,4 @@
-package hypercache
+package v1
 
 import (
 	"fmt"
@@ -67,7 +67,7 @@ func TestHyperCache_Set(t *testing.T) {
 	if ee, ok := cache.itemsByKey["key"]; !ok {
 		t.Error("key not found in itemsByKey map")
 	} else {
-		item := ee.Value.(*cacheItem)
+		item := ee.Value.(*item)
 		if item.key != "key" {
 			t.Errorf("unexpected key: %s", item.key)
 		}
@@ -123,7 +123,7 @@ func TestHyperCache_Set(t *testing.T) {
 	if ee, ok := cache.itemsByKey["key10"]; !ok {
 		t.Error("key10 not found in itemsByKey map")
 	} else {
-		item := ee.Value.(*cacheItem)
+		item := ee.Value.(*item)
 		if item.key != "key10" {
 			t.Errorf("unexpected key: %s", item.key)
 		}
@@ -168,7 +168,7 @@ func TestHyperCache_Get(t *testing.T) {
 	if ee, ok := cache.itemsByKey["key"]; !ok {
 		t.Error("key not found in itemsByKey map")
 	} else {
-		item := ee.Value.(*cacheItem)
+		item := ee.Value.(*item)
 		if item.key != "key" {
 			t.Errorf("unexpected key: %s", item.key)
 		}

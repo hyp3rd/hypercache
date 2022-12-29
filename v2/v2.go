@@ -2,30 +2,17 @@
 // Use of this source code is governed by a Mozilla Public License 2.0
 // license that can be found in the LICENSE file.
 // HyperCache is an in-memory cache implementation in Go that supports the expiration and eviction of items.
-package hypercache
+package v2
 
 import (
 	"container/list"
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/hyp3rd/hypercache/stats"
 )
 
-// StatsCollector is an interface for collecting cache statistics.
-// It has four methods for incrementing the number of cache hits, misses, evictions, and expirations, and a method for getting the cache statistics.
-// It is used by the HyperCache struct to allow users to collect cache statistics using their own implementation.
-type StatsCollector interface {
-	IncrementHits()
-	IncrementMisses()
-	IncrementEvictions()
-	IncrementExpirations()
-	GetStats() stats.Stats
-}
-
-// cacheItem represents an item in the cache. It stores the key, value, last accessed time, and duration.
-type cacheItem struct {
+// item represents an item in the cache. It stores the key, value, last accessed time, and duration.
+type item struct {
 	key                string
 	value              interface{}
 	lastAccessedBefore time.Time
@@ -38,14 +25,13 @@ type cacheItem struct {
 // and a capacity field that limits the number of items that can be stored in the cache.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
 type HyperCache struct {
-	mu             sync.RWMutex             // mutex to protect concurrent access to the cache
-	lru            *list.List               // doubly-linked list to store the items in the cache
-	itemsByKey     map[string]*list.Element // map to quickly look up items by their key
-	capacity       int                      // capacity of the cache, limits the number of items that can be stored in the cache
-	stop           chan bool                // channel to signal the expiration and eviction loops to stop
-	evictCh        chan bool                // channel to signal the eviction loop to start
-	once           sync.Once                // used to ensure that the expiration and eviction loops are only started once
-	statsCollector StatsCollector           // stats collector to collect cache statistics
+	mu         sync.RWMutex             // mutex to protect concurrent access to the cache
+	lru        *list.List               // doubly-linked list to store the items in the cache
+	itemsByKey map[string]*list.Element // map to quickly look up items by their key
+	capacity   int                      // capacity of the cache, limits the number of items that can be stored in the cache
+	stop       chan bool                // channel to signal the expiration and eviction loops to stop
+	evictCh    chan bool                // channel to signal the eviction loop to start
+	once       sync.Once                // used to ensure that the expiration and eviction loops are only started once
 }
 
 // NewHyperCache creates a new in-memory cache with the given capacity.
@@ -56,12 +42,11 @@ func NewHyperCache(capacity int) (cache *HyperCache, err error) {
 		return nil, fmt.Errorf("invalid capacity: %d", capacity)
 	}
 	cache = &HyperCache{
-		lru:            list.New(),
-		itemsByKey:     make(map[string]*list.Element),
-		capacity:       capacity,
-		stop:           make(chan bool, 1),
-		evictCh:        make(chan bool, 1),
-		statsCollector: stats.NewCollector(), // initialize the default stats collector field
+		lru:        list.New(),
+		itemsByKey: make(map[string]*list.Element),
+		capacity:   capacity,
+		stop:       make(chan bool, 1),
+		evictCh:    make(chan bool, 1),
 	}
 
 	// Start expiration and eviction loops if capacity is greater than zero
@@ -84,15 +69,6 @@ func NewHyperCache(capacity int) (cache *HyperCache, err error) {
 	}
 
 	return
-}
-
-// SetStatsCollector sets the statsCollector field of the HyperCache struct to the given Collector.
-// This allows the HyperCache to increment the appropriate counters in the Collector when cache events occur.
-// The Collector is used to collect cache statistics, such as the number of cache hits, misses, evictions, and expirations.
-// This function takes a pointer to a Collector as an argument, so that the original Collector can be modified.
-// If a different type of StatsCollector is needed, the statsCollector field of the HyperCache struct can be set to a different type that implements the StatsCollector interface.
-func (c *HyperCache) SetStatsCollector(collector *stats.Collector) {
-	c.statsCollector = collector
 }
 
 // Set adds a value to the cache with the given key and duration.
@@ -118,12 +94,11 @@ func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) 
 	// Check if the item already exists
 	if ee, ok := c.itemsByKey[key]; ok {
 		// Update the value, duration, and last accessed time
-		ee.Value.(*cacheItem).value = value
-		ee.Value.(*cacheItem).lastAccessedBefore = time.Now()
-		ee.Value.(*cacheItem).duration = duration
+		ee.Value.(*item).value = value
+		ee.Value.(*item).lastAccessedBefore = time.Now()
+		ee.Value.(*item).duration = duration
 		// Move the item to the front of the lru list
 		c.lru.MoveToFront(ee)
-		go c.statsCollector.IncrementHits() // increment hits in stats collector
 		return nil
 	}
 
@@ -154,9 +129,8 @@ func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) 
 	// }
 
 	// Create a new item and add it to the front of the lru list and itemsByKey map
-	ee := c.lru.PushFront(&cacheItem{key, value, time.Now(), duration})
+	ee := c.lru.PushFront(&item{key, value, time.Now(), duration})
 	c.itemsByKey[key] = ee
-	go c.statsCollector.IncrementMisses() // increment misses in stats collector
 	return nil
 }
 
@@ -173,7 +147,7 @@ func (c *HyperCache) Get(key string) (value interface{}, ok bool) {
 	defer c.mu.Unlock()
 	// Check if the item exists
 	if ee, ok := c.itemsByKey[key]; ok {
-		item := ee.Value.(*cacheItem)
+		item := ee.Value.(*item)
 		// Check if the item has expired
 		if time.Since(item.lastAccessedBefore) > item.duration {
 			return nil, false
@@ -182,11 +156,8 @@ func (c *HyperCache) Get(key string) (value interface{}, ok bool) {
 		item.lastAccessedBefore = time.Now()
 		// Move the item to the front of the lru list
 		c.lru.MoveToFront(ee)
-		go c.statsCollector.IncrementHits() // increment hits in stats collector
 		return item.value, true
 	}
-
-	go c.statsCollector.IncrementMisses() // increment misses in stats collector
 	return nil, false
 }
 
@@ -216,15 +187,15 @@ func (c *HyperCache) Delete(key string) error {
 // It acquires a lock, iterates through the lru list, and appends each item to the slice.
 // If the lru list is empty, it returns an empty slice.
 // The function releases the lock before returning the slice.
-func (c *HyperCache) List() []*cacheItem {
+func (c *HyperCache) List() []*item {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	items := make([]*cacheItem, 0, c.lru.Len())
+	items := make([]*item, 0, c.lru.Len())
 
 	// Iterate through the lru list and append each item to the slice
 	for e := c.lru.Front(); e != nil; e = e.Next() {
-		items = append(items, e.Value.(*cacheItem))
+		items = append(items, e.Value.(*item))
 	}
 
 	return items
@@ -309,7 +280,6 @@ func (c *HyperCache) evictionLoop() {
 			break
 		}
 		c.removeElement(ee)
-		go c.statsCollector.IncrementEvictions() // increment evictions in stats collector
 	}
 
 	// Signal that eviction is complete
@@ -323,10 +293,9 @@ func (c *HyperCache) expirationLoop() {
 
 	now := time.Now()
 	for ee := c.lru.Back(); ee != nil; ee = ee.Prev() {
-		i := ee.Value.(*cacheItem)
+		i := ee.Value.(*item)
 		if i.lastAccessedBefore.Add(i.duration).Before(now) {
 			c.removeElement(ee)
-			go c.statsCollector.IncrementExpirations() // increment expirations in stats collector
 		}
 	}
 }
@@ -334,10 +303,5 @@ func (c *HyperCache) expirationLoop() {
 // removeElement removes the given element from the lru list and the itemsByKey map.
 func (c *HyperCache) removeElement(e *list.Element) {
 	c.lru.Remove(e)
-	delete(c.itemsByKey, e.Value.(*cacheItem).key)
-}
-
-// Stats returns the statistics collected by the stats collector.
-func (c *HyperCache) Stats() stats.Stats {
-	return c.statsCollector.GetStats()
+	delete(c.itemsByKey, e.Value.(*item).key)
 }
