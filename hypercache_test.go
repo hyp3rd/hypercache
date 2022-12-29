@@ -207,18 +207,18 @@ func TestHyperCache_Delete(t *testing.T) {
 	}
 }
 
-func TestHyperCache_Clean(t *testing.T) {
+func TestHyperCache_Clear(t *testing.T) {
 	cache, _ := NewHyperCache(10)
 
 	// Test with empty cache
-	cache.Clean()
+	cache.Clear()
 	if len(cache.itemsByKey) != 0 {
 		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
 	}
 
 	// Test with non-empty cache
 	cache.Set("key", "value", time.Minute)
-	cache.Clean()
+	cache.Clear()
 	if len(cache.itemsByKey) != 0 {
 		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
 	}

@@ -219,9 +219,9 @@ func (c *HyperCache) List() []*cacheItem {
 	return items
 }
 
-// Clean removes all items from the cache.
+// Clear removes all items from the cache.
 // The function acquires a lock, removes all items from the lru list and itemsByKey map, and releases the lock.
-func (c *HyperCache) Clean() {
+func (c *HyperCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -279,8 +279,8 @@ func (c *HyperCache) Close() {
 	// Stop the expiration and eviction loops
 	c.Stop()
 
-	// Clean the cache
-	c.Clean()
+	// Clear the cache
+	c.Clear()
 }
 
 // The evictionLoop function removes the least recently used items from the cache until it is below the capacity.
