@@ -80,6 +80,7 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 					}
 				}
 			}()
+			// Start eviction loop if eviction interval is greater than zero
 			if cache.evictionInterval > 0 {
 				tick := time.NewTicker(cache.evictionInterval)
 				go func() {
@@ -411,21 +412,6 @@ func (c *HyperCache) evictionLoop() {
 	// Signal that eviction is complete
 	c.evictCh <- false
 }
-
-// // expirationLoop is a goroutine that runs every minute and removes expired items from the cache.
-// func (c *HyperCache) expirationLoop() {
-// 	c.mu.Lock()
-// 	defer c.mu.Unlock()
-
-// 	now := time.Now()
-// 	for ee := c.lru.Back(); ee != nil; ee = ee.Prev() {
-// 		i := ee.Value.(*CacheItem)
-// 		if i.lastAccessedBefore.Add(i.duration).Before(now) {
-// 			c.removeElement(ee)
-// 			c.statsCollector.IncrementExpirations() // increment expirations in stats collector
-// 		}
-// 	}
-// }
 
 // expirationLoop is a loop that runs at the expiration interval and removes expired items from the cache.
 func (c *HyperCache) expirationLoop() {
