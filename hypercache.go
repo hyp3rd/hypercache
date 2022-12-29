@@ -13,12 +13,13 @@ import (
 	"github.com/hyp3rd/hypercache/stats"
 )
 
-// cacheItem represents an item in the cache. It stores the key, value, last accessed time, and duration.
-type cacheItem struct {
-	key                string
-	value              interface{}
-	lastAccessedBefore time.Time
-	duration           time.Duration
+// CacheItem represents an item in the cache. It stores the key, value, last accessed time, and duration.
+type CacheItem struct {
+	Key                string                              // Key is the key of the item
+	Value              interface{}                         // Value is the value stored in the cache
+	LastAccessedBefore time.Time                           // LastAccessedBefore is the time before which the item was last accessed
+	Duration           time.Duration                       // Duration is the time after which the item expires
+	OnItemExpired      func(key string, value interface{}) // callback function to be executed when the item expires
 }
 
 // HyperCache is an in-memory cache that stores items with a key and expiration duration.
@@ -42,16 +43,9 @@ type HyperCache struct {
 // NewHyperCache creates a new in-memory cache with the given capacity.
 // If the capacity is negative, it returns an error.
 // The function initializes the lru list and itemsByKey map, and starts the expiration and eviction loops in separate goroutines.
-func NewHyperCache(capacity int, expirationInterval, evictionInterval time.Duration) (cache *HyperCache, err error) {
+func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err error) {
 	if capacity < 0 {
 		return nil, fmt.Errorf("invalid capacity: %d", capacity)
-	}
-
-	if expirationInterval < 0 {
-		expirationInterval = time.Minute
-	}
-	if evictionInterval < 0 {
-		evictionInterval = 0
 	}
 
 	cache = &HyperCache{
@@ -61,8 +55,13 @@ func NewHyperCache(capacity int, expirationInterval, evictionInterval time.Durat
 		stop:               make(chan bool, 1),
 		evictCh:            make(chan bool, 1),
 		statsCollector:     stats.NewCollector(), // initialize the default stats collector field
-		expirationInterval: expirationInterval,
-		evictionInterval:   evictionInterval,
+		expirationInterval: 30 * time.Minute,
+		evictionInterval:   5 * time.Minute,
+	}
+
+	// Apply options
+	for _, option := range options {
+		option(cache)
 	}
 
 	// Start expiration and eviction loops if capacity is greater than zero
@@ -111,6 +110,68 @@ func (c *HyperCache) SetStatsCollector(collector *stats.Collector) {
 	c.statsCollector = collector
 }
 
+// Add adds a cache item to the HyperCache.
+// If the item already exists, it updates the value, duration, and last accessed time of the item.
+// If the cache is at capacity, it evicts the least recently used item before adding the new item.
+// If the key or value of the item is empty, or the duration is negative, it returns an error.
+func (c *HyperCache) Add(cacheItem CacheItem) error {
+	// Check for invalid key, value, or duration
+	if cacheItem.Key == "" {
+		return fmt.Errorf("key cannot be empty")
+	}
+	if cacheItem.Value == nil {
+		return fmt.Errorf("value cannot be nil")
+	}
+	if cacheItem.Duration < 0 {
+		return fmt.Errorf("invalid duration: %d", cacheItem.Duration)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check if the item already exists
+	if elem, ok := c.itemsByKey[cacheItem.Key]; ok {
+		c.lru.MoveToFront(elem)
+		item := elem.Value.(*CacheItem)
+		// Update the value, duration, and last accessed time
+		item.Value = cacheItem.Value
+		item.LastAccessedBefore = time.Now()
+		item.Duration = cacheItem.Duration
+		item.OnItemExpired = cacheItem.OnItemExpired
+		// Move the item to the front of the lru list
+		c.lru.MoveToFront(elem)
+		go c.statsCollector.IncrementHits() // increment hits in stats collector
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	if c.lru.Len() >= c.capacity {
+		// Evict the least recently used item
+		select {
+		case c.evictCh <- true:
+			// Wait for eviction to complete
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-c.evictCh
+			}()
+
+			go func() {
+				wg.Wait()
+				c.statsCollector.IncrementEvictions()
+			}()
+		case <-c.stop:
+			return nil
+		}
+	}
+
+	// Create a new item and add it to the front of the lru list and itemsByKey map
+	c.itemsByKey[cacheItem.Key] = c.lru.PushFront(&cacheItem)
+	// c.itemsByKey[key] = ee
+	go c.statsCollector.IncrementMisses() // increment misses in stats collector
+	return nil
+}
+
 // Set adds a value to the cache with the given key and duration.
 // If the key is an empty string, the value is nil, or the duration is negative, it returns an error.
 // The function acquires a lock and checks if the item already exists in the cache.
@@ -118,6 +179,7 @@ func (c *HyperCache) SetStatsCollector(collector *stats.Collector) {
 // If the item doesn't exist, the function checks if the cache is at capacity and evicts the least recently used item if necessary.
 // Finally, it creates a new item and adds it to the front of the lru list and the itemsByKey map.
 func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) error {
+	// Check for invalid key, value, or duration
 	if key == "" {
 		return fmt.Errorf("key cannot be empty")
 	}
@@ -132,20 +194,22 @@ func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) 
 	defer c.mu.Unlock()
 
 	// Check if the item already exists
-	if ee, ok := c.itemsByKey[key]; ok {
+	if elem, ok := c.itemsByKey[key]; ok {
+		c.lru.MoveToFront(elem)
+		item := elem.Value.(*CacheItem)
 		// Update the value, duration, and last accessed time
-		ee.Value.(*cacheItem).value = value
-		ee.Value.(*cacheItem).lastAccessedBefore = time.Now()
-		ee.Value.(*cacheItem).duration = duration
+		item.Value = value
+		item.LastAccessedBefore = time.Now()
+		item.Duration = duration
 		// Move the item to the front of the lru list
-		c.lru.MoveToFront(ee)
+		c.lru.MoveToFront(elem)
 		go c.statsCollector.IncrementHits() // increment hits in stats collector
 		return nil
 	}
 
 	var wg sync.WaitGroup
 	if c.lru.Len() >= c.capacity {
-
+		// Evict the least recently used item
 		select {
 		case c.evictCh <- true:
 			// Wait for eviction to complete
@@ -171,7 +235,13 @@ func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) 
 	// }
 
 	// Create a new item and add it to the front of the lru list and itemsByKey map
-	c.itemsByKey[key] = c.lru.PushFront(&cacheItem{key, value, time.Now(), duration})
+	c.itemsByKey[key] = c.lru.PushFront(&CacheItem{
+		Key:                key,
+		Value:              value,
+		LastAccessedBefore: time.Now(),
+		Duration:           duration,
+	})
+	// c.itemsByKey[key] = ee
 	go c.statsCollector.IncrementMisses() // increment misses in stats collector
 	return nil
 }
@@ -189,17 +259,17 @@ func (c *HyperCache) Get(key string) (value interface{}, ok bool) {
 	defer c.mu.Unlock()
 	// Check if the item exists
 	if ee, ok := c.itemsByKey[key]; ok {
-		item := ee.Value.(*cacheItem)
+		item := ee.Value.(*CacheItem)
 		// Check if the item has expired
-		if time.Since(item.lastAccessedBefore) > item.duration {
+		if time.Since(item.LastAccessedBefore) > item.Duration {
 			return nil, false
 		}
 		// Update the last accessed time
-		item.lastAccessedBefore = time.Now()
+		item.LastAccessedBefore = time.Now()
 		// Move the item to the front of the lru list
 		c.lru.MoveToFront(ee)
 		go c.statsCollector.IncrementHits() // increment hits in stats collector
-		return item.value, true
+		return item.Value, true
 	}
 
 	go c.statsCollector.IncrementMisses() // increment misses in stats collector
@@ -232,15 +302,15 @@ func (c *HyperCache) Delete(key string) error {
 // It acquires a lock, iterates through the lru list, and appends each item to the slice.
 // If the lru list is empty, it returns an empty slice.
 // The function releases the lock before returning the slice.
-func (c *HyperCache) List() []*cacheItem {
+func (c *HyperCache) List() []*CacheItem {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	items := make([]*cacheItem, 0, c.lru.Len())
+	items := make([]*CacheItem, 0, c.lru.Len())
 
 	// Iterate through the lru list and append each item to the slice
 	for e := c.lru.Front(); e != nil; e = e.Next() {
-		items = append(items, e.Value.(*cacheItem))
+		items = append(items, e.Value.(*CacheItem))
 	}
 
 	return items
@@ -274,6 +344,11 @@ func (c *HyperCache) Capacity() int {
 	return c.capacity
 }
 
+// Stats returns the statistics collected by the stats collector.
+func (c *HyperCache) Stats() any {
+	return c.statsCollector.GetStats()
+}
+
 // SetCapacity sets the capacity of the cache. If the capacity is negative, it returns an error.
 // The function acquires a lock, updates the capacity field, and releases the lock.
 func (c *HyperCache) SetCapacity(capacity int) error {
@@ -294,7 +369,7 @@ func (c *HyperCache) SetCapacity(capacity int) error {
 func (c *HyperCache) Stop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
+	c.once = sync.Once{}
 	c.stop <- true
 	close(c.stop)
 	close(c.evictCh)
@@ -308,6 +383,11 @@ func (c *HyperCache) Close() {
 
 	// Clear the cache
 	c.Clear()
+}
+
+// TriggerEviction sends a signal to the eviction loop to start.
+func (c *HyperCache) TriggerEviction() {
+	c.evictCh <- true
 }
 
 // The evictionLoop function removes the least recently used items from the cache until it is below the capacity.
@@ -339,31 +419,28 @@ func (c *HyperCache) evictionLoop() {
 
 // 	now := time.Now()
 // 	for ee := c.lru.Back(); ee != nil; ee = ee.Prev() {
-// 		i := ee.Value.(*cacheItem)
+// 		i := ee.Value.(*CacheItem)
 // 		if i.lastAccessedBefore.Add(i.duration).Before(now) {
 // 			c.removeElement(ee)
-// 			go c.statsCollector.IncrementExpirations() // increment expirations in stats collector
+// 			c.statsCollector.IncrementExpirations() // increment expirations in stats collector
 // 		}
 // 	}
 // }
 
-// TriggerEviction sends a signal to the eviction loop to start.
-func (c *HyperCache) TriggerEviction() {
-	c.evictCh <- true
-}
-
-// expirationLoop is a goroutine that runs in the background and checks for expired items in the cache.
-// If an item has expired, it removes the item from the cache.
+// expirationLoop is a loop that runs at the expiration interval and removes expired items from the cache.
 func (c *HyperCache) expirationLoop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for e := c.lru.Back(); e != nil; e = e.Prev() {
+		item := e.Value.(*CacheItem)
+		if time.Now().After(item.LastAccessedBefore.Add(item.Duration)) {
+			c.removeElement(e)                      // remove the item from the lru list and itemsByKey map
+			c.statsCollector.IncrementExpirations() // increment expirations in stats collector
 
-	for e := c.lru.Back(); e != nil; e = c.lru.Back() {
-		item := e.Value.(*cacheItem)
-		if time.Now().After(item.lastAccessedBefore.Add(item.duration)) {
-			c.lru.Remove(e)
-			delete(c.itemsByKey, item.key)
-			c.statsCollector.IncrementExpirations()
+			// Call the onExpire function if it is not nil
+			if item.OnItemExpired != nil {
+				item.OnItemExpired(item.Key, item.Value)
+			}
 		} else {
 			break
 		}
@@ -373,10 +450,5 @@ func (c *HyperCache) expirationLoop() {
 // removeElement removes the given element from the lru list and the itemsByKey map.
 func (c *HyperCache) removeElement(e *list.Element) {
 	c.lru.Remove(e)
-	delete(c.itemsByKey, e.Value.(*cacheItem).key)
-}
-
-// Stats returns the statistics collected by the stats collector.
-func (c *HyperCache) Stats() any {
-	return c.statsCollector.GetStats()
+	delete(c.itemsByKey, e.Value.(*CacheItem).Key)
 }

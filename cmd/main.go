@@ -9,7 +9,12 @@ import (
 
 func main() {
 	// Create a new cache with a capacity of 100 items
-	cache, err := hypercache.NewHyperCache(5, time.Duration(5*time.Minute), time.Duration(1*time.Minute))
+	// onItemExpire := func(key string, value interface{}) {
+	// 	fmt.Printf("item expired: %s\n", key)
+	// }
+
+	cache, err := hypercache.NewHyperCache(100, hypercache.WithExpirationInterval(time.Hour), hypercache.WithEvictionInterval(time.Minute))
+
 	if err != nil {
 		fmt.Println(err)
 		return
