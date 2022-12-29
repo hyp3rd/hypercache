@@ -181,76 +181,17 @@ func (c *HyperCache) Add(cacheItem CacheItem) error {
 
 // Set adds a value to the cache with the given key and duration.
 // If the key is an empty string, the value is nil, or the duration is negative, it returns an error.
-// The function acquires a lock and checks if the item already exists in the cache.
 // If it does, it updates the value, duration, and the last accessed time, moves the item to the front of the lru list, and releases the lock.
 // If the item doesn't exist, the function checks if the cache is at capacity and evicts the least recently used item if necessary.
-// Finally, it creates a new item and adds it to the front of the lru list and the itemsByKey map.
 func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) error {
-	// Check for invalid key, value, or duration
-	if key == "" {
-		return fmt.Errorf("key cannot be empty")
-	}
-	if value == nil {
-		return fmt.Errorf("value cannot be nil")
-	}
-	if duration < 0 {
-		return fmt.Errorf("invalid duration: %s", duration)
+
+	item := CacheItem{
+		Key:      key,
+		Value:    value,
+		Duration: duration,
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Check if the item already exists
-	if elem, ok := c.itemsByKey[key]; ok {
-		c.lru.MoveToFront(elem)
-		item := elem.Value.(*CacheItem)
-		// Update the value, duration, and last accessed time
-		item.Value = value
-		item.LastAccessedBefore = time.Now()
-		item.Duration = duration
-		// Move the item to the front of the lru list
-		c.lru.MoveToFront(elem)
-		go c.statsCollector.IncrementHits() // increment hits in stats collector
-		return nil
-	}
-
-	var wg sync.WaitGroup
-	if c.lru.Len() >= c.capacity {
-		// Evict the least recently used item
-		select {
-		case c.evictCh <- true:
-			// Wait for eviction to complete
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				<-c.evictCh
-			}()
-
-			go func() {
-				wg.Wait()
-				c.statsCollector.IncrementEvictions()
-			}()
-		case <-c.stop:
-			return nil
-		}
-	}
-
-	// Check if the cache is at capacity
-	// if c.lru.Len() >= c.capacity {
-	// 	// Signal the eviction loop to start
-	// 	c.evictCh <- true
-	// }
-
-	// Create a new item and add it to the front of the lru list and itemsByKey map
-	c.itemsByKey[key] = c.lru.PushFront(&CacheItem{
-		Key:                key,
-		Value:              value,
-		LastAccessedBefore: time.Now(),
-		Duration:           duration,
-	})
-	// c.itemsByKey[key] = ee
-	go c.statsCollector.IncrementMisses() // increment misses in stats collector
-	return nil
+	return c.Add(item)
 }
 
 // Get retrieves the value with the given key from the cache.
