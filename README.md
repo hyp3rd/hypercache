@@ -14,10 +14,11 @@ HyperCache is an in-memory cache implementation in Go that supports the expirati
 - Clear the cache of all items
 - Evict least recently used items when the cache reaches capacity
 - Expire items after a specified duration
+- Collect stats
 
 ## Installation
 
-Install HyperCache using go get:
+Install HyperCache:
 
 ```bash
 go get github.com/hyp3rd/hypercache
@@ -27,7 +28,7 @@ go get github.com/hyp3rd/hypercache
 
 The `NewHyperCache` function creates a new `HyperCache` struct with the given capacity and initializes the `lru` list and itemsByKey map. It also starts the expiration and eviction loops in separate goroutines.
 
-To create a new cache with a given capacity, use the NewHyperCache function as follows:
+To create a new cache with a given capacity, use the NewHyperCache function as described below:
 
 ```golang
 cache, err := hypercache.NewHyperCache(100)
@@ -35,6 +36,8 @@ if err != nil {
     // handle error
 }
 ```
+
+Here to follow is described a basic set of functions to get started.
 
 ### Set
 
@@ -118,11 +121,41 @@ import (
 )
 
 func main() {
-    // Create a new cache with a capacity of 100 items
-    cache, err := hypercache.NewHyperCache(100)
+    // Create a new cache with a capacity of 10 items
+    cache, err := hypercache.NewHyperCache(10, hypercache.WithExpirationInterval(10*time.Minute), hypercache.WithEvictionInterval(5*time.Minute))
     if err != nil {
         fmt.Println(err)
         return
+    }
+
+    // The method Add allows you to have full control on the item being sent to cache
+    onItemExpire := func(key string, value interface{}) {
+        f, err := os.Create("my_item.log")
+        if err != nil {
+            fmt.Println(err)
+        }
+        // close the file with defer
+        defer f.Close()
+    }
+
+    cacheItem := hypercache.CacheItem{
+        Key:           "NewKey",
+        Value:         "hello, there",
+        Duration:      2 * time.Minute,
+        OnItemExpired: onItemExpire,
+    }
+    err = cache.Add(cacheItem)
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+
+    // GetOrSet allows you to add an item to cache or fetch it if already present.
+    value, ok := cache.GetOrSet("NewKey", "hello, Moon", hypercache.WithDuration(5*time.Minute))
+    if ok {
+        fmt.Println("Value was retrieved from the cache:", value)
+    } else {
+        fmt.Println("Value was not found in the cache, so it was set:", value)
     }
 
     // Add an item to the cache with a key "key" and a value "value" that expires in 5 seconds

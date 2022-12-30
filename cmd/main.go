@@ -20,7 +20,7 @@ func main() {
 		defer f.Close()
 	}
 
-	cache, err := hypercache.NewHyperCache(3, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(30*time.Second))
+	cache, err := hypercache.NewHyperCache(3, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(3*time.Second))
 
 	if err != nil {
 		fmt.Println(err)
@@ -126,7 +126,7 @@ func main() {
 	fmt.Println(stats)
 	fmt.Println(cache.Capacity())
 
-	time.Sleep(15 * time.Second)
+	// time.Sleep(25 * time.Second)
 
 	// Stop the expiration and eviction loops
 	cache.Stop()

@@ -44,6 +44,7 @@ func WithEvictionDisabled() Option {
 }
 
 // WithMaxEvictionCount sets the maximum number of items that can be evicted in a single eviction loop iteration.
+// This could be useful for controlling the amount of memory used by the cache at any given time
 func WithMaxEvictionCount(count uint) Option {
 	return func(c *HyperCache) {
 		c.maxEvictionCount = count
