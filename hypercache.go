@@ -297,14 +297,14 @@ func (c *HyperCache) GetOrSet(key string, value interface{}, options ...CacheIte
 	}
 
 	// Value was not found in the cache, set it in the cache
-	c.set(key, value, options...)
+	c.SetWithOptions(key, value, options...)
 	return value, false
 }
 
-// set sets an item in the cache with the given key and value.
+// SetWithOptions sets an item in the cache with the given key and value.
 // If the key already exists in the cache, it updates the value and moves the item to the front of the lru list.
 // If the key doesn't exist in the cache, it creates a new cache item and adds it to the front of the lru list.
-func (c *HyperCache) set(key string, value interface{}, options ...CacheItemOption) (err error) {
+func (c *HyperCache) SetWithOptions(key string, value interface{}, options ...CacheItemOption) (err error) {
 	// Check for invalid key, value, or duration
 	if key == "" {
 		return fmt.Errorf("key cannot be empty")
@@ -454,24 +454,9 @@ func (c *HyperCache) TriggerEviction() {
 	c.evictCh <- true
 }
 
-// The evictionLoop function removes the least recently used items from the cache until it is below the capacity.
-// The function acquires a lock and iterates over the items in the lru list, starting from the back.
-// It removes the item from the lru list and the itemsByKey map if the cache is at capacity.
-// evictionLoop evicts the least recently used items from the cache until the size of the cache is below the capacity.
-func (c *HyperCache) evictionLoop() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Evict the least recently used items from the cache until the size of the cache is below the capacity
-	c.evict(int(c.maxEvictionCount))
-	c.statsCollector.IncrementEvictions() // increment evictions in stats collector
-	// Signal that eviction is complete
-	c.evictCh <- true
-}
-
 // evict evicts items from the cache. It removes the specified number of items from the end of the lru list,
 // up to the number of items needed to bring the cache size down to the capacity.
-func (c *HyperCache) evict(count int) {
+func (c *HyperCache) Evict(count int) {
 	// Find the number of items to evict
 	toEvict := c.lru.Len() - c.capacity
 	if count > 0 && count < toEvict {
@@ -492,6 +477,21 @@ func (c *HyperCache) evict(count int) {
 		// Remove the item from the cache
 		c.removeElement(item)
 	}
+}
+
+// The evictionLoop function removes the least recently used items from the cache until it is below the capacity.
+// The function acquires a lock and iterates over the items in the lru list, starting from the back.
+// It removes the item from the lru list and the itemsByKey map if the cache is at capacity.
+// evictionLoop evicts the least recently used items from the cache until the size of the cache is below the capacity.
+func (c *HyperCache) evictionLoop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Evict the least recently used items from the cache until the size of the cache is below the capacity
+	c.Evict(int(c.maxEvictionCount))
+	c.statsCollector.IncrementEvictions() // increment evictions in stats collector
+	// Signal that eviction is complete
+	c.evictCh <- true
 }
 
 // expirationLoop is a loop that runs at the expiration interval and removes expired items from the cache.
