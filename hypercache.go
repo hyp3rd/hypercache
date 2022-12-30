@@ -39,6 +39,7 @@ type HyperCache struct {
 	statsCollector     StatsCollector           // stats collector to collect cache statistics
 	expirationInterval time.Duration            // interval at which the expiration loop should run
 	evictionInterval   time.Duration            // interval at which the eviction loop should run
+	maxEvictionCount   uint                     // maximum number of items that can be evicted in a single eviction loop iteration
 }
 
 // NewHyperCache creates a new in-memory cache with the given capacity.
@@ -456,18 +457,37 @@ func (c *HyperCache) evictionLoop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// Continue removing the least recently used items until the cache is below capacity
-	for c.lru.Len() >= c.capacity {
-		// Evict the least recently used item from the lru list and itemsByKey map until the cache size is below capacity
-		ee := c.lru.Back()
-		if ee == nil {
-			break
-		}
-		c.removeElement(ee)
-		c.statsCollector.IncrementEvictions() // increment evictions in stats collector
-	}
+	// for c.lru.Len() >= c.capacity {
+	// 	// Evict the least recently used item from the lru list and itemsByKey map until the cache size is below capacity
+	// 	ee := c.lru.Back()
+	// 	if ee == nil {
+	// 		break
+	// 	}
+	// 	c.removeElement(ee)
+	// 	c.statsCollector.IncrementEvictions() // increment evictions in stats collector
+	// }
 
+	// Evict the least recently used items from the cache until the size of the cache is below the capacity
+	c.evict(int(c.maxEvictionCount))
 	// Signal that eviction is complete
 	c.evictCh <- true
+}
+
+func (c *HyperCache) evict(count int) {
+	// Find the number of items to evict
+	toEvict := c.lru.Len() - c.capacity
+	if count > 0 && count < toEvict {
+		toEvict = count
+	}
+
+	// Evict the items
+	for i := 0; i <= toEvict; i++ {
+		item := c.lru.Back()
+		if item == nil {
+			break
+		}
+		c.removeElement(item)
+	}
 }
 
 // expirationLoop is a loop that runs at the expiration interval and removes expired items from the cache.

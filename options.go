@@ -1,6 +1,8 @@
 package hypercache
 
-import "time"
+import (
+	"time"
+)
 
 // Option is a function that configures an HyperCache instance.
 type Option func(*HyperCache)
@@ -28,21 +30,25 @@ func WithEvictionInterval(evictionInterval time.Duration) Option {
 }
 
 // WithExpirationDisabled disables the expiration loop.
-func WithExpirationDisabled(c *HyperCache) {
-	c.expirationInterval = 0
+func WithExpirationDisabled() Option {
+	return func(c *HyperCache) {
+		c.expirationInterval = 0
+	}
 }
 
 // WithEvictionDisabled disables the eviction loop.
-func WithEvictionDisabled(c *HyperCache) {
-	c.evictionInterval = 0
+func WithEvictionDisabled() Option {
+	return func(c *HyperCache) {
+		c.evictionInterval = 0
+	}
 }
 
 // WithMaxEvictionCount sets the maximum number of items that can be evicted in a single eviction loop iteration.
-// func WithMaxEvictionCount(count int) Option {
-// 	return func(c *HyperCache) {
-// 		c.maxEvictionCount = count
-// 	}
-// }
+func WithMaxEvictionCount(count uint) Option {
+	return func(c *HyperCache) {
+		c.maxEvictionCount = count
+	}
+}
 
 // CacheItemOption is a function that sets options for a CacheItem.
 type CacheItemOption func(*CacheItem)
