@@ -9,6 +9,7 @@ package api
 import "github.com/hyp3rd/hypercache"
 
 // NewCache creates a new in-memory cache with the given capacity and options.
+// It is meant to use as a manager, not as a cache itself.
 func NewCache(capacity int, options ...hypercache.Option) (cache *Cache, err error) {
 	// Create a new HyperCache with the given capacity and options
 	hc, err := hypercache.NewHyperCache(capacity, options...)
