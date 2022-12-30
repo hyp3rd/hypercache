@@ -20,7 +20,7 @@ func main() {
 		defer f.Close()
 	}
 
-	cache, err := hypercache.NewHyperCache(100, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(30*time.Second))
+	cache, err := hypercache.NewHyperCache(3, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(30*time.Second))
 
 	if err != nil {
 		fmt.Println(err)
@@ -39,8 +39,22 @@ func main() {
 		return
 	}
 
+	value, ok := cache.GetOrSet("keyz", "valuez", hypercache.WithDuration(5*time.Minute))
+	if ok {
+		fmt.Println("Value was retrieved from the cache:", value)
+	} else {
+		fmt.Println("Value was not found in the cache, so it was set:", value)
+	}
+
+	value, ok = cache.GetOrSet("keyz", "valuez")
+	if ok {
+		fmt.Println("Value was retrieved from the cache:", value)
+	} else {
+		fmt.Println("Value was not found in the cache, so it was set:", value)
+	}
+
 	// Try to retrieve the expired item from the cache
-	_, ok := cache.Get(cacheItem.Key)
+	_, ok = cache.Get(cacheItem.Key)
 	if !ok {
 		fmt.Println("item expired")
 	}
@@ -53,7 +67,7 @@ func main() {
 	}
 
 	// Retrieve the item from the cache
-	value, ok := cache.Get("key")
+	value, ok = cache.Get("key")
 	if !ok {
 		fmt.Println("item not found")
 		return
@@ -112,7 +126,7 @@ func main() {
 	fmt.Println(stats)
 	fmt.Println(cache.Capacity())
 
-	time.Sleep(35 * time.Second)
+	time.Sleep(15 * time.Second)
 
 	// Stop the expiration and eviction loops
 	cache.Stop()

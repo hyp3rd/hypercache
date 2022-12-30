@@ -20,6 +20,7 @@ type CacheItem struct {
 	LastAccessedBefore time.Time                           // LastAccessedBefore is the time before which the item was last accessed
 	Duration           time.Duration                       // Duration is the time after which the item expires
 	OnItemExpired      func(key string, value interface{}) // callback function to be executed when the item expires
+	OnItemEvicted      func(key string, value interface{}) // callback function to be executed when the item is evicted
 }
 
 // HyperCache is an in-memory cache that stores items with a key and expiration duration.
@@ -98,6 +99,16 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 	}
 
 	return
+}
+
+// SetOptions applies the given options to the cache.
+func (c *HyperCache) SetOptions(options ...Option) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, option := range options {
+		option(c)
+	}
 }
 
 // SetStatsCollector sets the statsCollector field of the HyperCache struct to the given Collector.
@@ -224,6 +235,106 @@ func (c *HyperCache) Get(key string) (value interface{}, ok bool) {
 	return nil, false
 }
 
+// GetItem gets an item from the cache.
+// If the key exists in the cache, it returns the item and true.
+// If the key doesn't exist in the cache, it returns nil and false.
+func (c *HyperCache) GetItem(key string) (item *CacheItem, ok bool) {
+	if key == "" {
+		return nil, false
+	}
+
+	// Acquire a lock to protect concurrent access to the cache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Check if the item exists
+	if ee, ok := c.itemsByKey[key]; ok {
+		item := ee.Value.(*CacheItem)
+		// Check if the item has expired
+		if time.Since(item.LastAccessedBefore) > item.Duration {
+			return nil, false
+		}
+		// Update the last accessed time
+		item.LastAccessedBefore = time.Now()
+		// Move the item to the front of the lru list
+		c.lru.MoveToFront(ee)
+		go c.statsCollector.IncrementHits() // increment hits in stats collector
+		return item, true
+	}
+
+	go c.statsCollector.IncrementMisses() // increment misses in stats collector
+	return nil, false
+}
+
+// GetOrSet retrieves the value of a cache item with the given key, or sets a new value in the cache if the key doesn't exist.
+// It returns the value and a boolean indicating whether the value was retrieved from the cache (true) or set in the cache (false).
+func (c *HyperCache) GetOrSet(key string, value interface{}, options ...CacheItemOption) (interface{}, bool) {
+	// Try to get the value from the cache
+	item, ok := c.GetItem(key)
+	if ok {
+		// Value was retrieved from the cache, return it
+		return item.Value, true
+	}
+
+	// Value was not found in the cache, set it in the cache
+	c.set(key, value, options...)
+	return value, false
+}
+
+// set sets an item in the cache with the given key and value.
+// If the key already exists in the cache, it updates the value and moves the item to the front of the lru list.
+// If the key doesn't exist in the cache, it creates a new cache item and adds it to the front of the lru list.
+func (c *HyperCache) set(key string, value interface{}, options ...CacheItemOption) (err error) {
+	// Check for invalid key, value, or duration
+	if key == "" {
+		return fmt.Errorf("key cannot be empty")
+	}
+	if value == nil {
+		return fmt.Errorf("value cannot be nil")
+	}
+	// Acquire a lock to protect concurrent access to the cache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check if the key already exists in the cache
+	elem, ok := c.itemsByKey[key]
+	if ok {
+		// Key already exists in the cache, update the value and move the item to the front of the lru list
+		c.lru.MoveToFront(elem)
+		item := elem.Value.(*CacheItem)
+		// Update the value, duration, and last accessed time
+		item.Value = value
+		item.LastAccessedBefore = time.Now()
+		// Move the item to the front of the lru list
+		c.lru.MoveToFront(elem)
+		go c.statsCollector.IncrementHits() // increment hits in stats collector
+		return nil
+	}
+
+	// Key doesn't exist in the cache, create a new cache item and add it to the front of the lru list
+	cacheItem := &CacheItem{
+		Key:                key,
+		Value:              value,
+		LastAccessedBefore: time.Now(),
+	}
+	elem = c.lru.PushFront(cacheItem)
+
+	// Set the options for the new cache item
+	for _, option := range options {
+		option(cacheItem)
+	}
+
+	// Evict items if the cache is at capacity
+	if c.lru.Len() >= c.capacity {
+		// Signal the eviction loop to start
+		c.evictCh <- true
+	}
+
+	// Add the new cache item to the itemsByKey map
+	c.itemsByKey[key] = elem
+
+	return
+}
+
 // Delete removes the item with the given key from the cache.
 // If the key is an empty string or the item doesn't exist, it returns an error.
 // The function acquires a lock, removes the item from the lru list and itemsByKey map, and releases the lock.
@@ -271,7 +382,6 @@ func (c *HyperCache) Clear() {
 	defer c.mu.Unlock()
 
 	// Remove all items from the lru list and itemsByKey map
-	c.lru = list.New()
 	c.lru.Init()
 	c.itemsByKey = make(map[string]*list.Element)
 }
