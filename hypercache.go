@@ -112,6 +112,27 @@ func (c *HyperCache) SetOptions(options ...Option) {
 	}
 }
 
+// SetCapacity sets the capacity of the cache. If the new capacity is less than the current cache size, it evicts items to bring the cache size down to the new capacity.
+func (c *HyperCache) SetCapacity(capacity int) error {
+	if capacity < 0 {
+		return fmt.Errorf("invalid capacity: %d", capacity)
+	}
+
+	// Acquire a lock to protect concurrent access to the cache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Set the new capacity
+	c.capacity = capacity
+
+	// Evict items if the cache is over capacity
+	if c.lru.Len() > c.capacity {
+		c.evictCh <- true
+	}
+
+	return nil
+}
+
 // SetStatsCollector sets the statsCollector field of the HyperCache struct to the given Collector.
 // This allows the HyperCache to increment the appropriate counters in the Collector when cache events occur.
 // The Collector is used to collect cache statistics, such as the number of cache hits, misses, evictions, and expirations.
@@ -406,21 +427,6 @@ func (c *HyperCache) Capacity() int {
 // Stats returns the statistics collected by the stats collector.
 func (c *HyperCache) Stats() any {
 	return c.statsCollector.GetStats()
-}
-
-// SetCapacity sets the capacity of the cache. If the capacity is negative, it returns an error.
-// The function acquires a lock, updates the capacity field, and releases the lock.
-func (c *HyperCache) SetCapacity(capacity int) error {
-	if capacity < 0 {
-		return fmt.Errorf("invalid capacity: %d", capacity)
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.capacity = capacity
-
-	return nil
 }
 
 // The Stop function stops the expiration and eviction loops and closes the stop channel.
