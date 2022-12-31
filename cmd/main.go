@@ -20,14 +20,14 @@ func main() {
 		defer f.Close()
 	}
 
-	cache, err := hypercache.NewHyperCache(3, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(3*time.Second))
+	cache, err := hypercache.NewHyperCache(20, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(3*time.Second))
 
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	cacheItem := hypercache.CacheItem{
+	cacheItem := &hypercache.CacheItem{
 		Key:           "NewKey",
 		Value:         "hello, there",
 		Duration:      2 * time.Second,
@@ -109,8 +109,9 @@ func main() {
 
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key%d", i)
+		val := fmt.Sprintf("val%d", i)
 		// t.Log(key)
-		err = cache.Set(key, "value", time.Minute)
+		err = cache.Set(key, val, time.Minute)
 
 		if err != nil {
 			fmt.Printf("unexpected error: %v\n", err)
@@ -122,9 +123,18 @@ func main() {
 		fmt.Println(err)
 	}
 
-	time.Sleep(5 * time.Second)
+	// time.Sleep(5 * time.Second)
 	fmt.Println(stats)
 	fmt.Println(cache.Capacity())
+
+	res, err := cache.GetMultiple("key0", "key2", "key9")
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(len(res))
+	for k, v := range res {
+		fmt.Println(k, v)
+	}
 
 	// time.Sleep(25 * time.Second)
 
