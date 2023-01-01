@@ -2,68 +2,81 @@ package hypercache
 
 import (
 	"time"
+
+	"github.com/hyp3rd/hypercache/types"
 )
 
-// Option is a function that configures an HyperCache instance.
+// Option is a function type that can be used to configure the `HyperCache` struct.
 type Option func(*HyperCache)
 
-// WithExpirationInterval is an Option for the NewHyperCache function that sets the expiration interval for the cache.
-// If the given expiration interval is negative, it defaults to 1 minute.
+// WithStatsCollector is an option that sets the stats collector field of the `HyperCache` struct.
+// The stats collector is used to collect statistics about the cache.
+func WithStatsCollector(statsCollector StatsCollector) Option {
+	return func(cache *HyperCache) {
+		cache.statsCollector = statsCollector
+	}
+}
+
+// WithExpirationInterval is an option that sets the expiration interval field of the `HyperCache` struct.
+// The expiration interval determines how often the cache will check for and remove expired items.
 func WithExpirationInterval(expirationInterval time.Duration) Option {
-	return func(c *HyperCache) {
-		if expirationInterval < 0 {
-			expirationInterval = time.Minute
-		}
-		c.expirationInterval = expirationInterval
+	return func(cache *HyperCache) {
+		cache.expirationInterval = expirationInterval
 	}
 }
 
-// WithEvictionInterval is an Option for the NewHyperCache function that sets the eviction interval for the cache.
-// If the given eviction interval is negative, it defaults to 0, which means that the eviction loop is disabled.
+// WithEvictionTriggerBufferSize is an option that sets the eviction trigger buffer size field of the `HyperCache` struct.
+// The eviction trigger buffer size determines how many items need to be added to the cache before an eviction run is triggered.
+func WithEvictionTriggerBufferSize(evictionTriggerBufferSize uint) Option {
+	return func(cache *HyperCache) {
+		cache.evictionTriggerBufferSize = evictionTriggerBufferSize
+	}
+}
+
+// WithEvictionInterval is an option that sets the eviction interval field of the `HyperCache` struct.
+// The eviction interval determines how often the cache will run the eviction process to remove the least recently used items.
 func WithEvictionInterval(evictionInterval time.Duration) Option {
-	return func(c *HyperCache) {
-		if evictionInterval < 0 {
-			evictionInterval = 0
-		}
-		c.evictionInterval = evictionInterval
+	return func(cache *HyperCache) {
+		cache.evictionInterval = evictionInterval
 	}
 }
 
-// WithExpirationDisabled disables the expiration loop.
-func WithExpirationDisabled() Option {
-	return func(c *HyperCache) {
-		c.expirationInterval = 0
+// WithMaxEvictionCount is an option that sets the max eviction count field of the `HyperCache` struct.
+// The max eviction count determines the maximum number of items that can be removed during a single eviction run.
+func WithMaxEvictionCount(maxEvictionCount uint) Option {
+	return func(cache *HyperCache) {
+		cache.maxEvictionCount = maxEvictionCount
 	}
 }
 
-// WithEvictionDisabled disables the eviction loop.
-func WithEvictionDisabled() Option {
-	return func(c *HyperCache) {
-		c.evictionInterval = 0
+// WithSortBy is an option that sets the field to sort the items by.
+// The field can be any of the fields in the `CacheItem` struct.
+func WithSortBy(field types.SortingField) Option {
+	return func(cache *HyperCache) {
+		cache.sortBy = field.String()
 	}
 }
 
-// WithMaxEvictionCount sets the maximum number of items that can be evicted in a single eviction loop iteration.
-// This could be useful for controlling the amount of memory used by the cache at any given time
-func WithMaxEvictionCount(count uint) Option {
-	return func(c *HyperCache) {
-		c.maxEvictionCount = count
+// WithSortAscending is an option that sets the sort order to ascending.
+// When sorting the items in the cache, they will be sorted in ascending order based on the field specified with the `WithSortBy` option.
+func WithSortAscending() Option {
+	return func(cache *HyperCache) {
+		cache.sortAscending = true
 	}
 }
 
-// CacheItemOption is a function that sets options for a CacheItem.
-type CacheItemOption func(*CacheItem)
-
-// WithDuration sets the expiration duration for a cache item.
-func WithDuration(duration time.Duration) CacheItemOption {
-	return func(item *CacheItem) {
-		item.Duration = duration
+// WithSortDescending is an option that sets the sort order to descending.
+// When sorting the items in the cache, they will be sorted in descending order based on the field specified with the `WithSortBy` option.
+func WithSortDescending() Option {
+	return func(cache *HyperCache) {
+		cache.sortAscending = false
 	}
 }
 
-// OnItemExpired sets the OnItemExpired callback function for a cache item.
-func OnItemExpired(onExpired func(key string, value interface{})) CacheItemOption {
-	return func(item *CacheItem) {
-		item.OnItemExpired = onExpired
+// WithFilter is an option that sets the filter function to use.
+// The filter function is a predicate that takes a `CacheItem` as an argument and returns a boolean indicating whether the item should be included in the cache.
+func WithFilter(fn func(item *CacheItem) bool) Option {
+	return func(cache *HyperCache) {
+		cache.filterFn = fn
 	}
 }

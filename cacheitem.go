@@ -1,17 +1,33 @@
 package hypercache
 
-import "time"
+import (
+	"reflect"
+	"time"
+)
 
-// CacheItem represents an item in the cache. It stores the key, value, last accessed time, and duration.
+// CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 type CacheItem struct {
-	Key                string                              // Key is the key of the item
-	Value              interface{}                         // Value is the value stored in the cache
-	LastAccessedBefore time.Time                           // LastAccessedBefore is the time before which the item was last accessed
-	Duration           time.Duration                       // Duration is the time after which the item expires
-	OnItemExpired      func(key string, value interface{}) // callback function to be executed when the item expires
-	OnItemEvicted      func(key string, value interface{}) // callback function to be executed when the item is evicted
+	Key         string        // key of the item
+	Value       interface{}   // value of the item
+	Expiration  time.Duration // expiration duration of the item
+	lastAccess  time.Time     // last access time of the item
+	accessCount uint          // number of times the item has been accessed
 }
 
-func (item *CacheItem) Touch() {
-	item.LastAccessedBefore = time.Now()
+// FieldByName returns the value of the field of the CacheItem struct with the given name.
+// If the field does not exist, an empty reflect.Value is returned.
+func (item *CacheItem) FieldByName(name string) reflect.Value {
+	// Get the reflect.Value of the item pointer
+	v := reflect.ValueOf(item)
+
+	// Get the reflect.Value of the item struct itself by calling Elem() on the pointer value
+	f := v.Elem().FieldByName(name)
+
+	// If the field does not exist, return an empty reflect.Value
+	if !f.IsValid() {
+		return reflect.Value{}
+	}
+
+	// Return the field value
+	return f
 }

@@ -2,23 +2,23 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 func main() {
 
-	onItemExpire := func(key string, value interface{}) {
-		// create the file
-		f, err := os.Create("test.txt")
-		if err != nil {
-			fmt.Println(err)
-		}
-		// close the file with defer
-		defer f.Close()
-	}
+	// onItemExpire := func(key string, value interface{}) {
+	// 	// create the file
+	// 	f, err := os.Create("test.txt")
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 	}
+	// 	// close the file with defer
+	// 	defer f.Close()
+	// }
 
 	cache, err := hypercache.NewHyperCache(20, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(3*time.Second))
 
@@ -27,36 +27,30 @@ func main() {
 		return
 	}
 
-	cacheItem := &hypercache.CacheItem{
-		Key:           "NewKey",
-		Value:         "hello, there",
-		Duration:      2 * time.Second,
-		OnItemExpired: onItemExpire,
-	}
-	err = cache.Add(cacheItem)
+	// cacheItem := &hypercache.CacheItem{
+	// 	Key:           "NewKey",
+	// 	Value:         "hello, there",
+	// 	Duration:      2 * time.Second,
+	// 	OnItemExpired: onItemExpire,
+	// }
+	// err = cache.Add(cacheItem)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+
+	value, err := cache.GetOrSet("keyz", "valuez", time.Minute)
 	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	value, ok := cache.GetOrSet("keyz", "valuez", hypercache.WithDuration(5*time.Minute))
-	if ok {
-		fmt.Println("Value was retrieved from the cache:", value)
+		fmt.Println("Value was not retrieved from the cache:", err)
 	} else {
-		fmt.Println("Value was not found in the cache, so it was set:", value)
+		fmt.Println("Value was not found in the cache", value)
 	}
 
-	value, ok = cache.GetOrSet("keyz", "valuez")
-	if ok {
-		fmt.Println("Value was retrieved from the cache:", value)
+	value, err = cache.GetOrSet("keyz", "valuez", time.Minute)
+	if err != nil {
+		fmt.Println("Value was not retrieved from the cache:", err)
 	} else {
-		fmt.Println("Value was not found in the cache, so it was set:", value)
-	}
-
-	// Try to retrieve the expired item from the cache
-	_, ok = cache.Get(cacheItem.Key)
-	if !ok {
-		fmt.Println("item expired")
+		fmt.Println("Value was found in the cache:", value)
 	}
 
 	// Add an item to the cache with a key "key" and a value "value" that expires in 5 seconds
@@ -67,39 +61,23 @@ func main() {
 	}
 
 	// Retrieve the item from the cache
-	value, ok = cache.Get("key")
+	value, ok := cache.Get("key")
 	if !ok {
 		fmt.Println("item not found")
 		return
 	}
 	fmt.Println(value) // "value"
 
-	// Try to retrieve the expired item from the cache
-	_, ok = cache.Get("key")
-	if !ok {
-		fmt.Println("item expired")
-	}
-
-	// Try to retrieve the expired item from the cache
-	_, ok = cache.Get("key")
-	if !ok {
-		fmt.Println("item expired")
-	}
-
 	// Wait for the item to expire
 	time.Sleep(5 * time.Second)
 
-	fmt.Println(cache.Capacity())
-
 	// Try to retrieve the expired item from the cache
 	_, ok = cache.Get("key")
 	if !ok {
 		fmt.Println("item expired")
 	}
 
-	stats := cache.Stats()
-
-	fmt.Println(stats)
+	fmt.Println(cache.Capacity())
 
 	err = cache.Set("key", "value", 5*time.Second)
 	if err != nil {
@@ -110,7 +88,7 @@ func main() {
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key%d", i)
 		val := fmt.Sprintf("val%d", i)
-		// t.Log(key)
+
 		err = cache.Set(key, val, time.Minute)
 
 		if err != nil {
@@ -118,20 +96,34 @@ func main() {
 		}
 	}
 
+	list, err := cache.List(
+		hypercache.WithSortBy(types.SortByExpiration),
+		hypercache.WithSortDescending(),
+		hypercache.WithFilter(func(item *hypercache.CacheItem) bool {
+			return item.Expiration > time.Second
+		}),
+	)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	for i, ci := range list {
+		fmt.Println(i, ci.Key, ci.Value)
+	}
+
 	err = cache.Set("key10", "value", time.Minute)
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	// time.Sleep(5 * time.Second)
-	fmt.Println(stats)
-	fmt.Println(cache.Capacity())
+	cache.SetCapacity(3)
 
-	res, err := cache.GetMultiple("key0", "key2", "key9")
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(len(res))
+	fmt.Println(cache.Capacity())
+	fmt.Println(cache.Size())
+
+	res := cache.GetMultiple("key0", "key2", "key9")
+
 	for k, v := range res {
 		fmt.Println(k, v)
 	}

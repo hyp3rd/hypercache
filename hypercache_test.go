@@ -1,345 +1,122 @@
 package hypercache
 
 import (
-	"fmt"
 	"testing"
-	"time"
 )
 
-func TestNewHyperCache(t *testing.T) {
-	// Test with valid capacity
-	cache, err := NewHyperCache(10)
+func TestHyperCache_GetSet(t *testing.T) {
+	cache, err := NewHyperCache(3)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if cache.capacity != 10 {
-		t.Errorf("unexpected capacity: %d", cache.capacity)
-	}
-	if cache.lru == nil {
-		t.Error("lru list is nil")
-	}
-	if cache.itemsByKey == nil {
-		t.Error("itemsByKey map is nil")
-	}
-	if cache.stop == nil {
-		t.Error("stop channel is nil")
-	}
-	if cache.evictCh == nil {
-		t.Error("evictCh channel is nil")
-	}
+	defer cache.Close()
 
-	// Test with invalid capacity
-	_, err = NewHyperCache(-1)
-	if err == nil {
-		t.Error("expected error for invalid capacity, got nil")
-	}
-}
-
-func TestHyperCache_Set(t *testing.T) {
-	cache, _ := NewHyperCache(10)
-
-	// Test with empty key
-	err := cache.Set("", "value", time.Minute)
-	if err == nil {
-		t.Error("expected error for empty key, got nil")
-	}
-
-	// Test with nil value
-	err = cache.Set("key", nil, time.Minute)
-	if err == nil {
-		t.Error("expected error for nil value, got nil")
-	}
-
-	// Test with negative duration
-	err = cache.Set("key", "value", -time.Minute)
-	if err == nil {
-		t.Error("expected error for negative duration, got nil")
-	}
-
-	// Test with valid key, value, and duration
-	err = cache.Set("key", "value", time.Minute)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if len(cache.itemsByKey) != 1 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
-	}
-	if ee, ok := cache.itemsByKey["key"]; !ok {
-		t.Error("key not found in itemsByKey map")
-	} else {
-		item := ee.Value.(*CacheItem)
-		if item.Key != "key" {
-			t.Errorf("unexpected key: %s", item.Key)
-		}
-		if item.Value != "value" {
-			t.Errorf("unexpected value: %v", item.Value)
-		}
-		if item.Duration != time.Minute {
-			t.Errorf("unexpected duration: %s", item.Duration)
-		}
-		if item.LastAccessedBefore.IsZero() {
-			t.Error("last accessed time is zero")
-		}
-	}
-
-	// Test with valid key, value, and duration when the cache is full
-	for i := 0; i < 10; i++ {
-		key := fmt.Sprintf("key%d", i)
-		// t.Log(key)
-		err = cache.Set(key, "value", time.Minute)
-
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-	}
-
-	items := cache.List()
-	for _, item := range items {
-		t.Log(item.Key)
-	}
-
-	err = cache.Set("key10", "value", time.Minute)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if cache.Len() != 10 {
-		t.Errorf("unexpected number of items in cache: %d", cache.Len())
-	}
-	if _, ok := cache.itemsByKey["key0"]; ok {
-		t.Error("key0 found in itemsByKey map, expected it to be evicted")
-	}
-	if _, ok := cache.itemsByKey["key10"]; !ok {
-		t.Error("key10 not found in itemsByKey map")
-	}
-
-	// Test with valid key, value, and duration when the key already exists in the cache
-	err = cache.Set("key10", "new value", 2*time.Minute)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if len(cache.itemsByKey) != 10 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
-	}
-	if ee, ok := cache.itemsByKey["key10"]; !ok {
-		t.Error("key10 not found in itemsByKey map")
-	} else {
-		item := ee.Value.(*CacheItem)
-		if item.Key != "key10" {
-			t.Errorf("unexpected key: %s", item.Key)
-		}
-		if item.Value != "new value" {
-			t.Errorf("unexpected value: %v", item.Value)
-		}
-		if item.Duration != 2*time.Minute {
-			t.Errorf("unexpected duration: %s", item.Duration)
-		}
-		if item.LastAccessedBefore.IsZero() {
-			t.Error("last accessed time is zero")
-		}
-	}
-}
-
-func TestHyperCache_Get(t *testing.T) {
-	cache, _ := NewHyperCache(10)
-
-	// Test with non-existent key
-	_, ok := cache.Get("key")
+	// Test getting a non-existent key
+	value, ok := cache.Get("key1")
 	if ok {
-		t.Error("expected error for non-existent key, got nil")
+		t.Error("expected ok to be false, got true")
+	}
+	if value != nil {
+		t.Error("expected value to be nil, got", value)
 	}
 
-	// Test with expired key
-	cache.Set("key", "value", -time.Minute)
-	_, ok = cache.Get("key")
-	if ok {
-		t.Error("expected error for expired key, got nil")
-	}
-
-	// Test with valid key
-	cache.Set("key", "value", time.Minute)
-	value, ok := cache.Get("key")
-
+	// Test setting and getting a key
+	value2 := "value2"
+	cache.Set("key2", value2, 0)
+	value3, ok := cache.Get("key2")
 	if !ok {
-		t.Errorf("unexpected error while getting the key")
+		t.Error("expected ok to be true, got false")
 	}
-	if value != "value" {
-		t.Errorf("unexpected value: %v", value)
-	}
-	if ee, ok := cache.itemsByKey["key"]; !ok {
-		t.Error("key not found in itemsByKey map")
-	} else {
-		item := ee.Value.(*CacheItem)
-		if item.Key != "key" {
-			t.Errorf("unexpected key: %s", item.Key)
-		}
-		if item.Value != "value" {
-			t.Errorf("unexpected value: %v", item.Value)
-		}
-		if item.Duration != time.Minute {
-			t.Errorf("unexpected duration: %s", item.Duration)
-		}
-		if item.LastAccessedBefore.IsZero() {
-			t.Error("last accessed time is zero")
-		}
-	}
-}
-
-func TestHyperCache_Delete(t *testing.T) {
-	cache, _ := NewHyperCache(10)
-
-	// Test with non-existent key
-	err := cache.Delete("key")
-	if err == nil {
-		t.Error("expected error for non-existent key, got nil")
+	if value3 != value2 {
+		t.Error("expected value to be value2, got", value3)
 	}
 
-	// Test with valid key
-	cache.Set("key", "value", time.Minute)
-	err = cache.Delete("key")
+	// Test getting a key with a capacity of 0
+	cache, err = NewHyperCache(0)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if len(cache.itemsByKey) != 0 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
+	defer cache.Close()
+	cache.Set("key3", "value3", 0)
+	value4, ok := cache.Get("key3")
+	if !ok {
+		t.Error("expected ok to be true, got false")
 	}
-	if _, ok := cache.itemsByKey["key"]; ok {
-		t.Error("key found in itemsByKey map, expected it to be deleted")
-	}
-}
-
-func TestHyperCache_Clear(t *testing.T) {
-	cache, _ := NewHyperCache(10)
-
-	// Test with empty cache
-	cache.Clear()
-	if len(cache.itemsByKey) != 0 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
-	}
-
-	// Test with non-empty cache
-	cache.Set("key", "value", time.Minute)
-	cache.Clear()
-	if len(cache.itemsByKey) != 0 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
-	}
-	if _, ok := cache.itemsByKey["key"]; ok {
-		t.Error("key found in itemsByKey map, expected it to be deleted")
+	if value4 != "value3" {
+		t.Error("expected value to be 'value3', got", value4)
 	}
 }
 
-func TestHyperCache_Capacity(t *testing.T) {
-	cache, _ := NewHyperCache(10)
+func TestHyperCache_GetOrSet(t *testing.T) {
+	cache, err := NewHyperCache(2)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	defer cache.Close()
 
-	// Test with valid capacity
-	cache.SetCapacity(5)
-	if cache.capacity != 5 {
-		t.Errorf("unexpected capacity: %d", cache.capacity)
+	// Test getting a non-existent key with a default value
+	value, err := cache.GetOrSet("key1", "default", 0)
+	if err != nil {
+		t.Error("unexpected error:", err)
+	}
+	if value != "default" {
+		t.Error("expected value to be 'default', got", value)
+	}
+	value2, ok := cache.Get("key1")
+	if !ok {
+		t.Error("expected ok to be true, got false")
+	}
+	if value2 != "default" {
+		t.Error("expected value to be 'default', got", value2)
 	}
 
-	// Test with invalid capacity
-	err := cache.SetCapacity(-1)
-	if err == nil {
-		t.Error("expected error for invalid capacity, got nil")
+	// Test getting a key with a value
+	cache.Set("key2", "value2", 0)
+	value3, err := cache.GetOrSet("key2", "default", 0)
+	if err != nil {
+		t.Error("unexpected error:", err)
 	}
-	if cache.capacity != 5 {
-		t.Errorf("unexpected capacity: %d", cache.capacity)
-	}
-}
-
-func TestHyperCache_Len(t *testing.T) {
-	cache, _ := NewHyperCache(10)
-
-	// Test with empty cache
-	if cache.Len() != 0 {
-		t.Errorf("unexpected number of items in cache: %d", cache.Len())
-	}
-
-	// Test with non-empty cache
-	cache.Set("key", "value", time.Minute)
-	if cache.Len() != 1 {
-		t.Errorf("unexpected number of items in cache: %d", cache.Len())
-	}
-}
-
-func TestHyperCache_expirationLoop(t *testing.T) {
-	cache, _ := NewHyperCache(10)
-
-	// Test with empty cache
-	cache.expirationLoop()
-	if len(cache.itemsByKey) != 0 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
-	}
-
-	// Test with non-empty cache
-	cache.Set("key", "value", time.Minute)
-	cache.expirationLoop()
-	if len(cache.itemsByKey) != 1 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
-	}
-
-	// Test with expired key
-	cache.Set("key", "value", 1*time.Second)
-	time.Sleep(1 * time.Second)
-	cache.expirationLoop()
-	if len(cache.itemsByKey) != 0 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
+	if value3 != "value2" {
+		t.Error("expected value to be 'value2', got", value3)
 	}
 }
 
-// func TestHyperCache_evictionLoop(t *testing.T) {
-// 	cache, _ := NewHyperCache(10)
+func TestHyperCache_GetMultiple(t *testing.T) {
+	cache, err := NewHyperCache(3)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	defer cache.Close()
 
-// 	// Test with empty cache
-// 	cache.evictionLoop()
-// 	if len(cache.itemsByKey) != 0 {
-// 		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
-// 	}
+	// Test getting multiple non-existent keys
+	values := cache.GetMultiple("key1", "key2")
 
-// 	// Test with non-empty cache
-// 	cache.Set("key", "value", time.Minute)
-// 	cache.evictionLoop()
-// 	if len(cache.itemsByKey) != 1 {
-// 		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
-// 	}
-
-// 	// Test with full cache
-// 	for i := 0; i < 10; i++ {
-// 		key := fmt.Sprintf("key%d", i)
-// 		err := cache.Set(key, "value", time.Minute)
-// 		if err != nil {
-// 			t.Errorf("unexpected error: %v", err)
-// 		}
-// 	}
-// 	cache.evictionLoop()
-// 	if len(cache.itemsByKey) != 10 {
-// 		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
-// 	}
-// 	if _, ok := cache.itemsByKey["key0"]; !ok {
-// 		t.Error("key0 not found in itemsByKey map, expected it to be present")
-// 	}
-// 	if _, ok := cache.itemsByKey["key9"]; !ok {
-// 		t.Error("key9 not found in itemsByKey map, expected it to be present")
-// 	}
-// }
-
-func TestHyperCache_Close(t *testing.T) {
-	cache, _ := NewHyperCache(10)
-
-	// Test with empty cache
-	cache.Close()
-	if len(cache.itemsByKey) != 0 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
+	if len(values) != 0 {
+		t.Error("expected len(values) to be 0, got", len(values))
+	}
+	if values["key1"] != nil || values["key2"] != nil {
+		t.Error("expected values to be nil, got", values)
 	}
 
-	cache, _ = NewHyperCache(10)
+	// Test getting multiple keys with values
+	cache.Set("key1", "value1", 0)
+	cache.Set("key2", "value2", 0)
+	values2 := cache.GetMultiple("key1", "key2")
 
-	// Test with non-empty cache
-	cache.Set("key", "value", time.Minute)
-	cache.Close()
-	if len(cache.itemsByKey) != 0 {
-		t.Errorf("unexpected number of items in cache: %d", len(cache.itemsByKey))
+	if len(values2) != 2 {
+		t.Error("expected len(values2) to be 2, got", len(values2))
 	}
-	if _, ok := cache.itemsByKey["key"]; ok {
-		t.Error("key found in itemsByKey map, expected it to be deleted")
+	if values2["key1"] != "value1" || values2["key2"] != "value2" {
+		t.Error("expected values to be ['value1', 'value2'], got", values2)
+	}
+
+	// Test getting multiple keys with some values and some non-existent keys
+	values3 := cache.GetMultiple("key1", "key2", "key3")
+
+	if len(values3) != 2 {
+		t.Error("expected len(values3) to be 3, got", len(values3))
+	}
+	if values3["key1"] != "value1" || values3["key2"] != "value2" || values3["key3"] != nil {
+		t.Error("expected values to be ['value1', 'value2', nil], got", values3)
 	}
 }

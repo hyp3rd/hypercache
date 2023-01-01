@@ -1,4 +1,4 @@
-package hypercache
+package hypercacheV2
 
 // StatsCollector is an interface for collecting cache statistics.
 // It has four methods for incrementing the number of cache hits, misses, evictions, and expirations, and a method for getting the cache statistics.

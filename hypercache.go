@@ -5,56 +5,86 @@
 package hypercache
 
 import (
-	"container/list"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/hyp3rd/hypercache/stats"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 // HyperCache is an in-memory cache that stores items with a key and expiration duration.
-// It has a mutex mu to protect concurrent access to the cache,
-// a doubly-linked list lru to store the items in the cache, a map itemsByKey to quickly look up items by their key,
+// It has a sync.Map items to store the items in the cache,
 // and a capacity field that limits the number of items that can be stored in the cache.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
 type HyperCache struct {
-	mu                 sync.RWMutex             // mutex to protect concurrent access to the cache
-	lru                *list.List               // doubly-linked list to store the items in the cache
-	itemsByKey         map[string]*list.Element // map to quickly look up items by their key
-	capacity           int                      // capacity of the cache, limits the number of items that can be stored in the cache
-	stop               chan bool                // channel to signal the expiration and eviction loops to stop
-	evictCh            chan bool                // channel to signal the eviction loop to start
-	once               sync.Once                // used to ensure that the expiration and eviction loops are only started once
-	statsCollector     StatsCollector           // stats collector to collect cache statistics
-	expirationInterval time.Duration            // interval at which the expiration loop should run
-	evictionInterval   time.Duration            // interval at which the eviction loop should run
-	maxEvictionCount   uint                     // maximum number of items that can be evicted in a single eviction loop iteration
+	items                     sync.Map                   // map to store the items in the cache
+	capacity                  int                        // capacity of the cache, limits the number of items that can be stored in the cache
+	stop                      chan bool                  // channel to signal the expiration and eviction loops to stop
+	evictCh                   chan bool                  // channel to signal the eviction loop to start
+	evictionTriggerCh         chan bool                  // channel to signal the eviction trigger loop to start
+	once                      sync.Once                  // used to ensure that the expiration and eviction loops are only started once
+	statsCollector            StatsCollector             // stats collector to collect cache statistics
+	expirationInterval        time.Duration              // interval at which the expiration loop should run
+	evictionInterval          time.Duration              // interval at which the eviction loop should run
+	evictionTriggerBufferSize uint                       // size of the eviction trigger buffer
+	maxEvictionCount          uint                       // maximum number of items that can be evicted in a single eviction loop iteration
+	sortBy                    string                     // field to sort the items by
+	sortAscending             bool                       // whether to sort the items in ascending order
+	filterFn                  func(item *CacheItem) bool // filter function to select items that meet certain criteria
+}
+
+// StatsCollector is an interface that defines the methods that a stats collector should implement.
+type StatsCollector interface {
+	// Incr increments the count of a statistic by the given value.
+	Incr(stat stats.Stat, value int64)
+	// Decr decrements the count of a statistic by the given value.
+	Decr(stat stats.Stat, value int64)
+	// Timing records the time it took for an event to occur.
+	Timing(stat stats.Stat, value int64)
+	// Gauge records the current value of a statistic.
+	Gauge(stat stats.Stat, value int64)
+	// Histogram records the statistical distribution of a set of values.
+	Histogram(stat stats.Stat, value int64)
 }
 
 // NewHyperCache creates a new in-memory cache with the given capacity.
 // If the capacity is negative, it returns an error.
-// The function initializes the lru list and itemsByKey map, and starts the expiration and eviction loops in separate goroutines.
+// The function initializes the items map, and starts the expiration and eviction loops in separate goroutines.
 func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err error) {
 	if capacity < 0 {
 		return nil, fmt.Errorf("invalid capacity: %d", capacity)
 	}
 
 	cache = &HyperCache{
-		lru:                list.New(),
-		itemsByKey:         make(map[string]*list.Element),
+		items:              sync.Map{},
 		capacity:           capacity,
 		stop:               make(chan bool, 1),
 		evictCh:            make(chan bool, 1),
-		statsCollector:     stats.NewCollector(), // initialize the default stats collector field
+		statsCollector:     stats.NewHistogramStatsCollector(), // initialize the default stats collector field
 		expirationInterval: 30 * time.Minute,
 		evictionInterval:   5 * time.Minute,
+		maxEvictionCount:   10,
 	}
 
 	// Apply options
 	for _, option := range options {
 		option(cache)
 	}
+
+	if cache.evictionTriggerBufferSize == 0 {
+		// The default eviction trigger buffer size should be large enough to prevent the channel from filling up under normal circumstances,
+		// but not so large that it consumes too much memory.
+		// The appropriate size will depend on the specific requirements of your application and the expected rate at which the eviction loop will be triggered.
+		// As a general rule of thumb, you can start with a relatively small buffer size (e.g. 10-100) and increase it if you observe that the channel is filling up frequently.
+		// Keep in mind that increasing the buffer size will increase the memory usage of the application, so you should be mindful of this when deciding on the buffer size.
+		// It's also worth noting that if the eviction loop is able to keep up with the rate at which it is being triggered,
+		// you may not need a large buffer size at all. In this case, you could set the buffer size to 1 to ensure that the eviction loop is triggered synchronously and to avoid the overhead of buffering messages.
+		cache.evictionTriggerBufferSize = 10
+	}
+
+	cache.evictionTriggerCh = make(chan bool, cache.evictionTriggerBufferSize)
 
 	// Start expiration and eviction loops if capacity is greater than zero
 	if capacity > 0 {
@@ -64,10 +94,16 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 				for {
 					select {
 					case <-tick.C:
+						// trigger expiration
 						cache.expirationLoop()
 					case <-cache.evictCh:
+						// trigger eviction
 						cache.evictionLoop()
+					case <-cache.evictionTriggerCh:
+						// trigger eviction
+						cache.evictItem()
 					case <-cache.stop:
+						// stop the loop
 						return
 					}
 				}
@@ -92,353 +128,331 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 	return
 }
 
-// SetOptions applies the given options to the cache.
-func (c *HyperCache) SetOptions(options ...Option) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// expirationLoop is a function that runs in a separate goroutine and expires items in the cache based on their expiration duration.
+func (cache *HyperCache) expirationLoop() {
+	cache.statsCollector.Incr("expiration_loop_count", 1)
+	defer cache.statsCollector.Timing("expiration_loop_duration", time.Now().UnixNano())
 
-	for _, option := range options {
-		option(c)
-	}
+	var expiredCount int64
+	cache.items.Range(func(key, value interface{}) bool {
+		item := value.(*CacheItem)
+		if item.Expiration > 0 && time.Since(item.lastAccess) > item.Expiration {
+			expiredCount++
+			cache.items.Delete(key)
+			cache.statsCollector.Incr("item_expired_count", 1)
+		}
+		return true
+	})
+	cache.statsCollector.Gauge("item_count", int64(cache.itemCount()))
+	cache.statsCollector.Gauge("expired_item_count", expiredCount)
 }
 
-// SetCapacity sets the capacity of the cache. If the new capacity is less than the current cache size, it evicts items to bring the cache size down to the new capacity.
-func (c *HyperCache) SetCapacity(capacity int) error {
-	// If the new capacity is negative, return an error
-	if capacity < 0 {
-		return fmt.Errorf("invalid capacity: %d", capacity)
+// evictionLoop is a function that runs in a separate goroutine and evicts items from the cache based on the cache's capacity and the max eviction count.
+func (cache *HyperCache) evictionLoop() {
+	cache.statsCollector.Incr("eviction_loop_count", 1)
+	defer cache.statsCollector.Timing("eviction_loop_duration", time.Now().UnixNano())
+
+	var evictedCount int64
+	for i := uint(0); i < cache.maxEvictionCount; i++ {
+		if cache.itemCount() <= cache.capacity {
+			break
+		}
+		item, ok := cache.evictItem()
+		if !ok {
+			break
+		}
+		cache.items.Delete(item.Key)
+		evictedCount++
+		cache.statsCollector.Incr("item_evicted_count", 1)
 	}
-
-	// Acquire a lock to protect concurrent access to the cache
-	c.mu.Lock()
-	// Set the new capacity
-	c.capacity = capacity
-	// Release the lock
-	c.mu.Unlock()
-
-	// Evict the least recently used item
-	if c.Len() > capacity {
-		c.evictCh <- true
-		<-c.evictCh
-		// c.Evict(c.Len() - capacity)
-	}
-
-	return nil
+	cache.statsCollector.Gauge("item_count", int64(cache.itemCount()))
+	cache.statsCollector.Gauge("evicted_item_count", evictedCount)
 }
 
-// SetStatsCollector sets the statsCollector field of the HyperCache struct to the given Collector.
-// This allows the HyperCache to increment the appropriate counters in the Collector when cache events occur.
-// The Collector is used to collect cache statistics, such as the number of cache hits, misses, evictions, and expirations.
-// This function takes a pointer to a Collector as an argument, so that the original Collector can be modified.
-// If a different type of StatsCollector is needed, the statsCollector field of the HyperCache struct can be set to a different type that implements the StatsCollector interface.
-func (c *HyperCache) SetStatsCollector(collector *stats.Collector) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.statsCollector = collector
+// evictItem is a helper function that returns the next item to be evicted from the cache.
+func (cache *HyperCache) evictItem() (*CacheItem, bool) {
+	var item *CacheItem
+	var ok bool
+	if cache.sortBy == "last_access" {
+		item, ok = cache.evictItemByLastAccess()
+	} else if cache.sortBy == "access_count" {
+		item, ok = cache.evictItemByAccessCount()
+	} else if cache.sortBy == "expiration" {
+		item, ok = cache.evictItemByExpiration()
+	} else {
+		item, ok = cache.evictItemByLRU()
+	}
+	return item, ok
 }
 
-// Add adds a cache item to the HyperCache.
-// If the item already exists, it updates the value, duration, and last accessed time of the item.
-// If the cache is at capacity, it evicts the least recently used item before adding the new item.
-// If the key or value of the item is empty, or the duration is negative, it returns an error.
-func (c *HyperCache) Add(cacheItem *CacheItem) error {
-	// Check for invalid key, value, or duration
-	if cacheItem.Key == "" {
-		return fmt.Errorf("key cannot be empty")
-	}
-	if cacheItem.Value == nil {
-		return fmt.Errorf("value cannot be nil")
-	}
-	if cacheItem.Duration < 0 {
-		return fmt.Errorf("invalid duration: %d", cacheItem.Duration)
-	}
-
-	// Acquire a lock to protect concurrent access to the cache
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Check if the item already exists
-	if elem, ok := c.itemsByKey[cacheItem.Key]; ok {
-		c.lru.MoveToFront(elem)
-		item := elem.Value.(*CacheItem)
-		// Update the value, duration, and last accessed time
-		item.Value = cacheItem.Value
-		item.LastAccessedBefore = time.Now()
-		item.Duration = cacheItem.Duration
-		item.OnItemExpired = cacheItem.OnItemExpired
-		// Move the item to the front of the lru list
-		c.lru.MoveToFront(elem)
-		go c.statsCollector.IncrementHits() // increment hits in stats collector
-		return nil
-	}
-
-	// Evict the least recently used item
-	if c.lru.Len() >= c.capacity {
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			c.evictCh <- true
-			<-c.evictCh
-		}()
-
-		go func() {
-			// Wait for eviction to complete
-			wg.Wait()
-
-		}()
-	}
-
-	// Create a new item and add it to the front of the lru list and itemsByKey map
-	newItem := &CacheItem{
-		Key:                cacheItem.Key,
-		Value:              cacheItem.Value,
-		LastAccessedBefore: time.Now(),
-		Duration:           cacheItem.Duration,
-		OnItemExpired:      cacheItem.OnItemExpired,
-	}
-	c.itemsByKey[cacheItem.Key] = c.lru.PushFront(newItem)
-
-	go c.statsCollector.IncrementMisses() // increment misses in stats collector
-	return nil
-}
-
-// Set adds a value to the cache with the given key and duration.
-// If the key is an empty string, the value is nil, or the duration is negative, it returns an error.
-// If it does, it updates the value, duration, and the last accessed time, moves the item to the front of the lru list, and releases the lock.
-// If the item doesn't exist, the function checks if the cache is at capacity and evicts the least recently used item if necessary.
-func (c *HyperCache) Set(key string, value interface{}, duration time.Duration) error {
-	// Check for invalid key, value, or duration
-	if key == "" {
-		return fmt.Errorf("key cannot be empty")
-	}
-	if value == nil {
-		return fmt.Errorf("value cannot be nil")
-	}
-
-	cacheItem := &CacheItem{
-		Key:      key,
-		Value:    value,
-		Duration: duration,
-	}
-
-	return c.Add(cacheItem)
-}
-
-// SetWithOptions sets an item in the cache with the given key and value.
-// If the key already exists in the cache, it updates the value and moves the item to the front of the lru list.
-// If the key doesn't exist in the cache, it creates a new cache item and adds it to the front of the lru list.
-func (c *HyperCache) SetWithOptions(key string, value interface{}, options ...CacheItemOption) (err error) {
-	// Check for invalid key, value, or duration
-	if key == "" {
-		return fmt.Errorf("key cannot be empty")
-	}
-	if value == nil {
-		return fmt.Errorf("value cannot be nil")
-	}
-
-	// Key doesn't exist in the cache, create a new cache item and add it to the front of the lru list
-	cacheItem := &CacheItem{
-		Key:                key,
-		Value:              value,
-		LastAccessedBefore: time.Now(),
-	}
-
-	// Set the options for the new cache item
-	for _, option := range options {
-		option(cacheItem)
-	}
-
-	return c.Add(cacheItem)
-}
-
-// Get retrieves the value associated with the given key from the cache.
-// If the item is not found in the cache, it returns an error.
-// The function updates the item's last accessed time before returning it.
-func (c *HyperCache) Get(key string) (value interface{}, ok bool) {
-	// Lock the cache's mutex to ensure thread-safety
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if element, ok := c.itemsByKey[key]; ok {
-		// Retrieve the cache item and update its last accessed time
-		item := element.Value.(*CacheItem)
-		item.Touch()
-		c.lru.MoveToFront(element)
-
-		go c.statsCollector.IncrementHits() // increment hits in stats collector
-		return item.Value, true
-	}
-
-	go c.statsCollector.IncrementMisses() // increment misses in stats collector
-	// Return an error if the item is not found in the cache
-	return nil, false
-}
-
-// GetItem gets an item from the cache.
-// If the key exists in the cache, it returns the item and true.
-// If the key doesn't exist in the cache, it returns nil and false.
-func (c *HyperCache) GetItem(key string) (item *CacheItem, ok bool) {
-	if key == "" {
+// evictItemByLastAccess is a helper function that returns the next item to be evicted from the cache based on the last access time of the items.
+func (cache *HyperCache) evictItemByLastAccess() (*CacheItem, bool) {
+	var evictionItem *CacheItem
+	cache.items.Range(func(key, value interface{}) bool {
+		item := value.(*CacheItem)
+		if evictionItem == nil || item.lastAccess.Before(evictionItem.lastAccess) {
+			evictionItem = item
+		}
+		return true
+	})
+	if evictionItem == nil {
 		return nil, false
 	}
+	return evictionItem, true
+}
 
-	// Acquire a lock to protect concurrent access to the cache
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	// Check if the item exists
-	if ee, ok := c.itemsByKey[key]; ok {
-		item := ee.Value.(*CacheItem)
-		// Check if the item has expired
-		if time.Since(item.LastAccessedBefore) > item.Duration {
-			return nil, false
+// evictItemByAccessCount is a helper function that returns the next item to be evicted from the cache based on the access count of the items.
+func (cache *HyperCache) evictItemByAccessCount() (*CacheItem, bool) {
+	var evictionItem *CacheItem
+	cache.items.Range(func(key, value interface{}) bool {
+		item := value.(*CacheItem)
+		if evictionItem == nil || item.accessCount < evictionItem.accessCount {
+			evictionItem = item
 		}
-		// Update the last accessed time
-		item.LastAccessedBefore = time.Now()
-		// Move the item to the front of the lru list
-		c.lru.MoveToFront(ee)
-		go c.statsCollector.IncrementHits() // increment hits in stats collector
-		return item, true
+		return true
+	})
+	if evictionItem == nil {
+		return nil, false
 	}
-
-	go c.statsCollector.IncrementMisses() // increment misses in stats collector
-	return nil, false
+	return evictionItem, true
 }
 
-// GetOrSet retrieves the value of a cache item with the given key, or sets a new value in the cache if the key doesn't exist.
-// It returns the value and a boolean indicating whether the value was retrieved from the cache (true) or set in the cache (false).
-func (c *HyperCache) GetOrSet(key string, value interface{}, options ...CacheItemOption) (interface{}, bool) {
-	// Try to get the value from the cache
-	item, ok := c.GetItem(key)
-	if ok {
-		// Value was retrieved from the cache, return it
-		return item.Value, true
+// evictItemByExpiration is a helper function that returns the next item to be evicted from the cache based on the expiration duration of the items.
+func (cache *HyperCache) evictItemByExpiration() (*CacheItem, bool) {
+	var evictionItem *CacheItem
+	cache.items.Range(func(key, value interface{}) bool {
+		item := value.(*CacheItem)
+		if evictionItem == nil || item.Expiration < evictionItem.Expiration {
+			evictionItem = item
+		}
+		return true
+	})
+	if evictionItem == nil {
+		return nil, false
 	}
-
-	// Value was not found in the cache, set it in the cache
-	c.SetWithOptions(key, value, options...)
-	return value, false
+	return evictionItem, true
 }
 
-// GetMultiple retrieves the values associated with the given keys from the cache.
-// It returns a map of keys to values for the items found in the cache,
-// and an error if any of the items are not found in the cache.
-func (c *HyperCache) GetMultiple(keys ...string) (values map[string]interface{}, err error) {
-	values = make(map[string]interface{})
-	for _, key := range keys {
-		// Retrieve each item from the cache individually
-		value, ok := c.Get(key)
+// evictItemByLRU is a helper function that returns the least recently used item in the cache.
+func (cache *HyperCache) evictItemByLRU() (*CacheItem, bool) {
+	var evictionItem *CacheItem
+	cache.items.Range(func(key, value interface{}) bool {
+		item := value.(*CacheItem)
+		if evictionItem == nil || item.lastAccess.Before(evictionItem.lastAccess) {
+			evictionItem = item
+		}
+		return true
+	})
+	if evictionItem == nil {
+		return nil, false
+	}
+	return evictionItem, true
+}
+
+// SetCapacity sets the capacity of the cache. If the new capacity is smaller than the current number of items in the cache,
+// it evicts the excess items from the cache.
+func (cache *HyperCache) SetCapacity(capacity int) {
+	if capacity < 0 {
+		return
+	}
+	cache.capacity = capacity
+	for cache.itemCount() > cache.capacity {
+		_, ok := cache.evictItem()
 		if !ok {
-			return nil, err
-		}
-		if ok {
-			values[key] = value
+			break
 		}
 	}
-	return values, nil
 }
 
-// Delete removes the item with the given key from the cache.
-// If the key is an empty string or the item doesn't exist, it returns an error.
-// The function acquires a lock, removes the item from the lru list and itemsByKey map, and releases the lock.
-func (c *HyperCache) Delete(key string) error {
+// itemCount returns the number of items in the cache.
+func (cache *HyperCache) itemCount() int {
+	var count int
+	cache.items.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+// Close stops the expiration and eviction loops and closes the stop channel.
+func (cache *HyperCache) Close() {
+	cache.stop <- true
+	close(cache.stop)
+}
+
+// Set adds an item to the cache with the given key and value. If an item with the same key already exists, it updates the value of the existing item.
+// If the expiration duration is greater than zero, the item will expire after the specified duration.
+// If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
+func (cache *HyperCache) Set(key string, value interface{}, expiration time.Duration) error {
+	// Check for invalid key, value, or duration
 	if key == "" {
 		return fmt.Errorf("key cannot be empty")
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Check if the item exists
-	if ee, ok := c.itemsByKey[key]; ok {
-		// Remove the item from the lru list and itemsByKey map
-		c.lru.Remove(ee)
-		delete(c.itemsByKey, key)
-		return nil
+	if value == nil {
+		return fmt.Errorf("value cannot be nil")
+	}
+	if expiration < 0 {
+		return fmt.Errorf("expiration cannot be negative")
 	}
 
-	return fmt.Errorf("item with key %q not found", key)
+	item := &CacheItem{
+		Key:        key,
+		Value:      value,
+		Expiration: expiration,
+		lastAccess: time.Now(),
+	}
+	cache.items.Store(key, item)
+	if cache.capacity > 0 && cache.itemCount() > cache.capacity {
+		// if elem, ok := cache.evictItem(); !ok {
+		// 	return fmt.Errorf("error evicting item: %v", elem)
+		// }
+		select {
+		case cache.evictionTriggerCh <- true:
+			// eviction triggered
+		default:
+			// eviction trigger channel is full, unable to trigger eviction
+		}
+	}
+	return nil
 }
 
-// List returns a slice of all items in the cache.
-// It acquires a lock, iterates through the lru list, and appends each item to the slice.
-// If the lru list is empty, it returns an empty slice.
-// The function releases the lock before returning the slice.
-func (c *HyperCache) List() []*CacheItem {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+// Get retrieves the item with the given key from the cache. If the item is not found, it returns nil.
+func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
+	item, ok := cache.items.Load(key)
+	if !ok {
+		return nil, false
+	}
+	if i, ok := item.(*CacheItem); ok {
+		i.lastAccess = time.Now()
+		i.accessCount++
+		return i.Value, true
+	}
+	return nil, false
+}
 
-	items := make([]*CacheItem, 0, c.lru.Len())
+// GetOrSet retrieves the item with the given key from the cache. If the item is not found, it adds the item to the cache with the given value and expiration duration.
+// If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
+func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time.Duration) (interface{}, error) {
+	item, ok := cache.items.Load(key)
+	if ok {
+		if i, ok := item.(*CacheItem); ok {
+			i.lastAccess = time.Now()
+			i.accessCount++
+			return i.Value, nil
+		}
+	}
+	item = &CacheItem{
+		Key:        key,
+		Value:      value,
+		Expiration: expiration,
+		lastAccess: time.Now(),
+	}
+	cache.items.Store(key, item)
+	if cache.capacity > 0 && cache.itemCount() > cache.capacity {
+		select {
+		case cache.evictionTriggerCh <- true:
+			// eviction triggered
+		default:
+			// eviction trigger channel is full, unable to trigger eviction
+		}
+	}
+	return value, nil
+}
 
-	// Iterate through the lru list and append each item to the slice
-	for e := c.lru.Front(); e != nil; e = e.Next() {
-		items = append(items, e.Value.(*CacheItem))
+// GetMultiple retrieves the items with the given keys from the cache. If an item is not found, it is not included in the returned map.
+func (cache *HyperCache) GetMultiple(keys ...string) map[string]interface{} {
+	result := make(map[string]interface{})
+	for _, key := range keys {
+		item, ok := cache.items.Load(key)
+		if !ok {
+			continue
+		}
+		if i, ok := item.(*CacheItem); ok {
+			i.lastAccess = time.Now()
+			i.accessCount++
+			result[key] = i.Value
+		}
+	}
+	return result
+}
+
+// List lists the items in the cache that meet the specified criteria.
+func (cache *HyperCache) List(options ...Option) ([]*CacheItem, error) {
+	for _, option := range options {
+		option(cache)
 	}
 
-	return items
+	items := make([]*CacheItem, 0)
+	cache.items.Range(func(key, value interface{}) bool {
+		item := value.(*CacheItem)
+		if cache.filterFn == nil || cache.filterFn(item) {
+			items = append(items, item)
+		}
+		return true
+	})
+
+	if cache.sortBy == "" {
+		return items, nil
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		a := items[i].FieldByName(cache.sortBy)
+		b := items[j].FieldByName(cache.sortBy)
+		switch cache.sortBy {
+		case types.SortByKey.String():
+			if cache.sortAscending {
+				return a.Interface().(string) < b.Interface().(string)
+			}
+			return a.Interface().(string) > b.Interface().(string)
+		case types.SortByLastAccess.String():
+			if cache.sortAscending {
+				return a.Interface().(time.Time).Before(b.Interface().(time.Time))
+			}
+			return a.Interface().(time.Time).After(b.Interface().(time.Time))
+		case types.SortByAccessCount.String():
+			if cache.sortAscending {
+				return a.Interface().(uint) < b.Interface().(uint)
+			}
+			return a.Interface().(uint) > b.Interface().(uint)
+		case types.SortByExpiration.String():
+			if cache.sortAscending {
+				return a.Interface().(time.Duration) < b.Interface().(time.Duration)
+			}
+			return a.Interface().(time.Duration) > b.Interface().(time.Duration)
+		default:
+			return false
+		}
+	})
+
+	return items, nil
+}
+
+// Remove removes the item with the given key from the cache. If the item is not found, it does nothing.
+func (cache *HyperCache) Remove(key string) {
+	cache.items.Delete(key)
 }
 
 // Clear removes all items from the cache.
-// The function acquires a lock, removes all items from the lru list and itemsByKey map, and releases the lock.
-func (c *HyperCache) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Remove all items from the lru list and itemsByKey map
-	c.lru.Init()
-	c.itemsByKey = make(map[string]*list.Element)
+func (cache *HyperCache) Clear() {
+	cache.items.Range(func(key, value interface{}) bool {
+		cache.items.Delete(key)
+		return true
+	})
 }
 
-// Len returns the number of items in the cache.
-func (c *HyperCache) Len() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	return c.lru.Len()
+// Capacity returns the capacity of the cache.
+func (cache *HyperCache) Capacity() int {
+	return cache.capacity
 }
 
-// The Capacity function returns the capacity of the cache.
-func (c *HyperCache) Capacity() int {
-	// Acquire a read lock to protect concurrent access to the cache
-	c.mu.RLock()
-	// Get the capacity of the cache
-	capacity := c.capacity
-	// Release the read lock
-	c.mu.RUnlock()
-
-	return capacity
-}
-
-// Stats returns the statistics collected by the stats collector.
-func (c *HyperCache) Stats() any {
-	return c.statsCollector.GetStats()
-}
-
-// The Stop function stops the expiration and eviction loops and closes the stop channel.
-// The function acquires a lock and sends a value to the stop and evictCh channels.
-func (c *HyperCache) Stop() {
-	// Acquire a lock to protect concurrent access to the cache
-	c.mu.Lock()
-
-	// Stop the expiration and eviction loops
-	c.once = sync.Once{}
-	c.stop <- true
-	close(c.stop)
-	close(c.evictCh)
-
-	// Release the lock
-	c.mu.Unlock()
-}
-
-// Close stops the expiration and eviction loops and cleans the cache.
-// The function calls the Stop method to stop the loops and cleans the cache.
-func (c *HyperCache) Close() {
-	// Stop the expiration and eviction loops
-	c.Stop()
-
-	// Clear the cache
-	c.Clear()
+// Size returns the number of items in the cache.
+func (cache *HyperCache) Size() int {
+	size := 0
+	cache.items.Range(func(key, value interface{}) bool {
+		size++
+		return true
+	})
+	return size
 }
 
 // TriggerEviction sends a signal to the eviction loop to start.
@@ -446,70 +460,11 @@ func (c *HyperCache) TriggerEviction() {
 	c.evictCh <- true
 }
 
-// evict evicts items from the cache. It removes the specified number of items from the end of the lru list,
-// up to the number of items needed to bring the cache size down to the capacity.
-func (c *HyperCache) Evict(count int) {
-	// Find the number of items to evict
-	toEvict := c.lru.Len() - c.capacity
-	if count > 0 && count < toEvict {
-		// If a count is specified and it is less than the number of items needed to bring the cache size down to the capacity,
-		// only evict the specified number of items
-		toEvict = count
-	}
-
-	// Evict the items
-	// Continue removing the least recently used items until the cache is below capacity
-	for i := 0; i <= toEvict; i++ {
-		// Get the last item in the lru list
-		item := c.lru.Back()
-		if item == nil {
-			// lru list is empty, break out of the loop
-			break
-		}
-		// Remove the item from the cache
-		c.removeElement(item)
-		go c.statsCollector.IncrementEvictions() // increment evictions in stats collector
-	}
-}
-
-// The evictionLoop function removes the least recently used items from the cache until it is below the capacity.
-// The function acquires a lock and iterates over the items in the lru list, starting from the back.
-// It removes the item from the lru list and the itemsByKey map if the cache is at capacity.
-// evictionLoop evicts the least recently used items from the cache until the size of the cache is below the capacity.
-func (c *HyperCache) evictionLoop() {
-	c.mu.Lock()
-	// defer c.mu.Unlock()
-
-	// Evict the least recently used items from the cache until the size of the cache is below the capacity
-	c.Evict(int(c.maxEvictionCount))
-
-	// Signal that eviction is complete
-	c.evictCh <- true
-	c.mu.Unlock()
-}
-
-// expirationLoop is a loop that runs at the expiration interval and removes expired items from the cache.
-func (c *HyperCache) expirationLoop() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for e := c.lru.Back(); e != nil; e = e.Prev() {
-		item := e.Value.(*CacheItem)
-		if time.Now().After(item.LastAccessedBefore.Add(item.Duration)) {
-			c.removeElement(e)                      // remove the item from the lru list and itemsByKey map
-			c.statsCollector.IncrementExpirations() // increment expirations in stats collector
-
-			// Call the onExpire function if it is not nil
-			if item.OnItemExpired != nil {
-				item.OnItemExpired(item.Key, item.Value)
-			}
-		} else {
-			break
-		}
-	}
-}
-
-// removeElement removes the given element from the lru list and the itemsByKey map.
-func (c *HyperCache) removeElement(e *list.Element) {
-	c.lru.Remove(e)
-	delete(c.itemsByKey, e.Value.(*CacheItem).Key)
+// The Stop function stops the expiration and eviction loops and closes the stop channel.
+func (c *HyperCache) Stop() {
+	// Stop the expiration and eviction loops
+	c.once = sync.Once{}
+	c.stop <- true
+	close(c.stop)
+	close(c.evictCh)
 }
