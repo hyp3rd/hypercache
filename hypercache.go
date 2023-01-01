@@ -25,6 +25,9 @@ var (
 	// ErrNilValue is returned when a nil value is attempted to be set in the cache.
 	ErrNilValue = errors.New("nil value")
 
+	// ErrKeyExpired is returned when a key is found in the cache but has expired.
+	ErrKeyExpired = errors.New("key expired")
+
 	// ErrInvalidExpiration is returned when an invalid expiration is passed to a cache item.
 	ErrInvalidExpiration = errors.New("expiration cannot be negative")
 
@@ -370,6 +373,12 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 	// if the item is found, return the value
 	if item, ok := cache.items.Load(key); ok {
 		if i, ok := item.(*CacheItem); ok {
+			// Check if the item has expired
+			if i.Expired() {
+				go cache.expirationLoop()
+				return nil, ErrKeyExpired
+			}
+
 			// Update the last access time and access count
 			i.Touch()
 			return i.Value, nil
