@@ -2,12 +2,12 @@ package hypercache
 
 import (
 	"reflect"
+	"sync/atomic"
 	"time"
 )
 
 // CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 type CacheItem struct {
-	Key         string        // key of the item
 	Value       interface{}   // value of the item
 	Expiration  time.Duration // expiration duration of the item
 	lastAccess  time.Time     // last access time of the item
@@ -34,14 +34,19 @@ func (item *CacheItem) FieldByName(name string) reflect.Value {
 
 // Valid returns an error if the item is invalid, nil otherwise.
 func (item *CacheItem) Valid() error {
-	// Check for invalid key, value, or duration
-	if item.Key == "" {
-		return ErrInvalidKey
-	}
+	// Check for nil value
 	if item.Value == nil {
 		return ErrNilValue
 	}
-	if item.Expiration < 0 {
+
+	// Check for negative expiration
+	// if item.Expiration < 0 {
+	// 	return ErrInvalidExpiration
+	// }
+
+	// Check for negative expiration
+	if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
+		// atomic.StoreInt64((*int64)(&item.Expiration), 0)
 		return ErrInvalidExpiration
 	}
 

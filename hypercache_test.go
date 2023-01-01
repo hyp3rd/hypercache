@@ -44,7 +44,7 @@ func TestHyperCache_WithExpirationInterval(t *testing.T) {
 	// Test with default expiration interval
 	cache, err := NewHyperCache(10)
 	assert.Nil(t, err)
-	assert.Equal(t, 30*time.Minute, cache.expirationInterval)
+	assert.Equal(t, 10*time.Minute, cache.expirationInterval)
 
 	// Test with custom expiration interval
 	cache, err = NewHyperCache(10, WithExpirationInterval(1*time.Hour))
@@ -56,7 +56,7 @@ func TestHyperCache_WithEvictionInterval(t *testing.T) {
 	// Test with default eviction interval
 	cache, err := NewHyperCache(10)
 	assert.Nil(t, err)
-	assert.Equal(t, 5*time.Minute, cache.evictionInterval)
+	assert.Equal(t, 1*time.Minute, cache.evictionInterval)
 
 	// Test with custom eviction interval
 	cache, err = NewHyperCache(10, WithEvictionInterval(1*time.Hour))
@@ -68,7 +68,7 @@ func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
 	// Test with default max eviction count
 	cache, err := NewHyperCache(10)
 	assert.Nil(t, err)
-	assert.Equal(t, uint(10), cache.maxEvictionCount)
+	assert.Equal(t, uint(100), cache.maxEvictionCount)
 
 	// Test with custom max eviction count
 	cache, err = NewHyperCache(10, WithMaxEvictionCount(5))
@@ -81,10 +81,10 @@ func TestHyperCache_WithEvictionTriggerBufferSize(t *testing.T) {
 	cache, err := NewHyperCache(10, WithEvictionTriggerBufferSize(0))
 	assert.Nil(t, err)
 	// check if the default value is used
-	assert.Equal(t, uint(10), cache.evictionTriggerBufferSize)
+	assert.Equal(t, uint(100), cache.evictionTriggerBufferSize)
 
 	// Test with eviction trigger buffer size of 100
-	cache, err = NewHyperCache(10, WithEvictionTriggerBufferSize(100))
+	cache, err = NewHyperCache(10, WithEvictionTriggerBufferSize(200))
 	assert.Nil(t, err)
-	assert.Equal(t, uint(100), cache.evictionTriggerBufferSize)
+	assert.Equal(t, uint(200), cache.evictionTriggerBufferSize)
 }

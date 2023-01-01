@@ -97,7 +97,7 @@ func main() {
 	}
 
 	list, err := cache.List(
-		hypercache.WithSortBy(types.SortByExpiration),
+		hypercache.WithSortBy(types.SortByValue),
 		hypercache.WithSortDescending(),
 		hypercache.WithFilter(func(item *hypercache.CacheItem) bool {
 			return item.Expiration > time.Second
@@ -109,7 +109,7 @@ func main() {
 	}
 
 	for i, ci := range list {
-		fmt.Println(i, ci.Key, ci.Value)
+		fmt.Println(i, ci.Value)
 	}
 
 	err = cache.Set("key10", "value", time.Minute)
@@ -122,7 +122,11 @@ func main() {
 	fmt.Println(cache.Capacity())
 	fmt.Println(cache.Size())
 
-	res := cache.GetMultiple("key0", "key2", "key9")
+	res, errs := cache.GetMultiple("key0", "key2", "key9")
+
+	if errs != nil {
+		fmt.Println(errs)
+	}
 
 	for k, v := range res {
 		fmt.Println(k, v)
