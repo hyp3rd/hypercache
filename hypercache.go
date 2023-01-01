@@ -189,18 +189,29 @@ func (cache *HyperCache) evictionLoop() {
 
 // evictItem is a helper function that returns the next item to be evicted from the cache.
 func (cache *HyperCache) evictItem() (*CacheItem, bool) {
-	var item *CacheItem
-	var ok bool
-	if cache.sortBy == "last_access" {
-		item, ok = cache.evictItemByLastAccess()
-	} else if cache.sortBy == "access_count" {
-		item, ok = cache.evictItemByAccessCount()
-	} else if cache.sortBy == "expiration" {
-		item, ok = cache.evictItemByExpiration()
-	} else {
-		item, ok = cache.evictItemByLRU()
+	// var item *CacheItem
+	// var ok bool
+	switch cache.sortBy {
+	case types.SortByLastAccess.String():
+		return cache.evictItemByLastAccess()
+	case types.SortByAccessCount.String():
+		return cache.evictItemByAccessCount()
+	case types.SortByExpiration.String():
+		return cache.evictItemByExpiration()
+	default:
+		return cache.evictItemByLRU()
 	}
-	return item, ok
+
+	// if cache.sortBy == "last_access" {
+	// 	item, ok = cache.evictItemByLastAccess()
+	// } else if cache.sortBy == "access_count" {
+	// 	item, ok = cache.evictItemByAccessCount()
+	// } else if cache.sortBy == "expiration" {
+	// 	item, ok = cache.evictItemByExpiration()
+	// } else {
+	// 	item, ok = cache.evictItemByLRU()
+	// }
+	// return item, ok
 }
 
 // evictItemByLastAccess is a helper function that returns the next item to be evicted from the cache based on the last access time of the items.
@@ -302,23 +313,18 @@ func (cache *HyperCache) Close() {
 // If the expiration duration is greater than zero, the item will expire after the specified duration.
 // If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
 func (cache *HyperCache) Set(key string, value interface{}, expiration time.Duration) error {
-	// Check for invalid key, value, or duration
-	if key == "" {
-		return ErrInvalidKey
-	}
-	if value == nil {
-		return ErrNilValue
-	}
-	if expiration < 0 {
-		return ErrInvalidExpiration
-	}
-
 	item := &CacheItem{
 		Key:        key,
 		Value:      value,
 		Expiration: expiration,
 		lastAccess: time.Now(),
 	}
+
+	// Check for invalid key, value, or duration
+	if err := item.Valid(); err != nil {
+		return err
+	}
+
 	cache.items.Store(key, item)
 	if cache.capacity > 0 && cache.itemCount() > cache.capacity {
 		// if elem, ok := cache.evictItem(); !ok {
@@ -351,8 +357,8 @@ func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
 	}
 
 	if i, ok := item.(*CacheItem); ok {
-		i.lastAccess = time.Now()
-		i.accessCount++
+		// Update the last access time and access count
+		i.Touch()
 		return i.Value, true
 	}
 	return nil, false
@@ -361,20 +367,28 @@ func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
 // GetOrSet retrieves the item with the given key from the cache. If the item is not found, it adds the item to the cache with the given value and expiration duration.
 // If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
 func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time.Duration) (interface{}, error) {
-	item, ok := cache.items.Load(key)
-	if ok {
+	// if the item is found, return the value
+	if item, ok := cache.items.Load(key); ok {
 		if i, ok := item.(*CacheItem); ok {
-			i.lastAccess = time.Now()
-			i.accessCount++
+			// Update the last access time and access count
+			i.Touch()
 			return i.Value, nil
 		}
 	}
-	item = &CacheItem{
+
+	// if the item is not found, add it to the cache
+	item := &CacheItem{
 		Key:        key,
 		Value:      value,
 		Expiration: expiration,
 		lastAccess: time.Now(),
 	}
+
+	// Check for invalid key, value, or duration
+	if err := item.Valid(); err != nil {
+		return nil, err
+	}
+
 	cache.items.Store(key, item)
 	if cache.capacity > 0 && cache.itemCount() > cache.capacity {
 		select {
@@ -396,8 +410,7 @@ func (cache *HyperCache) GetMultiple(keys ...string) map[string]interface{} {
 			continue
 		}
 		if i, ok := item.(*CacheItem); ok {
-			i.lastAccess = time.Now()
-			i.accessCount++
+			i.Touch() // Update the last access time and access count
 			result[key] = i.Value
 		}
 	}
@@ -495,4 +508,5 @@ func (c *HyperCache) Stop() {
 	c.stop <- true
 	close(c.stop)
 	close(c.evictCh)
+	close(c.evictionTriggerCh)
 }

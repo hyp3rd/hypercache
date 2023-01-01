@@ -32,6 +32,28 @@ func (item *CacheItem) FieldByName(name string) reflect.Value {
 	return f
 }
 
+// Valid returns an error if the item is invalid, nil otherwise.
+func (item *CacheItem) Valid() error {
+	// Check for invalid key, value, or duration
+	if item.Key == "" {
+		return ErrInvalidKey
+	}
+	if item.Value == nil {
+		return ErrNilValue
+	}
+	if item.Expiration < 0 {
+		return ErrInvalidExpiration
+	}
+
+	return nil
+}
+
+// Touch updates the last access time of the item and increments the access count.
+func (item *CacheItem) Touch() {
+	item.lastAccess = time.Now()
+	item.accessCount++
+}
+
 // Expired returns true if the item has expired, false otherwise.
 func (item *CacheItem) Expired() bool {
 	// If the expiration duration is 0, the item never expires
