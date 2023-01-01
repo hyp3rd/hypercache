@@ -5,13 +5,31 @@
 package hypercache
 
 import (
-	"fmt"
+	"errors"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/hyp3rd/hypercache/stats"
 	"github.com/hyp3rd/hypercache/types"
+)
+
+var (
+	// ErrInvalidKey is returned when an invalid key is used to access an item in the cache.
+	// An invalid key is a key that is either empty or consists only of whitespace characters.
+	ErrInvalidKey = errors.New("invalid key")
+
+	// ErrKeyNotFound is returned when a key is not found in the cache.
+	ErrKeyNotFound = errors.New("key not found")
+
+	// ErrNilValue is returned when a nil value is attempted to be set in the cache.
+	ErrNilValue = errors.New("nil value")
+
+	// ErrInvalidExpiration is returned when an invalid expiration is passed to a cache item.
+	ErrInvalidExpiration = errors.New("expiration cannot be negative")
+
+	// ErrInvalidCapacity is returned when an invalid capacity is passed to the cache.
+	ErrInvalidCapacity = errors.New("capacity cannot be negative")
 )
 
 // HyperCache is an in-memory cache that stores items with a key and expiration duration.
@@ -54,7 +72,7 @@ type StatsCollector interface {
 // The function initializes the items map, and starts the expiration and eviction loops in separate goroutines.
 func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err error) {
 	if capacity < 0 {
-		return nil, fmt.Errorf("invalid capacity: %d", capacity)
+		return nil, ErrInvalidCapacity
 	}
 
 	cache = &HyperCache{
@@ -286,13 +304,13 @@ func (cache *HyperCache) Close() {
 func (cache *HyperCache) Set(key string, value interface{}, expiration time.Duration) error {
 	// Check for invalid key, value, or duration
 	if key == "" {
-		return fmt.Errorf("key cannot be empty")
+		return ErrInvalidKey
 	}
 	if value == nil {
-		return fmt.Errorf("value cannot be nil")
+		return ErrNilValue
 	}
 	if expiration < 0 {
-		return fmt.Errorf("expiration cannot be negative")
+		return ErrInvalidExpiration
 	}
 
 	item := &CacheItem{
@@ -318,10 +336,20 @@ func (cache *HyperCache) Set(key string, value interface{}, expiration time.Dura
 
 // Get retrieves the item with the given key from the cache. If the item is not found, it returns nil.
 func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
+	if key == "" {
+		return nil, false
+	}
+
 	item, ok := cache.items.Load(key)
 	if !ok {
 		return nil, false
 	}
+
+	if item.(*CacheItem).Expiration > 0 && time.Since(item.(*CacheItem).lastAccess) > item.(*CacheItem).Expiration {
+		go cache.expirationLoop()
+		return nil, false
+	}
+
 	if i, ok := item.(*CacheItem); ok {
 		i.lastAccess = time.Now()
 		i.accessCount++
@@ -377,7 +405,7 @@ func (cache *HyperCache) GetMultiple(keys ...string) map[string]interface{} {
 }
 
 // List lists the items in the cache that meet the specified criteria.
-func (cache *HyperCache) List(options ...Option) ([]*CacheItem, error) {
+func (cache *HyperCache) List(options ...FilteringOption) ([]*CacheItem, error) {
 	for _, option := range options {
 		option(cache)
 	}

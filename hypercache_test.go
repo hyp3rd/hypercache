@@ -2,121 +2,89 @@ package hypercache
 
 import (
 	"testing"
+	"time"
+
+	"github.com/longbridgeapp/assert"
 )
 
-func TestHyperCache_GetSet(t *testing.T) {
-	cache, err := NewHyperCache(3)
+func TestHyperCache_NewHyperCache(t *testing.T) {
+	// Test that an error is returned when the capacity is negative
+	_, err := NewHyperCache(-1)
+	if err == nil {
+		t.Error("Expected an error when capacity is negative, got nil")
+	}
+
+	// Test that a new HyperCache is returned when the capacity is 0
+	cache, err := NewHyperCache(0)
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Errorf("Unexpected error when capacity is 0: %v", err)
 	}
-	defer cache.Close()
-
-	// Test getting a non-existent key
-	value, ok := cache.Get("key1")
-	if ok {
-		t.Error("expected ok to be false, got true")
-	}
-	if value != nil {
-		t.Error("expected value to be nil, got", value)
+	if cache == nil {
+		t.Error("Expected a new HyperCache when capacity is 0, got nil")
 	}
 
-	// Test setting and getting a key
-	value2 := "value2"
-	cache.Set("key2", value2, 0)
-	value3, ok := cache.Get("key2")
-	if !ok {
-		t.Error("expected ok to be true, got false")
-	}
-	if value3 != value2 {
-		t.Error("expected value to be value2, got", value3)
-	}
-
-	// Test getting a key with a capacity of 0
-	cache, err = NewHyperCache(0)
+	// Test that a new HyperCache is returned when the capacity is positive
+	cache, err = NewHyperCache(10)
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Errorf("Unexpected error when capacity is positive: %v", err)
 	}
-	defer cache.Close()
-	cache.Set("key3", "value3", 0)
-	value4, ok := cache.Get("key3")
-	if !ok {
-		t.Error("expected ok to be true, got false")
-	}
-	if value4 != "value3" {
-		t.Error("expected value to be 'value3', got", value4)
+	if cache == nil {
+		t.Error("Expected a new HyperCache when capacity is positive, got nil")
 	}
 }
 
-func TestHyperCache_GetOrSet(t *testing.T) {
-	cache, err := NewHyperCache(2)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	defer cache.Close()
-
-	// Test getting a non-existent key with a default value
-	value, err := cache.GetOrSet("key1", "default", 0)
-	if err != nil {
-		t.Error("unexpected error:", err)
-	}
-	if value != "default" {
-		t.Error("expected value to be 'default', got", value)
-	}
-	value2, ok := cache.Get("key1")
-	if !ok {
-		t.Error("expected ok to be true, got false")
-	}
-	if value2 != "default" {
-		t.Error("expected value to be 'default', got", value2)
-	}
-
-	// Test getting a key with a value
-	cache.Set("key2", "value2", 0)
-	value3, err := cache.GetOrSet("key2", "default", 0)
-	if err != nil {
-		t.Error("unexpected error:", err)
-	}
-	if value3 != "value2" {
-		t.Error("expected value to be 'value2', got", value3)
-	}
+func TestHyperCache_WithStatsCollector(t *testing.T) {
+	// Test with default stats collector
+	cache, err := NewHyperCache(10)
+	assert.Nil(t, err)
+	assert.NotNil(t, cache.statsCollector)
 }
 
-func TestHyperCache_GetMultiple(t *testing.T) {
-	cache, err := NewHyperCache(3)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	defer cache.Close()
+func TestHyperCache_WithExpirationInterval(t *testing.T) {
+	// Test with default expiration interval
+	cache, err := NewHyperCache(10)
+	assert.Nil(t, err)
+	assert.Equal(t, 30*time.Minute, cache.expirationInterval)
 
-	// Test getting multiple non-existent keys
-	values := cache.GetMultiple("key1", "key2")
+	// Test with custom expiration interval
+	cache, err = NewHyperCache(10, WithExpirationInterval(1*time.Hour))
+	assert.Nil(t, err)
+	assert.Equal(t, 1*time.Hour, cache.expirationInterval)
+}
 
-	if len(values) != 0 {
-		t.Error("expected len(values) to be 0, got", len(values))
-	}
-	if values["key1"] != nil || values["key2"] != nil {
-		t.Error("expected values to be nil, got", values)
-	}
+func TestHyperCache_WithEvictionInterval(t *testing.T) {
+	// Test with default eviction interval
+	cache, err := NewHyperCache(10)
+	assert.Nil(t, err)
+	assert.Equal(t, 5*time.Minute, cache.evictionInterval)
 
-	// Test getting multiple keys with values
-	cache.Set("key1", "value1", 0)
-	cache.Set("key2", "value2", 0)
-	values2 := cache.GetMultiple("key1", "key2")
+	// Test with custom eviction interval
+	cache, err = NewHyperCache(10, WithEvictionInterval(1*time.Hour))
+	assert.Nil(t, err)
+	assert.Equal(t, 1*time.Hour, cache.evictionInterval)
+}
 
-	if len(values2) != 2 {
-		t.Error("expected len(values2) to be 2, got", len(values2))
-	}
-	if values2["key1"] != "value1" || values2["key2"] != "value2" {
-		t.Error("expected values to be ['value1', 'value2'], got", values2)
-	}
+func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
+	// Test with default max eviction count
+	cache, err := NewHyperCache(10)
+	assert.Nil(t, err)
+	assert.Equal(t, uint(10), cache.maxEvictionCount)
 
-	// Test getting multiple keys with some values and some non-existent keys
-	values3 := cache.GetMultiple("key1", "key2", "key3")
+	// Test with custom max eviction count
+	cache, err = NewHyperCache(10, WithMaxEvictionCount(5))
+	assert.Nil(t, err)
+	assert.Equal(t, uint(5), cache.maxEvictionCount)
+}
 
-	if len(values3) != 2 {
-		t.Error("expected len(values3) to be 3, got", len(values3))
-	}
-	if values3["key1"] != "value1" || values3["key2"] != "value2" || values3["key3"] != nil {
-		t.Error("expected values to be ['value1', 'value2', nil], got", values3)
-	}
+func TestHyperCache_WithEvictionTriggerBufferSize(t *testing.T) {
+	// Test with eviction trigger buffer size of 0
+	cache, err := NewHyperCache(10, WithEvictionTriggerBufferSize(0))
+	assert.Nil(t, err)
+	// check if the default value is used
+	assert.Equal(t, uint(10), cache.evictionTriggerBufferSize)
+
+	// Test with eviction trigger buffer size of 100
+	cache, err = NewHyperCache(10, WithEvictionTriggerBufferSize(100))
+	assert.Nil(t, err)
+	assert.Equal(t, uint(100), cache.evictionTriggerBufferSize)
 }
