@@ -31,3 +31,9 @@ func (item *CacheItem) FieldByName(name string) reflect.Value {
 	// Return the field value
 	return f
 }
+
+// Expired returns true if the item has expired, false otherwise.
+func (item *CacheItem) Expired() bool {
+	// If the expiration duration is 0, the item never expires
+	return item.Expiration > 0 && time.Since(item.lastAccess) > item.Expiration
+}

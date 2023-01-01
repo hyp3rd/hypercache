@@ -345,7 +345,7 @@ func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
 		return nil, false
 	}
 
-	if item.(*CacheItem).Expiration > 0 && time.Since(item.(*CacheItem).lastAccess) > item.(*CacheItem).Expiration {
+	if item.(*CacheItem).Expired() {
 		go cache.expirationLoop()
 		return nil, false
 	}
