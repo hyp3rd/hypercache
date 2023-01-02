@@ -2,12 +2,14 @@ package hypercache
 
 import (
 	"reflect"
+	"sync/atomic"
 	"time"
 )
 
 // CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 type CacheItem struct {
-	Value       interface{}   // value of the item
+	Value interface{} // value of the item
+	// Expiration  time.Duration // expiration duration of the item
 	Expiration  time.Duration // expiration duration of the item
 	lastAccess  time.Time     // last access time of the item
 	accessCount uint          // number of times the item has been accessed
@@ -38,15 +40,10 @@ func (item *CacheItem) Valid() error {
 	}
 
 	// Check for negative expiration
-	if item.Expiration < 0 {
+	if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
+		// atomic.StoreInt64((*int64)(&item.Expiration), 0)
 		return ErrInvalidExpiration
 	}
-
-	// Check for negative expiration
-	// if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
-	// 	// atomic.StoreInt64((*int64)(&item.Expiration), 0)
-	// 	return ErrInvalidExpiration
-	// }
 
 	return nil
 }
@@ -58,7 +55,17 @@ func (item *CacheItem) Touch() {
 }
 
 // Expired returns true if the item has expired, false otherwise.
+//
+//	func (item *CacheItem) Expired() bool {
+//		// If the expiration duration is 0, the item never expires
+//		return item.Expiration > 0 && time.Since(item.lastAccess) > item.Expiration
+//	}
+//
+// Expired returns true if the item has expired, false otherwise.
 func (item *CacheItem) Expired() bool {
+	// Use the atomic package to load the value of the Expiration field
+	expiration := atomic.LoadInt64((*int64)(&item.Expiration))
+
 	// If the expiration duration is 0, the item never expires
-	return item.Expiration > 0 && time.Since(item.lastAccess) > item.Expiration
+	return expiration > 0 && time.Since(item.lastAccess) > time.Duration(expiration)
 }

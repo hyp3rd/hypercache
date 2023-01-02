@@ -37,6 +37,27 @@ if err != nil {
 }
 ```
 
+### Performance
+
+HyperCache is optimized for performance. It uses a read/write lock to synchronize access to the cache, with a custom implementation of a concurrent map.
+Running the benchmarks on a 2019 MacBook Pro with a 2.4 GHz 8-Core Intel Core i9 processor and 32 GB 2400 MHz DDR4 memory, the results are as follows:
+
+```bash
+go test -bench=. -benchmem -benchtime=4s . -timeout 30m
+goos: darwin
+goarch: amd64
+pkg: github.com/hyp3rd/hypercache/tests/benchmark
+cpu: Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz
+BenchmarkHyperCache_Get-16      33454436          125.6 ns/op          0 B/op          0 allocs/op
+BenchmarkHyperCache_Set-16       4540826          1045 ns/op         156 B/op          4 allocs/op
+PASS
+ok      github.com/hyp3rd/hypercache/tests/benchmark       10.303s
+```
+
+```bash
+go test -go test -bench=. -benchmem -benchtime=4s . -timeout 30m
+```
+
 Here to follow is described a basic set of functions to get started.
 
 ### Set

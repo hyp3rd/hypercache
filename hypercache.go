@@ -102,6 +102,7 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 	if cache.evictionAlgorithmName == "" {
 		// Use the default eviction algorithm if none is specified
 		cache.evictionAlgorithm, err = NewARC(capacity)
+
 	} else {
 		// Use the specified eviction algorithm
 		cache.evictionAlgorithm, err = NewEvictionAlgorithm(cache.evictionAlgorithmName, capacity)

@@ -31,10 +31,12 @@ func NewEvictionAlgorithm(algorithmName string, capacity int) (EvictionAlgorithm
 	return createFunc(capacity)
 }
 
+// RegisterEvictionAlgorithm registers a new eviction algorithm with the given name.
 func RegisterEvictionAlgorithm(name string, createFunc func(capacity int) (EvictionAlgorithm, error)) {
 	evictionAlgorithmRegistry[name] = createFunc
 }
 
+// Register the default eviction algorithms.
 func init() {
 	RegisterEvictionAlgorithm("arc", func(capacity int) (EvictionAlgorithm, error) {
 		return NewARC(capacity)
