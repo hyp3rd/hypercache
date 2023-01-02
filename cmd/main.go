@@ -119,8 +119,8 @@ func main() {
 
 	cache.SetCapacity(3)
 
-	fmt.Println(cache.Capacity())
-	fmt.Println(cache.Size())
+	fmt.Println("capacity", cache.Capacity())
+	fmt.Println("size", cache.Size())
 
 	res, errs := cache.GetMultiple("key0", "key2", "key9")
 

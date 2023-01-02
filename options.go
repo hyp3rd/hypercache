@@ -9,6 +9,12 @@ import (
 // Option is a function type that can be used to configure the `HyperCache` struct.
 type Option func(*HyperCache)
 
+func EvictionAlgorithmName(name string) Option {
+	return func(cache *HyperCache) {
+		cache.evictionAlgorithmName = name
+	}
+}
+
 // WithStatsCollector is an option that sets the stats collector field of the `HyperCache` struct.
 // The stats collector is used to collect statistics about the cache.
 func WithStatsCollector(statsCollector StatsCollector) Option {
@@ -25,11 +31,11 @@ func WithExpirationInterval(expirationInterval time.Duration) Option {
 	}
 }
 
-// WithEvictionTriggerBufferSize is an option that sets the eviction trigger buffer size field of the `HyperCache` struct.
-// The eviction trigger buffer size determines how many items need to be added to the cache before an eviction run is triggered.
-func WithEvictionTriggerBufferSize(evictionTriggerBufferSize uint) Option {
+// WithExpirationTriggerBufferSize is an option that sets the expiration trigger buffer size field of the `HyperCache` struct.
+// The expiration trigger buffer size determines how many items need to be added to the cache before an expiration run is triggered.
+func WithExpirationriggerBufferSize(expirationTriggerBufferSize uint) Option {
 	return func(cache *HyperCache) {
-		cache.evictionTriggerBufferSize = evictionTriggerBufferSize
+		cache.expirationTriggerBufferSize = expirationTriggerBufferSize
 	}
 }
 

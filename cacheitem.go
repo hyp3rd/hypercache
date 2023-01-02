@@ -2,7 +2,6 @@ package hypercache
 
 import (
 	"reflect"
-	"sync/atomic"
 	"time"
 )
 
@@ -27,7 +26,6 @@ func (item *CacheItem) FieldByName(name string) reflect.Value {
 	if !f.IsValid() {
 		return reflect.Value{}
 	}
-
 	// Return the field value
 	return f
 }
@@ -40,15 +38,15 @@ func (item *CacheItem) Valid() error {
 	}
 
 	// Check for negative expiration
-	// if item.Expiration < 0 {
-	// 	return ErrInvalidExpiration
-	// }
-
-	// Check for negative expiration
-	if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
-		// atomic.StoreInt64((*int64)(&item.Expiration), 0)
+	if item.Expiration < 0 {
 		return ErrInvalidExpiration
 	}
+
+	// Check for negative expiration
+	// if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
+	// 	// atomic.StoreInt64((*int64)(&item.Expiration), 0)
+	// 	return ErrInvalidExpiration
+	// }
 
 	return nil
 }
