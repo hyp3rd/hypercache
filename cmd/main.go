@@ -20,7 +20,7 @@ func main() {
 	// 	defer f.Close()
 	// }
 
-	cache, err := hypercache.NewHyperCache(20, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(3*time.Second))
+	cache, err := hypercache.NewHyperCache(200, hypercache.WithExpirationInterval(3*time.Second), hypercache.WithEvictionInterval(3*time.Second))
 
 	if err != nil {
 		fmt.Println(err)
@@ -85,7 +85,7 @@ func main() {
 		return
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("key%d", i)
 		val := fmt.Sprintf("val%d", i)
 

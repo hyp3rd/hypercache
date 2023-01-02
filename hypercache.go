@@ -56,8 +56,8 @@ type HyperCache struct {
 	sortBy                      string                                          // field to sort the items by
 	sortAscending               bool                                            // whether to sort the items in ascending order
 	filterFn                    func(item *CacheItem) bool                      // filter function to select items that meet certain criteria
-	mutex                       sync.RWMutex                                    // mutex to protect the eviction algorithm
-	once                        sync.Once                                       // used to ensure that the expiration and eviction loops are only started once
+	// mutex                       sync.RWMutex                                    // mutex to protect the eviction algorithm
+	once sync.Once // used to ensure that the expiration and eviction loops are only started once
 }
 
 // StatsCollector is an interface that defines the methods that a stats collector should implement.
@@ -101,7 +101,11 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 	// Initialize the eviction algorithm
 	if cache.evictionAlgorithmName == "" {
 		// Use the default eviction algorithm if none is specified
-		cache.evictionAlgorithm, err = NewARC(capacity)
+		// cache.evictionAlgorithm, err = NewARC(capacity)
+		// cache.evictionAlgorithm, err = NewLRU(capacity)
+
+		// cache.evictionAlgorithm, err = NewEvictionAlgorithm("lru", capacity)
+		cache.evictionAlgorithm, err = NewEvictionAlgorithm("clock", capacity)
 
 	} else {
 		// Use the specified eviction algorithm
@@ -251,8 +255,8 @@ func (cache *HyperCache) Set(key string, value interface{}, expiration time.Dura
 		return err
 	}
 
-	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
+	// cache.mutex.Lock()
+	// defer cache.mutex.Unlock()
 
 	cache.items.Set(key, item)
 	defer cache.evictionAlgorithm.Set(key, item.Value)
@@ -265,7 +269,6 @@ func (cache *HyperCache) Set(key string, value interface{}, expiration time.Dura
 
 // Get retrieves the item with the given key from the cache. If the item is not found, it returns nil.
 func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
-	// item, ok := cache.items.Load(key)
 	item, ok := cache.items.Get(key)
 	if !ok {
 		return nil, false
@@ -279,7 +282,7 @@ func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
 	}
 
 	// Update the last access time and access count
-	item.Touch()
+	defer item.Touch()
 	return item.Value, true
 }
 
@@ -305,7 +308,6 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 
 	// if the item is not found, add it to the cache
 	item := &CacheItem{
-		// Key:        key,
 		Value:      value,
 		Expiration: expiration,
 		lastAccess: time.Now(),
@@ -316,15 +318,13 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 		return nil, err
 	}
 
-	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
+	// cache.mutex.Lock()
+	// defer cache.mutex.Unlock()
 	cache.items.Set(key, item)
 
 	defer cache.evictionAlgorithm.Set(key, item.Value)
 	if cache.capacity > 0 && cache.itemCount() > cache.capacity {
-		// cache.evictionTriggerCh <- true
 		defer cache.evictItem()
-		// <-cache.evictionTriggerCh
 	}
 
 	return value, nil

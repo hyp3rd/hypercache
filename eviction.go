@@ -41,4 +41,10 @@ func init() {
 	RegisterEvictionAlgorithm("arc", func(capacity int) (EvictionAlgorithm, error) {
 		return NewARC(capacity)
 	})
+	RegisterEvictionAlgorithm("lru", func(capacity int) (EvictionAlgorithm, error) {
+		return NewLRU(capacity)
+	})
+	RegisterEvictionAlgorithm("clock", func(capacity int) (EvictionAlgorithm, error) {
+		return NewClockCache(capacity)
+	})
 }
