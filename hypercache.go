@@ -56,8 +56,8 @@ type HyperCache struct {
 	sortBy                      string                                          // field to sort the items by
 	sortAscending               bool                                            // whether to sort the items in ascending order
 	filterFn                    func(item *CacheItem) bool                      // filter function to select items that meet certain criteria
-	// mutex                       sync.RWMutex                                    // mutex to protect the eviction algorithm
-	once sync.Once // used to ensure that the expiration and eviction loops are only started once
+	mutex                       sync.RWMutex                                    // mutex to protect the eviction algorithm
+	once                        sync.Once                                       // used to ensure that the expiration and eviction loops are only started once
 }
 
 // StatsCollector is an interface that defines the methods that a stats collector should implement.
@@ -90,7 +90,7 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 		statsCollector:     stats.NewHistogramStatsCollector(), // initialize the default stats collector field
 		expirationInterval: 10 * time.Minute,
 		evictionInterval:   1 * time.Minute,
-		maxEvictionCount:   100,
+		maxEvictionCount:   uint(capacity),
 	}
 
 	// Apply options
@@ -174,6 +174,7 @@ func (cache *HyperCache) expirationLoop() {
 		if item.Val.Expiration > 0 && time.Since(item.Val.lastAccess) > item.Val.Expiration {
 			expiredCount++
 			cache.items.Remove(item.Key)
+			CacheItemPool.Put(item.Val)
 			cache.statsCollector.Incr("item_expired_count", 1)
 		}
 	}
@@ -244,19 +245,19 @@ func (cache *HyperCache) Close() {
 // If the expiration duration is greater than zero, the item will expire after the specified duration.
 // If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
 func (cache *HyperCache) Set(key string, value interface{}, expiration time.Duration) error {
-	item := &CacheItem{
-		Value:      value,
-		Expiration: expiration,
-		lastAccess: time.Now(),
-	}
+	item := CacheItemPool.Get().(*CacheItem)
+	item.Value = value
+	item.Expiration = expiration
+	item.lastAccess = time.Now()
 
 	// Check for invalid key, value, or duration
 	if err := item.Valid(); err != nil {
+		CacheItemPool.Put(item)
 		return err
 	}
 
-	// cache.mutex.Lock()
-	// defer cache.mutex.Unlock()
+	cache.mutex.Lock()
+	defer cache.mutex.Unlock()
 
 	cache.items.Set(key, item)
 	defer cache.evictionAlgorithm.Set(key, item.Value)
@@ -276,6 +277,7 @@ func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
 
 	if item.Expired() {
 		go func() {
+			CacheItemPool.Put(item)
 			cache.expirationTriggerCh <- true
 		}()
 		return nil, false
@@ -295,6 +297,7 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 		// Check if the item has expired
 		if item.Expired() {
 			go func() {
+				CacheItemPool.Put(item)
 				cache.expirationTriggerCh <- true
 			}()
 			return nil, ErrKeyExpired
@@ -307,19 +310,18 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 	}
 
 	// if the item is not found, add it to the cache
-	item := &CacheItem{
-		Value:      value,
-		Expiration: expiration,
-		lastAccess: time.Now(),
-	}
+	item := CacheItemPool.Get().(*CacheItem)
+	item.Value = value
+	item.Expiration = expiration
+	item.lastAccess = time.Now()
 
 	// Check for invalid key, value, or duration
 	if err := item.Valid(); err != nil {
 		return nil, err
 	}
 
-	// cache.mutex.Lock()
-	// defer cache.mutex.Unlock()
+	cache.mutex.Lock()
+	defer cache.mutex.Unlock()
 	cache.items.Set(key, item)
 
 	defer cache.evictionAlgorithm.Set(key, item.Value)

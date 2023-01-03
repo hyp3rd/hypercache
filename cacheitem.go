@@ -2,6 +2,7 @@ package hypercache
 
 import (
 	"reflect"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,13 @@ type CacheItem struct {
 	// Expiration  int64     // monotonic clock value in nanoseconds
 	lastAccess  time.Time // last access time of the item
 	accessCount uint      // number of times the item has been accessed
+}
+
+// CacheItemPool is a pool of CacheItem values.
+var CacheItemPool = sync.Pool{
+	New: func() interface{} {
+		return &CacheItem{}
+	},
 }
 
 // FieldByName returns the value of the field of the CacheItem struct with the given name.

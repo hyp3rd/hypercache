@@ -193,12 +193,12 @@ type Tuple[K comparable, V any] struct {
 // Iter returns an iterator which could be used in a for range loop.
 //
 // Deprecated: using IterBuffered() will get a better performence
-func (m ConcurrentMap[K, V]) Iter() <-chan Tuple[K, V] {
-	chans := snapshot(m)
-	ch := make(chan Tuple[K, V])
-	go fanIn(chans, ch)
-	return ch
-}
+// func (m ConcurrentMap[K, V]) Iter() <-chan Tuple[K, V] {
+// 	chans := snapshot(m)
+// 	ch := make(chan Tuple[K, V])
+// 	go fanIn(chans, ch)
+// 	return ch
+// }
 
 // IterBuffered returns a buffered iterator which could be used in a for range loop.
 func (m ConcurrentMap[K, V]) IterBuffered() <-chan Tuple[K, V] {

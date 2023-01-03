@@ -14,6 +14,13 @@ type ClockCacheItem struct {
 	next  *ClockCacheItem
 }
 
+// ClockCacheItemPool is a pool of ClockCacheItem values.
+var ClockCacheItemPool = sync.Pool{
+	New: func() interface{} {
+		return &ClockCacheItem{}
+	},
+}
+
 // Clock represents a clock cache
 type ClockCache struct {
 	capacity int
@@ -65,11 +72,11 @@ func (clock *ClockCache) Set(key string, value interface{}) {
 			clock.cond.Wait()
 		}
 	}
-	item = &ClockCacheItem{
-		key:   key,
-		Value: value,
-		ref:   0,
-	}
+	item = ClockCacheItemPool.Get().(*ClockCacheItem)
+	item.key = key
+	item.Value = value
+	item.ref = 0
+
 	clock.items[key] = item
 	if clock.head == nil {
 		clock.head = item
@@ -91,31 +98,6 @@ func (clock *ClockCache) Set(key string, value interface{}) {
 // If it doesn't find an item with a reference count of 0, it sets all reference counts to 0 and waits on the condition variable.
 // When the function is woken up, it will start the loop again and check for an item with a reference count of 0.
 // This process continues until an item with a reference count of 0 is found.
-//
-//	func (clock *ClockCache) Evict() (string, error) {
-//		clock.mutex.Lock()
-//		defer clock.mutex.Unlock()
-//		for {
-//			if clock.head == nil {
-//				return "", errors.New("cache is empty")
-//			}
-//			curr := clock.head
-//			for {
-//				if curr.ref == 0 {
-//					key := curr.key
-//					clock.removeFromList(curr)
-//					delete(clock.items, key)
-//					return key, nil
-//				}
-//				curr.ref = 0
-//				curr = curr.next
-//				if curr == clock.head {
-//					break
-//				}
-//			}
-//			clock.cond.Wait()
-//		}
-//	}
 func (clock *ClockCache) Evict() (string, error) {
 	clock.mutex.Lock()
 	defer clock.mutex.Unlock()
@@ -168,4 +150,5 @@ func (clock *ClockCache) removeFromList(item *ClockCacheItem) {
 	}
 	item.prev = nil
 	item.next = nil
+	ClockCacheItemPool.Put(item)
 }

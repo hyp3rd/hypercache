@@ -85,7 +85,7 @@ func main() {
 		return
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		key := fmt.Sprintf("key%d", i)
 		val := fmt.Sprintf("val%d", i)
 
@@ -117,7 +117,7 @@ func main() {
 		fmt.Println(err)
 	}
 
-	cache.SetCapacity(3)
+	cache.SetCapacity(5)
 
 	fmt.Println("capacity", cache.Capacity())
 	fmt.Println("size", cache.Size())
