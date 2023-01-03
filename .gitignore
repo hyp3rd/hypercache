@@ -96,4 +96,4 @@ tags
 
 ### Project ###
 .dccache
-./cmd
+cmd/
