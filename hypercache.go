@@ -318,6 +318,7 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 
 	// Check for invalid key, value, or duration
 	if err := item.Valid(); err != nil {
+		CacheItemPool.Put(item)
 		return nil, err
 	}
 
@@ -344,6 +345,7 @@ func (cache *HyperCache) GetMultiple(keys ...string) (result map[string]interfac
 		}
 
 		if item.Expired() {
+			CacheItemPool.Put(item)
 			errors = append(errors, ErrKeyExpired)
 			go cache.expirationLoop()
 		} else {
@@ -353,7 +355,6 @@ func (cache *HyperCache) GetMultiple(keys ...string) (result map[string]interfac
 
 	}
 	return result, errors
-
 }
 
 // List lists the items in the cache that meet the specified criteria.
