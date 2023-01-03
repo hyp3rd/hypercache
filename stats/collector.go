@@ -1,59 +1,113 @@
 package stats
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
-// Stats contains cache statistics.
-type Stats struct {
-	Hits        uint64 // number of cache hits
-	Misses      uint64 // number of cache misses
-	Evictions   uint64 // number of cache evictions
-	Expirations uint64 // number of cache expirations
+// Stat defines a type Stat as an alias for string, and five constants of type Stat.
+// The constants are used to represent different stat values that can be collected by the stats collector.
+type Stat string
+
+const (
+	StatIncr      Stat = "incr"      // represent a stat that should be incremented
+	StatDecr      Stat = "decr"      // represent a stat that should be decremented
+	StatTiming    Stat = "timing"    //represent a stat that represents the time it takes for an event to occur
+	StatGauge     Stat = "gauge"     // represent a stat that represents the current value of a statistic
+	StatHistogram Stat = "histogram" //represent a stat that represents the statistical distribution of a set of values
+)
+
+// String returns the string representation of a Stat.
+func (s Stat) String() string {
+	return string(s)
 }
 
-// Collector is a struct for collecting cache statistics.
-type Collector struct {
+type HistogramStatsCollector struct {
 	mu    sync.RWMutex // mutex to protect concurrent access to the stats
-	stats Stats        // cache statistics
+	stats map[string][]int64
 }
 
-// NewCollector creates a new stats collector.
-func NewCollector() *Collector {
-	return &Collector{
-		stats: Stats{},
+// NewHistogramStatsCollector creates a new histogram stats collector.
+func NewHistogramStatsCollector() *HistogramStatsCollector {
+	return &HistogramStatsCollector{
+		stats: make(map[string][]int64),
 	}
 }
 
-// IncrementHits increments the number of cache hits.
-func (c *Collector) IncrementHits() {
+// Incr increments the count of a statistic by the given value.
+func (c *HistogramStatsCollector) Incr(stat Stat, value int64) {
+	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stats.Hits++
+	c.stats[stat.String()] = append(c.stats[stat.String()], value)
 }
 
-// IncrementMisses increments the number of cache misses.
-func (c *Collector) IncrementMisses() {
+// Decr decrements the count of a statistic by the given value.
+func (c *HistogramStatsCollector) Decr(stat Stat, value int64) {
+	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stats.Misses++
+	c.stats[stat.String()] = append(c.stats[stat.String()], -value)
 }
 
-// IncrementEvictions increments the number of cache evictions.
-func (c *Collector) IncrementEvictions() {
+// Timing records the time it took for an event to occur.
+func (c *HistogramStatsCollector) Timing(stat Stat, value int64) {
+	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stats.Evictions++
+	c.stats[stat.String()] = append(c.stats[stat.String()], value)
 }
 
-// IncrementExpirations increments the number of cache expirations.
-func (c *Collector) IncrementExpirations() {
+// Gauge records the current value of a statistic.
+func (c *HistogramStatsCollector) Gauge(stat Stat, value int64) {
+	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stats.Expirations++
+	c.stats[stat.String()] = append(c.stats[stat.String()], value)
 }
 
-// GetStats returns the cache statistics.
-func (c *Collector) GetStats() any {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.stats
+// Histogram records the statistical distribution of a set of values.
+func (c *HistogramStatsCollector) Histogram(stat Stat, value int64) {
+	// Lock the cache's mutex to ensure thread-safety
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stats[stat.String()] = append(c.stats[stat.String()], value)
+}
+
+// Mean returns the mean value of a statistic.
+func (c *HistogramStatsCollector) Mean(stat Stat) float64 {
+	values := c.stats[stat.String()]
+	if len(values) == 0 {
+		return 0
+	}
+	var sum int64
+	for _, value := range values {
+		sum += value
+	}
+	return float64(sum) / float64(len(values))
+}
+
+// Median returns the median value of a statistic.
+func (c *HistogramStatsCollector) Median(stat Stat) float64 {
+	values := c.stats[stat.String()]
+	if len(values) == 0 {
+		return 0
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	mid := len(values) / 2
+	if len(values)%2 == 0 {
+		return float64(values[mid-1]+values[mid]) / 2
+	}
+	return float64(values[mid])
+}
+
+// Percentile returns the pth percentile value of a statistic.
+func (c *HistogramStatsCollector) Percentile(stat Stat, p float64) float64 {
+	values := c.stats[stat.String()]
+	if len(values) == 0 {
+		return 0
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	index := int(float64(len(values)) * p)
+	return float64(values[index])
 }
