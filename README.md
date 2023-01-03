@@ -1,6 +1,6 @@
 # HyperCache
 
-[![Go](https://github.com/hyp3rd/hypercache/actions/workflows/go.yml/badge.svg)][def]
+[![Go](https://github.com/hyp3rd/hypercache/actions/workflows/go.yml/badge.svg)][build-link] [![CodeQL](https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml/badge.svg)][codeql-link]
 
 ## Synopsis
 
@@ -148,4 +148,5 @@ The code and documentation in this project are released under Mozilla Public Lic
 
 I'm a surfer, a crypto trader, and a software architect with 15 years of experience designing highly available distributed production environments and developing cloud-native apps in public and private clouds. Feel free to hook me up on [LinkedIn](https://www.linkedin.com/in/francesco-cosentino/).
 
-[def]: https://github.com/hyp3rd/hypercache/actions/workflows/go.yml
+[build-link]: https://github.com/hyp3rd/hypercache/actions/workflows/go.yml
+[codeql-link]:https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml
