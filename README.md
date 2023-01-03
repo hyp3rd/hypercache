@@ -18,8 +18,10 @@ It also enables devs to collect stats about the cache with the default [stats co
 - Retrieve items from the cache by their key
 - Delete items from the cache by their key
 - Clear the cache of all items
-- Evict least recently used items when the cache reaches capacity leveraging several custom eviction algorithms
-- Stats collection with a default [stats collector](./stats/collector.go) or a custom one that implements the StatsCollector interface
+- Evitc items in the background based on the cache capacity and items access leveraging several custom eviction algorithms
+- Expire items in the background based on their duration
+- [EvictionAlgorithm interface](./eviction.go) to implement custom eviction algorithms.
+- Stats collection with a default [stats collector](./stats/collector.go) or a custom one that implements the StatsCollector interface.
 
 ## Installation
 
