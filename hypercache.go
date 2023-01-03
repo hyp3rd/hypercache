@@ -113,7 +113,7 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 		cache.evictionAlgorithm, err = NewEvictionAlgorithm(cache.evictionAlgorithmName, capacity)
 	}
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	if cache.expirationTriggerBufferSize == 0 {

@@ -73,6 +73,7 @@ func (clock *ClockCache) Set(key string, value interface{}) {
 		}
 	}
 	item = ClockCacheItemPool.Get().(*ClockCacheItem)
+	// item = &ClockCacheItem{}
 	item.key = key
 	item.Value = value
 	item.ref = 0
