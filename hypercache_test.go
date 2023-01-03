@@ -68,7 +68,7 @@ func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
 	// Test with default max eviction count
 	cache, err := NewHyperCache(10)
 	assert.Nil(t, err)
-	assert.Equal(t, uint(100), cache.maxEvictionCount)
+	assert.Equal(t, uint(10), cache.maxEvictionCount)
 
 	// Test with custom max eviction count
 	cache, err = NewHyperCache(10, WithMaxEvictionCount(5))
