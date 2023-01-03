@@ -9,6 +9,18 @@ import (
 // Option is a function type that can be used to configure the `HyperCache` struct.
 type Option func(*HyperCache)
 
+// EvictionAlgorithmName is an option that sets the eviction algorithm name field of the `HyperCache` struct.
+// The eviction algorithm name determines which eviction algorithm will be used to evict items from the cache.
+// The eviction algorithm name must be one of the following:
+// - "LRU" (Least Recently Used) - Implemented in the `lru.go` file
+// - "LFU" (Least Frequently Used)
+// - "FIFO" (First In First Out)
+// - "RANDOM" (Random)
+// - "CLOCK" (Clock) - Implemented in the `clock.go` file
+// - "ARC" (Adaptive Replacement Cache) - Implemented in the `arc.go` file
+// - "TTL" (Time To Live)
+// - "LFUDA" (Least Frequently Used with Dynamic Aging)
+// - "SLRU" (Segmented Least Recently Used)
 func EvictionAlgorithmName(name string) Option {
 	return func(cache *HyperCache) {
 		cache.evictionAlgorithmName = name
