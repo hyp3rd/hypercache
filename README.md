@@ -101,7 +101,7 @@ The `Remove` function takes a variadic number of keys as arguments and returns a
 
 ## Usage
 
-Here is an example of using the HyperCache package:
+Here is an example of using the HyperCache package. For a more comprehensive example, see the [examples](./examples/README.md) directory.
 
 ```golang
 package main
