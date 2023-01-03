@@ -124,6 +124,7 @@ func (clock *ClockCache) Evict() (string, error) {
 	return "", errors.New("no item available for eviction")
 }
 
+// Delete removes the key-value pair from the cache.
 func (clock *ClockCache) Delete(key string) {
 	clock.mutex.Lock()
 	defer clock.mutex.Unlock()
@@ -135,6 +136,7 @@ func (clock *ClockCache) Delete(key string) {
 	delete(clock.items, key)
 }
 
+// removeFromList removes the item from the linked list and puts it back in the pool.
 func (clock *ClockCache) removeFromList(item *ClockCacheItem) {
 	if clock.head == item {
 		if item.next == item {

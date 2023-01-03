@@ -3,6 +3,7 @@ package hypercache
 import (
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -47,16 +48,10 @@ func (item *CacheItem) Valid() error {
 	}
 
 	// Check for negative expiration
-	if item.Expiration < 0 {
+	if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
+		// atomic.StoreInt64((*int64)(&item.Expiration), 0)
 		return ErrInvalidExpiration
 	}
-
-	// Check for negative expiration
-	// if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
-	// 	// atomic.StoreInt64((*int64)(&item.Expiration), 0)
-	// 	return ErrInvalidExpiration
-	// }
-
 	return nil
 }
 
@@ -70,5 +65,4 @@ func (item *CacheItem) Touch() {
 func (item *CacheItem) Expired() bool {
 	// If the expiration duration is 0, the item never expires
 	return item.Expiration > 0 && time.Since(item.lastAccess) > item.Expiration
-	// return item.Expiration < time.Now().UnixNano()
 }
