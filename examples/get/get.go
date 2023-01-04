@@ -28,6 +28,7 @@ func main() {
 
 		if err != nil {
 			fmt.Printf("unexpected error: %v\n", err)
+			return
 		}
 	}
 
