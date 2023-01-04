@@ -11,14 +11,14 @@ import (
 )
 
 type ARC struct {
-	capacity int
-	t1       map[string]*CacheItem
-	t2       map[string]*CacheItem
-	b1       map[string]bool
-	b2       map[string]bool
-	p        int
-	c        int
-	mutex    sync.RWMutex
+	capacity int                   // capacity is the maximum number of items that can be stored in the cache
+	t1       map[string]*CacheItem // t1 is a list of items that have been accessed recently
+	t2       map[string]*CacheItem // t2 is a list of items that have been accessed less recently
+	b1       map[string]bool       // b1 is a list of items that have been evicted from t1
+	b2       map[string]bool       // b2 is a list of items that have been evicted from t2
+	p        int                   // p is the promotion threshold
+	c        int                   // c is the current number of items in the cache
+	mutex    sync.RWMutex          // mutex is a read-write mutex that protects the cache
 }
 
 // NewARC creates a new in-memory cache with the given capacity and the Adaptive Replacement Cache (ARC) algorithm.
