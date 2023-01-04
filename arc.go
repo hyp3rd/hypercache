@@ -1,3 +1,8 @@
+// ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
+// It has a map of items to store the items in the cache, and a capacity field that limits the number of items that can be stored in the cache.
+// The ARC algorithm uses two lists, t1 and t2, to store the items in the cache.
+// The p field represents the "promotion threshold", which determines how many items should be stored in t1.
+// The c field represents the current number of items in the cache.
 package hypercache
 
 import (
@@ -5,11 +10,6 @@ import (
 	"sync"
 )
 
-// ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
-// It has a map of items to store the items in the cache, and a capacity field that limits the number of items that can be stored in the cache.
-// The ARC algorithm uses two lists, t1 and t2, to store the items in the cache.
-// The p field represents the "promotion threshold", which determines how many items should be stored in t1.
-// The c field represents the current number of items in the cache.
 type ARC struct {
 	capacity int
 	t1       map[string]*CacheItem
@@ -108,9 +108,9 @@ func (arc *ARC) Set(key string, value interface{}) {
 		go arc.Delete(evictedKey)
 	}
 	// Add new item to cache
-	item := &CacheItem{
-		Value: value,
-	}
+	item := CacheItemPool.Get().(*CacheItem)
+	item.Value = value
+
 	arc.t1[key] = item
 	arc.c++
 	arc.p++
@@ -122,7 +122,7 @@ func (arc *ARC) Set(key string, value interface{}) {
 // Delete removes the item with the given key from the cache.
 func (arc *ARC) Delete(key string) {
 	// Check t1
-	_, ok := arc.t1[key]
+	item, ok := arc.t1[key]
 	if ok {
 		delete(arc.t1, key)
 		arc.c--
@@ -130,13 +130,15 @@ func (arc *ARC) Delete(key string) {
 		if arc.p < 0 {
 			arc.p = 0
 		}
+		CacheItemPool.Put(item)
 		return
 	}
 	// Check t2
-	_, ok = arc.t2[key]
+	item, ok = arc.t2[key]
 	if ok {
 		delete(arc.t2, key)
 		arc.c--
+		CacheItemPool.Put(item)
 	}
 }
 
@@ -144,15 +146,17 @@ func (arc *ARC) Delete(key string) {
 // If no item can be evicted, it returns an error.
 func (arc *ARC) Evict() (string, error) {
 	// Check t1
-	for key := range arc.t1 {
+	for key, val := range arc.t1 {
 		delete(arc.t1, key)
 		arc.c--
+		CacheItemPool.Put(val)
 		return key, nil
 	}
 	// Check t2
-	for key := range arc.t2 {
+	for key, val := range arc.t2 {
 		delete(arc.t2, key)
 		arc.c--
+		CacheItemPool.Put(val)
 		return key, nil
 	}
 	return "", errors.New("no items to evict")
