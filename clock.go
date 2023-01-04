@@ -1,3 +1,8 @@
+// The clock eviction algorithm is a page replacement algorithm that uses a clock-like data structure to keep track of which pages in a computer's memory have been used recently and which have not.
+// It works by maintaining a circular buffer of pages, with a "hand" that points to the next page to be replaced.
+// When a page needs to be evicted from memory, the hand is advanced to the next page in the buffer, and that page is evicted if it has not been used recently.
+// If the page has been used recently, the hand is advanced to the next page, and the process repeats until a page is found that can be evicted.
+// The clock eviction algorithm is often used in virtual memory systems to manage the allocation of physical memory.
 package hypercache
 
 import (
@@ -7,11 +12,11 @@ import (
 
 // ClockCacheItem represents an item in the cache
 type ClockCacheItem struct {
-	key   string
-	Value interface{}
-	ref   int
-	prev  *ClockCacheItem
-	next  *ClockCacheItem
+	key   string          // The key used to identify the item
+	Value interface{}     // The value stored in the item
+	ref   int             // The reference bit
+	prev  *ClockCacheItem // The previous item in the cache
+	next  *ClockCacheItem // The next item in the cache
 }
 
 // ClockCacheItemPool is a pool of ClockCacheItem values.

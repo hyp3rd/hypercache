@@ -31,6 +31,7 @@ func main() {
 
 		if err != nil {
 			fmt.Printf("unexpected error: %v\n", err)
+			return
 		}
 	}
 
@@ -46,6 +47,7 @@ func main() {
 	//
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
 
 	// Print the list of items

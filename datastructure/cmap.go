@@ -190,16 +190,6 @@ type Tuple[K comparable, V any] struct {
 	Val V
 }
 
-// Iter returns an iterator which could be used in a for range loop.
-//
-// Deprecated: using IterBuffered() will get a better performence
-// func (m ConcurrentMap[K, V]) Iter() <-chan Tuple[K, V] {
-// 	chans := snapshot(m)
-// 	ch := make(chan Tuple[K, V])
-// 	go fanIn(chans, ch)
-// 	return ch
-// }
-
 // IterBuffered returns a buffered iterator which could be used in a for range loop.
 func (m ConcurrentMap[K, V]) IterBuffered() <-chan Tuple[K, V] {
 	chans := snapshot(m)
@@ -338,10 +328,13 @@ func (m ConcurrentMap[K, V]) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(tmp)
 }
+
+// Returns a hash for a key.
 func strfnv32[K fmt.Stringer](key K) uint32 {
 	return fnv32(key.String())
 }
 
+// Returns a hash for a string.
 func fnv32(key string) uint32 {
 	hash := uint32(2166136261)
 	const prime32 = uint32(16777619)
