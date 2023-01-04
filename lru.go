@@ -21,6 +21,14 @@ type LRUCacheItem struct {
 	next  *LRUCacheItem
 }
 
+// LRUCacheItemmPool is a pool of LRUCacheItemm values.
+var LRUCacheItemmPool = sync.Pool{
+	New: func() interface{} {
+		return &LRUCacheItem{}
+	},
+}
+
+// LRU represents a LRU cache
 type LRU struct {
 	capacity int
 	items    map[string]*LRUCacheItem
@@ -29,6 +37,7 @@ type LRU struct {
 	mutex    sync.RWMutex
 }
 
+// NewLRU creates a new LRU cache with the given capacity
 func NewLRU(capacity int) (*LRU, error) {
 	if capacity < 0 {
 		return nil, ErrInvalidCapacity
@@ -39,6 +48,7 @@ func NewLRU(capacity int) (*LRU, error) {
 	}, nil
 }
 
+// Get retrieves the value for the given key from the cache. If the key is not
 func (lru *LRU) Get(key string) (interface{}, bool) {
 	lru.mutex.RLock()
 	defer lru.mutex.RUnlock()
@@ -50,6 +60,8 @@ func (lru *LRU) Get(key string) (interface{}, bool) {
 	return item.Value, true
 }
 
+// Set sets the value for the given key in the cache. If the key is not already	in the cache, it is added.
+// If the cache is full, the least recently used item is evicted.
 func (lru *LRU) Set(key string, value interface{}) {
 	lru.mutex.Lock()
 	defer lru.mutex.Unlock()
@@ -63,14 +75,18 @@ func (lru *LRU) Set(key string, value interface{}) {
 		delete(lru.items, lru.tail.Key)
 		lru.removeFromList(lru.tail)
 	}
-	item = &LRUCacheItem{
-		Key:   key,
-		Value: value,
-	}
+
+	// get a new item from the pool
+	item = LRUCacheItemmPool.Get().(*LRUCacheItem)
+
+	item.Key = key
+	item.Value = value
+
 	lru.items[key] = item
 	lru.addToFront(item)
 }
 
+// Evict removes the least recently used item from the cache and returns its key.
 func (lru *LRU) Evict() (string, error) {
 	lru.mutex.Lock()
 	defer lru.mutex.Unlock()
@@ -78,11 +94,13 @@ func (lru *LRU) Evict() (string, error) {
 		return "", errors.New("cache is empty")
 	}
 	key := lru.tail.Key
+	LRUCacheItemmPool.Put(lru.tail)
 	lru.removeFromList(lru.tail)
 	delete(lru.items, key)
 	return key, nil
 }
 
+// Delete removes the given key from the cache.
 func (lru *LRU) Delete(key string) {
 	lru.mutex.Lock()
 	defer lru.mutex.Unlock()
@@ -94,6 +112,7 @@ func (lru *LRU) Delete(key string) {
 	delete(lru.items, key)
 }
 
+// moveToFront moves the given item to the front of the list.
 func (lru *LRU) moveToFront(item *LRUCacheItem) {
 	if item == lru.head {
 		return
@@ -102,6 +121,7 @@ func (lru *LRU) moveToFront(item *LRUCacheItem) {
 	lru.addToFront(item)
 }
 
+// removeFromList removes the given item from the list.
 func (lru *LRU) removeFromList(item *LRUCacheItem) {
 	if item == lru.head {
 		lru.head = item.next
@@ -117,6 +137,7 @@ func (lru *LRU) removeFromList(item *LRUCacheItem) {
 	item.next = nil
 }
 
+// addToFront adds the given item to the front of the list.
 func (lru *LRU) addToFront(item *LRUCacheItem) {
 	if lru.head == nil {
 		lru.head = item
