@@ -30,11 +30,11 @@ var LRUCacheItemmPool = sync.Pool{
 
 // LRU represents a LRU cache
 type LRU struct {
-	capacity int
-	items    map[string]*LRUCacheItem
-	head     *LRUCacheItem
-	tail     *LRUCacheItem
-	mutex    sync.RWMutex
+	capacity int                      // The maximum number of items in the cache
+	items    map[string]*LRUCacheItem // The items in the cache
+	head     *LRUCacheItem            // The head of the linked list
+	tail     *LRUCacheItem            // The tail of the linked list
+	mutex    sync.RWMutex             // The mutex used to protect the cache
 }
 
 // NewLRU creates a new LRU cache with the given capacity

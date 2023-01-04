@@ -12,11 +12,11 @@ import (
 
 // ClockCacheItem represents an item in the cache
 type ClockCacheItem struct {
-	key   string
-	Value interface{}
-	ref   int
-	prev  *ClockCacheItem
-	next  *ClockCacheItem
+	key   string          // The key used to identify the item
+	Value interface{}     // The value stored in the item
+	ref   int             // The reference bit
+	prev  *ClockCacheItem // The previous item in the cache
+	next  *ClockCacheItem // The next item in the cache
 }
 
 // ClockCacheItemPool is a pool of ClockCacheItem values.
