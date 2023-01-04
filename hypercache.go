@@ -335,21 +335,29 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 }
 
 // GetMultiple retrieves the items with the given keys from the cache. If an item is not found, it is not included in the returned map.
-func (cache *HyperCache) GetMultiple(keys ...string) (result map[string]interface{}, errors []error) {
-	result = make(map[string]interface{}, len(keys))
+func (cache *HyperCache) GetMultiple(keys ...string) (result map[string]interface{}, errors map[string]error) {
+	result = make(map[string]interface{}, len(keys)) // Preallocate the result map
+	errors = make(map[string]error, len(keys))       // Preallocate the errors map
+
 	for _, key := range keys {
 		item, ok := cache.items.Get(key)
 		if !ok {
-			errors = append(errors, ErrKeyNotFound)
+			// Add the key to the errors map and continue
+			errors[key] = ErrKeyNotFound
 			continue
 		}
 
+		// Check if the item has expired
 		if item.Expired() {
+			// Put the item back in the pool
 			CacheItemPool.Put(item)
-			errors = append(errors, ErrKeyExpired)
+			// Add the key to the errors map
+			errors[key] = ErrKeyExpired
+			// Trigger the expiration loop
 			go cache.expirationLoop()
 		} else {
 			item.Touch() // Update the last access time and access count
+			// Add the item to the result map
 			result[key] = item.Value
 		}
 
@@ -406,7 +414,7 @@ func (cache *HyperCache) List(options ...FilteringOption) ([]*CacheItem, error) 
 	return items, nil
 }
 
-// Remove removes the items with the given key from the cache. If an item is not found, it does nothing.
+// Remove removes items with the given key from the cache. If an item is not found, it does nothing.
 func (cache *HyperCache) Remove(keys ...string) {
 	for _, key := range keys {
 		cache.evictionAlgorithm.Delete(key)

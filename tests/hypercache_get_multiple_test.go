@@ -14,14 +14,14 @@ func TestGetMultiple(t *testing.T) {
 		name       string
 		keys       []string
 		wantValues map[string]interface{}
-		wantErrs   []error
+		wantErrs   map[string]error
 		setup      func(*hypercache.HyperCache)
 	}{
 		{
 			name:       "get multiple keys with values",
 			keys:       []string{"key1", "key2", "key3"},
 			wantValues: map[string]interface{}{"key1": 1, "key2": 2, "key3": 3},
-			wantErrs:   []error(nil),
+			wantErrs:   map[string]error(map[string]error{}),
 			setup: func(cache *hypercache.HyperCache) {
 				cache.Set("key1", 1, 0)
 				cache.Set("key2", 2, 0)
@@ -32,7 +32,7 @@ func TestGetMultiple(t *testing.T) {
 			name:       "get multiple keys with missing values",
 			keys:       []string{"key1", "key2", "key3"},
 			wantValues: map[string]interface{}{"key1": 1, "key3": 3},
-			wantErrs:   []error{hypercache.ErrKeyNotFound},
+			wantErrs:   map[string]error{"key2": hypercache.ErrKeyNotFound},
 			setup: func(cache *hypercache.HyperCache) {
 				cache.Set("key1", 1, 0)
 				cache.Set("key3", 3, 0)
@@ -42,7 +42,7 @@ func TestGetMultiple(t *testing.T) {
 			name:       "get multiple keys with expired values",
 			keys:       []string{"key1", "key2", "key3"},
 			wantValues: map[string]interface{}{"key2": 2, "key3": 3},
-			wantErrs:   []error{hypercache.ErrKeyNotFound},
+			wantErrs:   map[string]error{"key1": hypercache.ErrKeyNotFound},
 			setup: func(cache *hypercache.HyperCache) {
 				cache.Set("key1", 1, time.Millisecond)
 				time.Sleep(2 * time.Millisecond)
