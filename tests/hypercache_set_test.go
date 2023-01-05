@@ -68,7 +68,7 @@ func TestHyperCache_Set(t *testing.T) {
 	}
 	cache, err := hypercache.NewHyperCache(10)
 	assert.Nil(t, err)
-	defer cache.Close()
+	defer cache.Stop()
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

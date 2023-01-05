@@ -19,8 +19,8 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	// Close the cache when the program exits
-	defer cache.Close()
+	// Stop the cache when the program exits
+	defer cache.Stop()
 
 	// Add 100 items to the cache
 	for i := 0; i < 100; i++ {

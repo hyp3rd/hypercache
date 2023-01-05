@@ -6,6 +6,7 @@ package hypercache
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -41,23 +42,22 @@ var (
 // and a capacity field that limits the number of items that can be stored in the cache.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
 type HyperCache struct {
-	items                       datastructure.ConcurrentMap[string, *CacheItem] // map to store the items in the cache
-	capacity                    int                                             // capacity of the cache, limits the number of items that can be stored in the cache
-	stop                        chan bool                                       // channel to signal the expiration and eviction loops to stop
-	expirationTriggerCh         chan bool                                       // channel to signal the expiration trigger loop to start
-	evictCh                     chan bool                                       // channel to signal the eviction loop to start
-	statsCollector              StatsCollector                                  // stats collector to collect cache statistics
-	evictionAlgorithmName       string                                          // name of the eviction algorithm to use when evicting items
-	evictionAlgorithm           EvictionAlgorithm                               // eviction algorithm to use when evicting items
-	expirationInterval          time.Duration                                   // interval at which the expiration loop should run
-	evictionInterval            time.Duration                                   // interval at which the eviction loop should run
-	expirationTriggerBufferSize uint                                            // size of the expiration trigger buffer
-	maxEvictionCount            uint                                            // maximum number of items that can be evicted in a single eviction loop iteration
-	sortBy                      string                                          // field to sort the items by
-	sortAscending               bool                                            // whether to sort the items in ascending order
-	filterFn                    func(item *CacheItem) bool                      // filter function to select items that meet certain criteria
-	mutex                       sync.RWMutex                                    // mutex to protect the eviction algorithm
-	once                        sync.Once                                       // used to ensure that the expiration and eviction loops are only started once
+	items                 datastructure.ConcurrentMap[string, *CacheItem] // map to store the items in the cache
+	capacity              int                                             // capacity of the cache, limits the number of items that can be stored in the cache
+	stop                  chan bool                                       // channel to signal the expiration and eviction loops to stop
+	expirationTriggerCh   chan bool                                       // channel to signal the expiration trigger loop to start
+	evictCh               chan bool                                       // channel to signal the eviction loop to start
+	statsCollector        StatsCollector                                  // stats collector to collect cache statistics
+	evictionAlgorithmName string                                          // name of the eviction algorithm to use when evicting items
+	evictionAlgorithm     EvictionAlgorithm                               // eviction algorithm to use when evicting items
+	expirationInterval    time.Duration                                   // interval at which the expiration loop should run
+	evictionInterval      time.Duration                                   // interval at which the eviction loop should run
+	maxEvictionCount      uint                                            // maximum number of items that can be evicted in a single eviction loop iteration
+	sortBy                string                                          // field to sort the items by
+	sortAscending         bool                                            // whether to sort the items in ascending order
+	filterFn              func(item *CacheItem) bool                      // filter function to select items that meet certain criteria
+	mutex                 sync.RWMutex                                    // mutex to protect the eviction algorithm
+	once                  sync.Once                                       // used to ensure that the expiration and eviction loops are only started once
 }
 
 // StatsCollector is an interface that defines the methods that a stats collector should implement.
@@ -101,26 +101,19 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 	// Initialize the eviction algorithm
 	if cache.evictionAlgorithmName == "" {
 		// Use the default eviction algorithm if none is specified
-		// cache.evictionAlgorithm, err = NewARC(capacity)
-		// cache.evictionAlgorithm, err = NewLRU(capacity)
-		cache.evictionAlgorithm, err = NewClockCache(capacity)
-
-		// cache.evictionAlgorithm, err = NewEvictionAlgorithm("lru", capacity)
-		// cache.evictionAlgorithm, err = NewEvictionAlgorithm("clock", capacity)
-
+		// cache.evictionAlgorithm, err = NewClockCache(capacity)
+		// cache.evictionAlgorithm, err = NewEvictionAlgorithm("clock", int(cache.maxEvictionCount))
+		cache.evictionAlgorithm, err = NewEvictionAlgorithm("clock", int(cache.maxEvictionCount))
 	} else {
 		// Use the specified eviction algorithm
-		cache.evictionAlgorithm, err = NewEvictionAlgorithm(cache.evictionAlgorithmName, capacity)
+		cache.evictionAlgorithm, err = NewEvictionAlgorithm(cache.evictionAlgorithmName, int(cache.maxEvictionCount))
 	}
 	if err != nil {
 		return
 	}
 
-	if cache.expirationTriggerBufferSize == 0 {
-		cache.expirationTriggerBufferSize = 100
-	}
-	// Initialize the expiration trigger channel with the specified buffer size
-	cache.expirationTriggerCh = make(chan bool, cache.expirationTriggerBufferSize)
+	// Initialize the expiration trigger channel with the buffer size set to half the capacity
+	cache.expirationTriggerCh = make(chan bool, capacity/2)
 
 	// Start expiration and eviction loops if capacity is greater than zero
 	if capacity > 0 {
@@ -172,7 +165,7 @@ func (cache *HyperCache) expirationLoop() {
 	var expiredCount int64
 
 	for item := range cache.items.IterBuffered() {
-		if item.Val.Expiration > 0 && time.Since(item.Val.lastAccess) > item.Val.Expiration {
+		if item.Val.Expiration > 0 && time.Since(item.Val.LastAccess) > item.Val.Expiration {
 			expiredCount++
 			cache.items.Remove(item.Key)
 			CacheItemPool.Put(item.Val)
@@ -189,12 +182,18 @@ func (cache *HyperCache) evictionLoop() {
 	cache.statsCollector.Incr("eviction_loop_count", 1)
 	defer cache.statsCollector.Timing("eviction_loop_duration", time.Now().UnixNano())
 	var evictedCount int64
-	for i := uint(0); i < cache.maxEvictionCount; i++ {
-		if cache.itemCount() <= cache.capacity {
+
+	for {
+		if cache.itemCount() <= cache.capacity || cache.maxEvictionCount == uint(evictedCount) {
+			fmt.Println("cache eviction stopped, we're at capacity", cache.maxEvictionCount)
 			break
 		}
 		key, err := cache.evictionAlgorithm.Evict()
+
 		if err != nil {
+			// should log error or stat it
+			fmt.Println("cache eviction stopped, error", err)
+
 			break
 		}
 
@@ -202,6 +201,7 @@ func (cache *HyperCache) evictionLoop() {
 		evictedCount++
 		cache.statsCollector.Incr("item_evicted_count", 1)
 	}
+
 	cache.statsCollector.Gauge("item_count", int64(cache.itemCount()))
 	cache.statsCollector.Gauge("evicted_item_count", evictedCount)
 }
@@ -236,12 +236,6 @@ func (cache *HyperCache) itemCount() int {
 	return cache.items.Count()
 }
 
-// Close stops the expiration and eviction loops and closes the stop channel.
-func (cache *HyperCache) Close() {
-	cache.stop <- true
-	close(cache.stop)
-}
-
 // Set adds an item to the cache with the given key and value. If an item with the same key already exists, it updates the value of the existing item.
 // If the expiration duration is greater than zero, the item will expire after the specified duration.
 // If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
@@ -249,7 +243,7 @@ func (cache *HyperCache) Set(key string, value interface{}, expiration time.Dura
 	item := CacheItemPool.Get().(*CacheItem)
 	item.Value = value
 	item.Expiration = expiration
-	item.lastAccess = time.Now()
+	item.LastAccess = time.Now()
 
 	// Check for invalid key, value, or duration
 	if err := item.Valid(); err != nil {
@@ -261,9 +255,9 @@ func (cache *HyperCache) Set(key string, value interface{}, expiration time.Dura
 	defer cache.mutex.Unlock()
 
 	cache.items.Set(key, item)
-	defer cache.evictionAlgorithm.Set(key, item.Value)
-	if cache.capacity > 0 && cache.itemCount() > cache.capacity {
-		defer cache.evictItem()
+	cache.evictionAlgorithm.Set(key, item.Value)
+	if cache.evictionInterval == 0 && cache.capacity > 0 && cache.itemCount() > cache.capacity {
+		cache.evictItem()
 	}
 
 	return nil
@@ -305,7 +299,7 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 		}
 
 		// Update the last access time and access count
-		defer item.Touch()
+		item.Touch()
 		return item.Value, nil
 
 	}
@@ -314,7 +308,7 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 	item := CacheItemPool.Get().(*CacheItem)
 	item.Value = value
 	item.Expiration = expiration
-	item.lastAccess = time.Now()
+	item.LastAccess = time.Now()
 
 	// Check for invalid key, value, or duration
 	if err := item.Valid(); err != nil {
@@ -326,9 +320,9 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 	defer cache.mutex.Unlock()
 	cache.items.Set(key, item)
 
-	defer cache.evictionAlgorithm.Set(key, item.Value)
+	cache.evictionAlgorithm.Set(key, item.Value)
 	if cache.capacity > 0 && cache.itemCount() > cache.capacity {
-		defer cache.evictItem()
+		cache.evictItem()
 	}
 
 	return value, nil

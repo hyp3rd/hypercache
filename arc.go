@@ -105,7 +105,7 @@ func (arc *ARC) Set(key string, value interface{}) {
 		if err != nil {
 			return
 		}
-		go arc.Delete(evictedKey)
+		arc.Delete(evictedKey)
 	}
 	// Add new item to cache
 	item := CacheItemPool.Get().(*CacheItem)
