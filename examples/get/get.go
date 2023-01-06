@@ -15,8 +15,8 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	// Close the cache when the program exits
-	defer cache.Close()
+	// Stop the cache when the program exits
+	defer cache.Stop()
 
 	log.Println("adding items to the cache")
 	// Add 10 items to the cache

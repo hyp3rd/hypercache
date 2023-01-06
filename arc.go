@@ -1,15 +1,16 @@
+package hypercache
+
 // ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
 // It has a map of items to store the items in the cache, and a capacity field that limits the number of items that can be stored in the cache.
 // The ARC algorithm uses two lists, t1 and t2, to store the items in the cache.
 // The p field represents the "promotion threshold", which determines how many items should be stored in t1.
 // The c field represents the current number of items in the cache.
-package hypercache
 
 import (
-	"errors"
 	"sync"
 )
 
+// ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
 type ARC struct {
 	capacity int                   // capacity is the maximum number of items that can be stored in the cache
 	t1       map[string]*CacheItem // t1 is a list of items that have been accessed recently
@@ -101,11 +102,11 @@ func (arc *ARC) Set(key string, value interface{}) {
 	// Check if cache is at capacity
 	if arc.c >= arc.capacity {
 		// Eviction needed
-		evictedKey, err := arc.Evict()
-		if err != nil {
+		evictedKey, ok := arc.Evict()
+		if !ok {
 			return
 		}
-		go arc.Delete(evictedKey)
+		arc.Delete(evictedKey)
 	}
 	// Add new item to cache
 	item := CacheItemPool.Get().(*CacheItem)
@@ -144,20 +145,20 @@ func (arc *ARC) Delete(key string) {
 
 // Evict removes an item from the cache and returns the key of the evicted item.
 // If no item can be evicted, it returns an error.
-func (arc *ARC) Evict() (string, error) {
+func (arc *ARC) Evict() (string, bool) {
 	// Check t1
 	for key, val := range arc.t1 {
 		delete(arc.t1, key)
 		arc.c--
 		CacheItemPool.Put(val)
-		return key, nil
+		return key, true
 	}
 	// Check t2
 	for key, val := range arc.t2 {
 		delete(arc.t2, key)
 		arc.c--
 		CacheItemPool.Put(val)
-		return key, nil
+		return key, true
 	}
-	return "", errors.New("no items to evict")
+	return "", false
 }

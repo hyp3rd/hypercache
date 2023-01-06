@@ -1,5 +1,7 @@
 package hypercache
 
+// CacheItem represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
+
 import (
 	"reflect"
 	"sync"
@@ -9,11 +11,12 @@ import (
 
 // CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 type CacheItem struct {
+	// Key        string        // key of the item
 	Value      interface{}   // value of the item
 	Expiration time.Duration // expiration duration of the item
 	// Expiration  int64     // monotonic clock value in nanoseconds
-	lastAccess  time.Time // last access time of the item
-	accessCount uint      // number of times the item has been accessed
+	LastAccess  time.Time // last access time of the item
+	AccessCount uint      // number of times the item has been accessed
 }
 
 // CacheItemPool is a pool of CacheItem values.
@@ -57,12 +60,12 @@ func (item *CacheItem) Valid() error {
 
 // Touch updates the last access time of the item and increments the access count.
 func (item *CacheItem) Touch() {
-	item.lastAccess = time.Now()
-	item.accessCount++
+	item.LastAccess = time.Now()
+	item.AccessCount++
 }
 
 // Expired returns true if the item has expired, false otherwise.
 func (item *CacheItem) Expired() bool {
 	// If the expiration duration is 0, the item never expires
-	return item.Expiration > 0 && time.Since(item.lastAccess) > item.Expiration
+	return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
 }

@@ -43,14 +43,6 @@ func WithExpirationInterval(expirationInterval time.Duration) Option {
 	}
 }
 
-// WithExpirationTriggerBufferSize is an option that sets the expiration trigger buffer size field of the `HyperCache` struct.
-// The expiration trigger buffer size determines how many items need to be added to the cache before an expiration run is triggered.
-func WithExpirationriggerBufferSize(expirationTriggerBufferSize uint) Option {
-	return func(cache *HyperCache) {
-		cache.expirationTriggerBufferSize = expirationTriggerBufferSize
-	}
-}
-
 // WithEvictionInterval is an option that sets the eviction interval field of the `HyperCache` struct.
 // The eviction interval determines how often the cache will run the eviction process to remove the least recently used items.
 func WithEvictionInterval(evictionInterval time.Duration) Option {
