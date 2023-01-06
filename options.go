@@ -13,7 +13,8 @@ type Option func(*HyperCache)
 // The eviction algorithm name determines which eviction algorithm will be used to evict items from the cache.
 // The eviction algorithm name must be one of the following:
 // - "LRU" (Least Recently Used) - Implemented in the `lru.go` file
-// - "LFU" (Least Frequently Used)
+// - "LFU" (Least Frequently Used) - Implemented in the `lfu.go` file
+// - "CAWOLFU" (Cache-Aware Write-Optimized LFU) - Implemented in the `cawolfu.go` file
 // - "FIFO" (First In First Out)
 // - "RANDOM" (Random)
 // - "CLOCK" (Clock) - Implemented in the `clock.go` file
