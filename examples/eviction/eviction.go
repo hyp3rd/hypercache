@@ -11,17 +11,17 @@ import (
 
 // This example demonstrates how to setup eviction of items from the cache
 func main() {
-	log.Println("example of eviction with a 3 seconds interval")
-	executeExample(5 * time.Second)
+	log.Println("running an example of eviction with a background 3 seconds interval")
+	executeExample(3 * time.Second)
 
-	log.Println("Example of background eviction disabled")
+	log.Println("running an example with background eviction disabled and proactive eviction enabled")
 	executeExample(0)
 }
 
 // executeExample runs the example
 func executeExample(evictionInterval time.Duration) {
 	// Create a new HyperCache with a capacity of 10
-	cache, err := hypercache.NewHyperCache(3,
+	cache, err := hypercache.NewHyperCache(10,
 		hypercache.EvictionAlgorithmName("cawolfu"),
 		hypercache.WithEvictionInterval(evictionInterval),
 		hypercache.WithMaxEvictionCount(10))
@@ -33,7 +33,7 @@ func executeExample(evictionInterval time.Duration) {
 	// Close the cache when the program exits
 	defer cache.Stop()
 
-	log.Println("initial capacity", cache.Capacity())
+	log.Println("cache capacity", cache.Capacity())
 
 	log.Println("adding 15 items to the cache, 5 over capacity")
 	for i := 0; i < 15; i++ {
@@ -63,8 +63,8 @@ func executeExample(evictionInterval time.Duration) {
 	}
 
 	if evictionInterval > 0 {
-		fmt.Println("sleeping for", evictionInterval+3*time.Second)
-		time.Sleep(evictionInterval + 5*time.Second + 3*time.Second)
+		fmt.Println("sleeping to allow two evition loops", evictionInterval+3*time.Second)
+		time.Sleep(evictionInterval + evictionInterval + 3*time.Second)
 		log.Println("listing all items in the cache the eviction is triggered")
 		list, err = cache.List(hypercache.WithSortBy(types.SortByValue))
 		if err != nil {

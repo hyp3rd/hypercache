@@ -11,6 +11,9 @@ It also enables devs to collect stats about the cache with the default [stats co
 - [Recently Used (LRU) eviction algorithm](./lru.go)
 - [The Adaptive Replacement Cache (ARC) algorithm](./arc.go)
 - [The clock eviction algorithm](./clock.go)
+- [The Least Frequently Used (LFU) algorithm](./lfu.go)
+- [Cache-Aware Write-Optimized LFU (CAWOLFU)](./cawolfu.go)
+
 
 ### Features
 
@@ -36,16 +39,29 @@ go get github.com/hyp3rd/hypercache
 Running the benchmarks on a 2019 MacBook Pro with a 2.4 GHz 8-Core Intel Core i9 processor and 32 GB 2400 MHz DDR4 memory, the results are as follows on average, using a pretty busy machine:
 
 ```bash
-go test -bench=. -benchmem -benchtime=4s . -timeout 30m
+make bench
+cd tests/benchmark && go test -bench=. -benchmem -benchtime=4s . -timeout 30m
 goos: darwin
 goarch: amd64
 pkg: github.com/hyp3rd/hypercache/tests/benchmark
 cpu: Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz
-BenchmarkHyperCache_Get-16      33191691          125.6 ns/op          0 B/op          0 allocs/op
-BenchmarkHyperCache_Set-16       4290988          1045 ns/op          88 B/op          3 allocs/op
+BenchmarkHyperCache_Get-16                          38833602           123.9 ns/op         0 B/op          0 allocs/op
+BenchmarkHyperCache_Get_ProactiveEviction-16        38079158           124.4 ns/op         0 B/op          0 allocs/op
+BenchmarkHyperCache_Set-16                           4361000          1217 ns/op         203 B/op          3 allocs/op
+BenchmarkHyperCache_Set_Proactive_Eviction-16        4343996          1128 ns/op          92 B/op          3 allocs/op
 PASS
-ok      github.com/hyp3rd/hypercache/tests/benchmark       10.303s
+ok      github.com/hyp3rd/hypercache/tests/benchmark    23.723s
 ```
+
+### Examples
+
+To run the examples, use the following command:
+
+```bash
+make run example=eviction  # or any other example
+```
+
+For a full list of examples, refer to the [examples](./examples/README.md) directory.
 
 ## API
 
