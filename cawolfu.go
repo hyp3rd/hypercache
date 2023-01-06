@@ -3,6 +3,8 @@ package hypercache
 // CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
 
 import (
+	"sync"
+
 	"github.com/hyp3rd/hypercache/datastructure"
 )
 
@@ -21,6 +23,13 @@ type CAWOLFUNode struct {
 	count int          // number of times the item has been accessed
 	prev  *CAWOLFUNode // previous node in the linked list
 	next  *CAWOLFUNode // next node in the linked list
+}
+
+// CAWOLFUNodePool is a pool of CAWOLFUNode values.
+var CAWOLFUNodePool = sync.Pool{
+	New: func() interface{} {
+		return &CAWOLFUNode{}
+	},
 }
 
 // CAWOLFULinkedList is a struct that represents a linked list. It has a head and tail field.
@@ -65,12 +74,12 @@ func (c *CAWOLFU) Set(key string, value interface{}) {
 		_, _ = c.Evict() // evict an item
 	}
 
+	node := CAWOLFUNodePool.Get().(*CAWOLFUNode)
 	// add the new item to the cache
-	node := &CAWOLFUNode{
-		key:   key,
-		value: value,
-		count: 1,
-	}
+	node.key = key
+	node.value = value
+	node.count = 1
+
 	c.items.Set(key, node)
 	c.addToFront(node)
 	c.length++
@@ -105,6 +114,7 @@ func (l *CAWOLFULinkedList) remove(node *CAWOLFUNode) {
 	}
 	node.prev = nil
 	node.next = nil
+	CAWOLFUNodePool.Put(node)
 }
 
 // addToFront adds the given node to the front of the linked list.
@@ -149,4 +159,5 @@ func (c *CAWOLFU) Delete(key string) {
 	c.list.remove(node)
 	c.items.Remove(key)
 	c.length--
+	CAWOLFUNodePool.Put(node)
 }
