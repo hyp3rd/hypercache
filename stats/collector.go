@@ -10,11 +10,16 @@ import (
 type Stat string
 
 const (
-	StatIncr      Stat = "incr"      // represent a stat that should be incremented
-	StatDecr      Stat = "decr"      // represent a stat that should be decremented
-	StatTiming    Stat = "timing"    //represent a stat that represents the time it takes for an event to occur
-	StatGauge     Stat = "gauge"     // represent a stat that represents the current value of a statistic
-	StatHistogram Stat = "histogram" //represent a stat that represents the statistical distribution of a set of values
+	// StatIncr represent a stat that should be incremented
+	StatIncr Stat = "incr"
+	// StatDecr represent a stat that should be decremented
+	StatDecr Stat = "decr"
+	// StatTiming represent a stat that represents the time it takes for an event to occur
+	StatTiming Stat = "timing"
+	// StatGauge represent a stat that represents the current value of a statistic
+	StatGauge Stat = "gauge"
+	// StatHistogram represent a stat that represents the statistical distribution of a set of values
+	StatHistogram Stat = "histogram"
 )
 
 // String returns the string representation of a Stat.
@@ -22,6 +27,7 @@ func (s Stat) String() string {
 	return string(s)
 }
 
+// HistogramStatsCollector is a stats collector that collects histogram stats.
 type HistogramStatsCollector struct {
 	mu    sync.RWMutex // mutex to protect concurrent access to the stats
 	stats map[string][]int64

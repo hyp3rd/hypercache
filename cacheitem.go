@@ -1,5 +1,7 @@
 package hypercache
 
+// CacheItem represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
+
 import (
 	"reflect"
 	"sync"
@@ -9,6 +11,7 @@ import (
 
 // CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 type CacheItem struct {
+	// Key        string        // key of the item
 	Value      interface{}   // value of the item
 	Expiration time.Duration // expiration duration of the item
 	// Expiration  int64     // monotonic clock value in nanoseconds

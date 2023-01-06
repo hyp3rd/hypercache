@@ -22,7 +22,7 @@ func main() {
 func executeExample(evictionInterval time.Duration) {
 	// Create a new HyperCache with a capacity of 10
 	cache, err := hypercache.NewHyperCache(3,
-		hypercache.EvictionAlgorithmName("clock"),
+		hypercache.EvictionAlgorithmName("cawolfu"),
 		hypercache.WithEvictionInterval(evictionInterval),
 		hypercache.WithMaxEvictionCount(10))
 	if err != nil {

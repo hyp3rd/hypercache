@@ -2,9 +2,10 @@ package hypercache
 
 import "fmt"
 
+// EvictionAlgorithm is the interface that must be implemented by eviction algorithms.
 type EvictionAlgorithm interface {
 	// Evict returns the next item to be evicted from the cache.
-	Evict() (string, error)
+	Evict() (string, bool)
 	// Set adds a new item to the cache with the given key.
 	Set(key string, value interface{})
 	// Get retrieves the item with the given key from the cache.
@@ -46,5 +47,11 @@ func init() {
 	})
 	RegisterEvictionAlgorithm("clock", func(capacity int) (EvictionAlgorithm, error) {
 		return NewClockAlgorithm(capacity)
+	})
+	RegisterEvictionAlgorithm("lfu", func(capacity int) (EvictionAlgorithm, error) {
+		return NewLFUAlgorithm(capacity)
+	})
+	RegisterEvictionAlgorithm("cawolfu", func(capacity int) (EvictionAlgorithm, error) {
+		return NewCAWOLFU(capacity)
 	})
 }

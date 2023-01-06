@@ -1,12 +1,12 @@
+package hypercache
+
 // Copyright 2023 F. All rights reserved.
 // Use of this source code is governed by a Mozilla Public License 2.0
 // license that can be found in the LICENSE file.
 // HyperCache is an in-memory cache implementation in Go that supports the expiration and eviction of items.
-package hypercache
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -103,7 +103,7 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 		// Use the default eviction algorithm if none is specified
 		// cache.evictionAlgorithm, err = NewClockCache(capacity)
 		// cache.evictionAlgorithm, err = NewEvictionAlgorithm("clock", int(cache.maxEvictionCount))
-		cache.evictionAlgorithm, err = NewEvictionAlgorithm("clock", int(cache.maxEvictionCount))
+		cache.evictionAlgorithm, err = NewEvictionAlgorithm("cawolfu", int(cache.maxEvictionCount))
 	} else {
 		// Use the specified eviction algorithm
 		cache.evictionAlgorithm, err = NewEvictionAlgorithm(cache.evictionAlgorithmName, int(cache.maxEvictionCount))
@@ -184,16 +184,17 @@ func (cache *HyperCache) evictionLoop() {
 	var evictedCount int64
 
 	for {
-		if cache.itemCount() <= cache.capacity || cache.maxEvictionCount == uint(evictedCount) {
-			fmt.Println("cache eviction stopped, we're at capacity", cache.maxEvictionCount)
+		if cache.itemCount() <= cache.capacity {
 			break
 		}
-		key, err := cache.evictionAlgorithm.Evict()
 
-		if err != nil {
-			// should log error or stat it
-			fmt.Println("cache eviction stopped, error", err)
+		if cache.maxEvictionCount == uint(evictedCount) {
+			break
+		}
+		key, ok := cache.evictionAlgorithm.Evict()
 
+		if !ok {
+			// no more items to evict
 			break
 		}
 
@@ -207,15 +208,15 @@ func (cache *HyperCache) evictionLoop() {
 }
 
 // evictItem is a helper function that removes an item from the cache and returns the key of the evicted item.
-// If no item can be evicted, it returns an error.
-func (cache *HyperCache) evictItem() (string, error) {
-	key, err := cache.evictionAlgorithm.Evict()
-	if err != nil {
-		return "", err
+// If no item can be evicted, it returns a false.
+func (cache *HyperCache) evictItem() (string, bool) {
+	key, ok := cache.evictionAlgorithm.Evict()
+	if !ok {
+		return "", false
 	}
 
 	cache.items.Remove(key)
-	return key, nil
+	return key, true
 }
 
 // SetCapacity sets the capacity of the cache. If the new capacity is smaller than the current number of items in the cache,
@@ -241,6 +242,7 @@ func (cache *HyperCache) itemCount() int {
 // If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
 func (cache *HyperCache) Set(key string, value interface{}, expiration time.Duration) error {
 	item := CacheItemPool.Get().(*CacheItem)
+	// item.Key = key
 	item.Value = value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
@@ -279,7 +281,7 @@ func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
 	}
 
 	// Update the last access time and access count
-	defer item.Touch()
+	item.Touch()
 	return item.Value, true
 }
 
@@ -306,6 +308,7 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 
 	// if the item is not found, add it to the cache
 	item := CacheItemPool.Get().(*CacheItem)
+	// item.Key = key
 	item.Value = value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
@@ -321,7 +324,7 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 	cache.items.Set(key, item)
 
 	cache.evictionAlgorithm.Set(key, item.Value)
-	if cache.capacity > 0 && cache.itemCount() > cache.capacity {
+	if cache.evictionInterval == 0 && cache.capacity > 0 && cache.itemCount() > cache.capacity {
 		cache.evictItem()
 	}
 
@@ -380,6 +383,11 @@ func (cache *HyperCache) List(options ...FilteringOption) ([]*CacheItem, error) 
 		a := items[i].FieldByName(cache.sortBy)
 		b := items[j].FieldByName(cache.sortBy)
 		switch cache.sortBy {
+		case types.SortByKey.String():
+			if cache.sortAscending {
+				return a.Interface().(string) < b.Interface().(string)
+			}
+			return a.Interface().(string) > b.Interface().(string)
 		case types.SortByValue.String():
 			if cache.sortAscending {
 				return a.Interface().(string) < b.Interface().(string)
@@ -435,15 +443,15 @@ func (cache *HyperCache) Size() int {
 }
 
 // TriggerEviction sends a signal to the eviction loop to start.
-func (c *HyperCache) TriggerEviction() {
-	c.evictCh <- true
+func (cache *HyperCache) TriggerEviction() {
+	cache.evictCh <- true
 }
 
-// The Stop function stops the expiration and eviction loops and closes the stop channel.
-func (c *HyperCache) Stop() {
+// Stop function stops the expiration and eviction loops and closes the stop channel.
+func (cache *HyperCache) Stop() {
 	// Stop the expiration and eviction loops
-	c.once = sync.Once{}
-	c.stop <- true
-	close(c.stop)
-	close(c.evictCh)
+	cache.once = sync.Once{}
+	cache.stop <- true
+	close(cache.stop)
+	close(cache.evictCh)
 }
