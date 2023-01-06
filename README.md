@@ -96,7 +96,7 @@ The `Set` function takes a key, a value, and a duration as arguments. The key mu
 ```golang
 value, ok := cache.Get("key")
 if !ok {
-    // handle itme not found
+    // handle item not found
 }
 ```
 
