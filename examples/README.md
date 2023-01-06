@@ -6,6 +6,6 @@ All the code in this directory is for demonstration purposes only.
 
 1. [`Get`](./get/get.go) - An example of using the HyperCache package to fetch one or more items and retrieve a single or multiple items from cache.
 
-2. [List](./list/list.go) - A simple example of using the HyperCache package to store a list of items and retrieve the list filtering and sorting the results.
+2. [`List`](./list/list.go) - A simple example of using the HyperCache package to store a list of items and retrieve the list filtering and sorting the results.
 
-3. [eviction](./eviction/eviction.go) - An example of using the HyperCache package to store a list of items and evict items from the cache based on several different algorithms.
+3. [`Eviction`](./eviction/eviction.go) - An example of using the HyperCache package to store a list of items and evict items from the cache based on several different algorithms.
