@@ -30,9 +30,9 @@ func EvictionAlgorithmName(name string) Option {
 
 // WithStatsCollector is an option that sets the stats collector field of the `HyperCache` struct.
 // The stats collector is used to collect statistics about the cache.
-func WithStatsCollector(statsCollector StatsCollector) Option {
+func WithStatsCollector(name string) Option {
 	return func(cache *HyperCache) {
-		cache.statsCollector = statsCollector
+		cache.statsCollectorName = name
 	}
 }
 
