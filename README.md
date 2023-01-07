@@ -14,7 +14,6 @@ It also enables devs to collect stats about the cache with the default [stats co
 - [The Least Frequently Used (LFU) algorithm](./lfu.go)
 - [Cache-Aware Write-Optimized LFU (CAWOLFU)](./cawolfu.go)
 
-
 ### Features
 
 - Store items in the cache with a key and expiration duration

@@ -35,6 +35,15 @@ var (
 
 	// ErrInvalidCapacity is returned when an invalid capacity is passed to the cache.
 	ErrInvalidCapacity = errors.New("capacity cannot be negative")
+
+	// ErrAlgorithmNotFound is returned when an algorithm is not found.
+	ErrAlgorithmNotFound = errors.New("algorithm not found")
+
+	// ErrStatsCollectorNotFound is returned when an algorithm is not found.
+	ErrStatsCollectorNotFound = errors.New("stats collector not found")
+
+	// ErrParamCannotBeEmpty is returned when a parameter cannot be empty.
+	ErrParamCannotBeEmpty = errors.New("param cannot be empty")
 )
 
 // HyperCache is an in-memory cache that stores items with a key and expiration duration.
@@ -47,6 +56,7 @@ type HyperCache struct {
 	stop                  chan bool                                       // channel to signal the expiration and eviction loops to stop
 	expirationTriggerCh   chan bool                                       // channel to signal the expiration trigger loop to start
 	evictCh               chan bool                                       // channel to signal the eviction loop to start
+	statsCollectorName    string                                          // name of the stats collector to use when collecting cache statistics
 	statsCollector        StatsCollector                                  // stats collector to collect cache statistics
 	evictionAlgorithmName string                                          // name of the eviction algorithm to use when evicting items
 	evictionAlgorithm     EvictionAlgorithm                               // eviction algorithm to use when evicting items
@@ -58,20 +68,6 @@ type HyperCache struct {
 	filterFn              func(item *CacheItem) bool                      // filter function to select items that meet certain criteria
 	mutex                 sync.RWMutex                                    // mutex to protect the eviction algorithm
 	once                  sync.Once                                       // used to ensure that the expiration and eviction loops are only started once
-}
-
-// StatsCollector is an interface that defines the methods that a stats collector should implement.
-type StatsCollector interface {
-	// Incr increments the count of a statistic by the given value.
-	Incr(stat stats.Stat, value int64)
-	// Decr decrements the count of a statistic by the given value.
-	Decr(stat stats.Stat, value int64)
-	// Timing records the time it took for an event to occur.
-	Timing(stat stats.Stat, value int64)
-	// Gauge records the current value of a statistic.
-	Gauge(stat stats.Stat, value int64)
-	// Histogram records the statistical distribution of a set of values.
-	Histogram(stat stats.Stat, value int64)
 }
 
 // NewHyperCache creates a new in-memory cache with the given capacity.
@@ -87,7 +83,6 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 		capacity:           capacity,
 		stop:               make(chan bool, 1),
 		evictCh:            make(chan bool, 1),
-		statsCollector:     stats.NewHistogramStatsCollector(), // initialize the default stats collector field
 		expirationInterval: 10 * time.Minute,
 		evictionInterval:   1 * time.Minute,
 		maxEvictionCount:   uint(capacity),
@@ -107,6 +102,18 @@ func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err erro
 	} else {
 		// Use the specified eviction algorithm
 		cache.evictionAlgorithm, err = NewEvictionAlgorithm(cache.evictionAlgorithmName, int(cache.maxEvictionCount))
+	}
+	if err != nil {
+		return
+	}
+
+	// Initialize the stats collector
+	if cache.statsCollectorName == "" {
+		// Use the default stats collector if none is specified
+		cache.statsCollector, err = NewStatsCollector("default")
+	} else {
+		// Use the specified stats collector
+		cache.statsCollector, err = NewStatsCollector(cache.statsCollectorName)
 	}
 	if err != nil {
 		return
@@ -454,4 +461,16 @@ func (cache *HyperCache) Stop() {
 	cache.stop <- true
 	close(cache.stop)
 	close(cache.evictCh)
+}
+
+// GetStats returns the stats collected by the cache.
+// It returns a map where the keys are the stat names and the values are the stat values.
+func (cache *HyperCache) GetStats() stats.Stats {
+	// Lock the cache's mutex to ensure thread-safety
+	cache.mutex.RLock()
+	defer cache.mutex.RUnlock()
+
+	stats := cache.statsCollector.GetStats()
+
+	return stats
 }

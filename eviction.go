@@ -20,13 +20,17 @@ var evictionAlgorithmRegistry = make(map[string]func(capacity int) (EvictionAlgo
 // If the capacity is negative, it returns an error.
 // The algorithmName parameter is used to select the eviction algorithm from the registry.
 func NewEvictionAlgorithm(algorithmName string, capacity int) (EvictionAlgorithm, error) {
+	// Check the parameters.
+	if algorithmName == "" {
+		return nil, fmt.Errorf("%s: %s", ErrParamCannotBeEmpty, "algorithmName")
+	}
 	if capacity < 0 {
 		return nil, ErrInvalidCapacity
 	}
 
 	createFunc, ok := evictionAlgorithmRegistry[algorithmName]
 	if !ok {
-		return nil, fmt.Errorf("eviction algorithm not found: %s", algorithmName)
+		return nil, fmt.Errorf("%s: %s", ErrAlgorithmNotFound, algorithmName)
 	}
 
 	return createFunc(capacity)

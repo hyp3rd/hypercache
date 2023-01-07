@@ -1,31 +1,12 @@
 package stats
 
 import (
+	"math"
 	"sort"
 	"sync"
+
+	"github.com/hyp3rd/hypercache/types"
 )
-
-// Stat defines a type Stat as an alias for string, and five constants of type Stat.
-// The constants are used to represent different stat values that can be collected by the stats collector.
-type Stat string
-
-const (
-	// StatIncr represent a stat that should be incremented
-	StatIncr Stat = "incr"
-	// StatDecr represent a stat that should be decremented
-	StatDecr Stat = "decr"
-	// StatTiming represent a stat that represents the time it takes for an event to occur
-	StatTiming Stat = "timing"
-	// StatGauge represent a stat that represents the current value of a statistic
-	StatGauge Stat = "gauge"
-	// StatHistogram represent a stat that represents the statistical distribution of a set of values
-	StatHistogram Stat = "histogram"
-)
-
-// String returns the string representation of a Stat.
-func (s Stat) String() string {
-	return string(s)
-}
 
 // HistogramStatsCollector is a stats collector that collects histogram stats.
 type HistogramStatsCollector struct {
@@ -41,7 +22,7 @@ func NewHistogramStatsCollector() *HistogramStatsCollector {
 }
 
 // Incr increments the count of a statistic by the given value.
-func (c *HistogramStatsCollector) Incr(stat Stat, value int64) {
+func (c *HistogramStatsCollector) Incr(stat types.Stat, value int64) {
 	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -49,7 +30,7 @@ func (c *HistogramStatsCollector) Incr(stat Stat, value int64) {
 }
 
 // Decr decrements the count of a statistic by the given value.
-func (c *HistogramStatsCollector) Decr(stat Stat, value int64) {
+func (c *HistogramStatsCollector) Decr(stat types.Stat, value int64) {
 	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -57,7 +38,7 @@ func (c *HistogramStatsCollector) Decr(stat Stat, value int64) {
 }
 
 // Timing records the time it took for an event to occur.
-func (c *HistogramStatsCollector) Timing(stat Stat, value int64) {
+func (c *HistogramStatsCollector) Timing(stat types.Stat, value int64) {
 	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -65,7 +46,7 @@ func (c *HistogramStatsCollector) Timing(stat Stat, value int64) {
 }
 
 // Gauge records the current value of a statistic.
-func (c *HistogramStatsCollector) Gauge(stat Stat, value int64) {
+func (c *HistogramStatsCollector) Gauge(stat types.Stat, value int64) {
 	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -73,7 +54,7 @@ func (c *HistogramStatsCollector) Gauge(stat Stat, value int64) {
 }
 
 // Histogram records the statistical distribution of a set of values.
-func (c *HistogramStatsCollector) Histogram(stat Stat, value int64) {
+func (c *HistogramStatsCollector) Histogram(stat types.Stat, value int64) {
 	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -81,7 +62,7 @@ func (c *HistogramStatsCollector) Histogram(stat Stat, value int64) {
 }
 
 // Mean returns the mean value of a statistic.
-func (c *HistogramStatsCollector) Mean(stat Stat) float64 {
+func (c *HistogramStatsCollector) Mean(stat types.Stat) float64 {
 	values := c.stats[stat.String()]
 	if len(values) == 0 {
 		return 0
@@ -94,7 +75,7 @@ func (c *HistogramStatsCollector) Mean(stat Stat) float64 {
 }
 
 // Median returns the median value of a statistic.
-func (c *HistogramStatsCollector) Median(stat Stat) float64 {
+func (c *HistogramStatsCollector) Median(stat types.Stat) float64 {
 	values := c.stats[stat.String()]
 	if len(values) == 0 {
 		return 0
@@ -108,7 +89,7 @@ func (c *HistogramStatsCollector) Median(stat Stat) float64 {
 }
 
 // Percentile returns the pth percentile value of a statistic.
-func (c *HistogramStatsCollector) Percentile(stat Stat, p float64) float64 {
+func (c *HistogramStatsCollector) Percentile(stat types.Stat, p float64) float64 {
 	values := c.stats[stat.String()]
 	if len(values) == 0 {
 		return 0
@@ -116,4 +97,55 @@ func (c *HistogramStatsCollector) Percentile(stat Stat, p float64) float64 {
 	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
 	index := int(float64(len(values)) * p)
 	return float64(values[index])
+}
+
+// GetStats returns the stats collected by the stats collector.
+// It calculates the mean, median, min, max, count, sum, and variance for each stat.
+// It returns a map where the keys are the stat names and the values are the stat values.
+func (c *HistogramStatsCollector) GetStats() Stats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	stats := make(Stats)
+	for stat, values := range c.stats {
+		mean := c.Mean(types.Stat(stat))
+		median := c.Median(types.Stat(stat))
+		sort.Slice(values, func(i, j int) bool {
+			return values[i] < values[j]
+		})
+		min := values[0]
+		max := values[len(values)-1]
+		stats[stat] = &Stat{
+			Mean:     mean,
+			Median:   median,
+			Min:      min,
+			Max:      max,
+			Values:   values,
+			Count:    len(values),
+			Sum:      sum(values),
+			Variance: variance(values, mean),
+		}
+	}
+	return stats
+}
+
+// sum returns the sum of a set of values.
+func sum(values []int64) int64 {
+	var sum int64
+	for _, value := range values {
+		sum += value
+	}
+	return sum
+}
+
+// variance returns the variance of a set of values.
+func variance(values []int64, mean float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	var variance float64
+	for _, value := range values {
+		variance += math.Pow(float64(value)-mean, 2)
+	}
+	return variance / float64(len(values))
 }
