@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/options"
+	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/types"
 )
 
@@ -52,7 +52,7 @@ func executeExample(evictionInterval time.Duration) {
 	log.Println("capacity after adding 15 items", cache.Capacity())
 
 	log.Println("listing all items in the cache")
-	list, err := cache.List(options.WithSortBy(types.SortByValue))
+	list, err := cache.List(backend.WithSortBy[backend.InMemoryBackend](types.SortByValue))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -67,7 +67,7 @@ func executeExample(evictionInterval time.Duration) {
 		fmt.Println("sleeping to allow two evition loops", evictionInterval+3*time.Second)
 		time.Sleep(evictionInterval + evictionInterval + 3*time.Second)
 		log.Println("listing all items in the cache the eviction is triggered")
-		list, err = cache.List(options.WithSortBy(types.SortByValue))
+		list, err = cache.List(backend.WithSortBy[backend.InMemoryBackend](types.SortByValue))
 		if err != nil {
 			fmt.Println(err)
 			return
