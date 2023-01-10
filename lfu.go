@@ -4,6 +4,8 @@ package hypercache
 
 import (
 	"sync"
+
+	"github.com/hyp3rd/hypercache/errors"
 )
 
 // LFUAlgorithm is an eviction algorithm that uses the Least Frequently Used (LFU) policy to select items for eviction.
@@ -40,7 +42,7 @@ type LinkedList struct {
 // NewLFUAlgorithm returns a new LFUAlgorithm with the given capacity.
 func NewLFUAlgorithm(capacity int) (*LFUAlgorithm, error) {
 	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+		return nil, errors.ErrInvalidCapacity
 	}
 
 	return &LFUAlgorithm{

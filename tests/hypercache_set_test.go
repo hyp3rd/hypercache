@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/errors"
 	"github.com/longbridgeapp/assert"
 )
 
@@ -47,7 +48,7 @@ func TestHyperCache_Set(t *testing.T) {
 			value:         nil,
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   hypercache.ErrNilValue,
+			expectedErr:   errors.ErrNilValue,
 		},
 		{
 			name:          "overwrite existing key",

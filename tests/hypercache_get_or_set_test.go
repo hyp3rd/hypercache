@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/errors"
 	"github.com/longbridgeapp/assert"
 )
 
@@ -47,7 +48,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 			value:         nil,
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   hypercache.ErrNilValue,
+			expectedErr:   errors.ErrNilValue,
 		},
 		{
 			name:          "get or set with key that has expired",
@@ -55,7 +56,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 			value:         "value5",
 			expiry:        time.Millisecond,
 			expectedValue: nil,
-			expectedErr:   hypercache.ErrKeyExpired,
+			expectedErr:   errors.ErrKeyExpired,
 		},
 		{
 			name:          "get or set with key that already exists",
@@ -75,7 +76,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 				err error
 			)
 
-			shouldExpire := test.expectedErr == hypercache.ErrKeyExpired
+			shouldExpire := test.expectedErr == errors.ErrKeyExpired
 
 			val, err = cache.GetOrSet(test.key, test.value, test.expiry)
 			if !shouldExpire {

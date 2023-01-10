@@ -1,22 +1,24 @@
-package hypercache
+package cache
 
 // CacheItem represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 
 import (
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hyp3rd/hypercache/errors"
 )
 
 // CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 type CacheItem struct {
-	// Key        string        // key of the item
-	Value      interface{}   // value of the item
-	Expiration time.Duration // expiration duration of the item
-	// Expiration  int64     // monotonic clock value in nanoseconds
-	LastAccess  time.Time // last access time of the item
-	AccessCount uint      // number of times the item has been accessed
+	Key         string        // key of the item
+	Value       interface{}   // value of the item
+	Expiration  time.Duration // expiration duration of the item
+	LastAccess  time.Time     // last access time of the item
+	AccessCount uint          // number of times the item has been accessed
 }
 
 // CacheItemPool is a pool of CacheItem values.
@@ -45,15 +47,20 @@ func (item *CacheItem) FieldByName(name string) reflect.Value {
 
 // Valid returns an error if the item is invalid, nil otherwise.
 func (item *CacheItem) Valid() error {
+	// Check for empty key
+	if item.Key == "" || strings.TrimSpace(item.Key) == "" {
+		return errors.ErrInvalidKey
+	}
+
 	// Check for nil value
 	if item.Value == nil {
-		return ErrNilValue
+		return errors.ErrNilValue
 	}
 
 	// Check for negative expiration
 	if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
-		// atomic.StoreInt64((*int64)(&item.Expiration), 0)
-		return ErrInvalidExpiration
+		atomic.StoreInt64((*int64)(&item.Expiration), 0)
+		return errors.ErrInvalidExpiration
 	}
 	return nil
 }

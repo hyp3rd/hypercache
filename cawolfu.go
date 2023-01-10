@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/hyp3rd/hypercache/datastructure"
+	"github.com/hyp3rd/hypercache/errors"
 )
 
 // CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
@@ -41,7 +42,7 @@ type CAWOLFULinkedList struct {
 // NewCAWOLFU returns a new CAWOLFU with the given capacity.
 func NewCAWOLFU(capacity int) (*CAWOLFU, error) {
 	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+		return nil, errors.ErrInvalidCapacity
 	}
 
 	return &CAWOLFU{

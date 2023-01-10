@@ -12,6 +12,8 @@ package hypercache
 
 import (
 	"sync"
+
+	"github.com/hyp3rd/hypercache/errors"
 )
 
 // LRUCacheItem represents an item in the LRU cache
@@ -41,7 +43,7 @@ type LRU struct {
 // NewLRU creates a new LRU cache with the given capacity
 func NewLRU(capacity int) (*LRU, error) {
 	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+		return nil, errors.ErrInvalidCapacity
 	}
 	return &LRU{
 		capacity: capacity,

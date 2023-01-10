@@ -1,6 +1,10 @@
 package hypercache
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/hyp3rd/hypercache/errors"
+)
 
 // EvictionAlgorithm is the interface that must be implemented by eviction algorithms.
 type EvictionAlgorithm interface {
@@ -22,15 +26,15 @@ var evictionAlgorithmRegistry = make(map[string]func(capacity int) (EvictionAlgo
 func NewEvictionAlgorithm(algorithmName string, capacity int) (EvictionAlgorithm, error) {
 	// Check the parameters.
 	if algorithmName == "" {
-		return nil, fmt.Errorf("%s: %s", ErrParamCannotBeEmpty, "algorithmName")
+		return nil, fmt.Errorf("%s: %s", errors.ErrParamCannotBeEmpty, "algorithmName")
 	}
 	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+		return nil, errors.ErrInvalidCapacity
 	}
 
 	createFunc, ok := evictionAlgorithmRegistry[algorithmName]
 	if !ok {
-		return nil, fmt.Errorf("%s: %s", ErrAlgorithmNotFound, algorithmName)
+		return nil, fmt.Errorf("%s: %s", errors.ErrAlgorithmNotFound, algorithmName)
 	}
 
 	return createFunc(capacity)

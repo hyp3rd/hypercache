@@ -9,11 +9,14 @@ package hypercache
 import (
 	"sync"
 	"time"
+
+	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/errors"
 )
 
 // ClockAlgorithm is an in-memory cache with the Clock algorithm.
 type ClockAlgorithm struct {
-	items    map[string]*CacheItem
+	items    map[string]*cache.CacheItem
 	mutex    sync.RWMutex
 	capacity int
 }
@@ -21,11 +24,11 @@ type ClockAlgorithm struct {
 // NewClockAlgorithm creates a new in-memory cache with the given capacity and the Clock algorithm.
 func NewClockAlgorithm(capacity int) (*ClockAlgorithm, error) {
 	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+		return nil, errors.ErrInvalidCapacity
 	}
 
 	return &ClockAlgorithm{
-		items:    make(map[string]*CacheItem, capacity),
+		items:    make(map[string]*cache.CacheItem, capacity),
 		capacity: capacity,
 	}, nil
 }
@@ -55,7 +58,7 @@ func (c *ClockAlgorithm) Set(key string, value interface{}) {
 	// c.mutex.RLock()
 	// defer c.mutex.RUnlock()
 
-	item := CacheItemPool.Get().(*CacheItem)
+	item := cache.CacheItemPool.Get().(*cache.CacheItem)
 	item.Value = value
 	item.LastAccess = time.Now()
 	item.AccessCount = 0
@@ -86,5 +89,5 @@ func (c *ClockAlgorithm) Delete(key string) {
 		return
 	}
 	delete(c.items, key)
-	CacheItemPool.Put(item)
+	cache.CacheItemPool.Put(item)
 }

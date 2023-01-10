@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/errors"
 	"github.com/longbridgeapp/assert"
 )
 
@@ -58,7 +59,7 @@ func TestHyperCache_Get(t *testing.T) {
 			value:         "value5",
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   hypercache.ErrKeyNotFound,
+			expectedErr:   errors.ErrKeyNotFound,
 			shouldSet:     false,
 		},
 	}
