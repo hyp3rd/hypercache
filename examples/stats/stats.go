@@ -13,8 +13,8 @@ import (
 func main() {
 	// Create a new HyperCache with a capacity of 100
 	hyperCache, err := hypercache.NewHyperCache(200,
-		hypercache.WithExpirationInterval(3*time.Second),
-		hypercache.WithEvictionInterval(3*time.Second))
+		hypercache.WithExpirationInterval[backend.InMemoryBackend](3*time.Second),
+		hypercache.WithEvictionInterval[backend.InMemoryBackend](3*time.Second))
 
 	if err != nil {
 		fmt.Println(err)

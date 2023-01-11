@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/backend"
 )
 
 func BenchmarkHyperCache_Get(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
-	cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval(30*time.Second))
+	cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval[backend.InMemoryBackend](30*time.Second))
 
 	// Store a value in the cache with a key and expiration duration
 	cache.Set("key", "value", time.Hour)
@@ -23,7 +24,7 @@ func BenchmarkHyperCache_Get(b *testing.B) {
 
 func BenchmarkHyperCache_Get_ProactiveEviction(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
-	cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval(0))
+	cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval[backend.InMemoryBackend](0))
 
 	// Store a value in the cache with a key and expiration duration
 	cache.Set("key", "value", time.Hour)

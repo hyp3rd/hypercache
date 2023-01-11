@@ -23,9 +23,9 @@ func main() {
 func executeExample(evictionInterval time.Duration) {
 	// Create a new HyperCache with a capacity of 10
 	cache, err := hypercache.NewHyperCache(10,
-		hypercache.EvictionAlgorithmName("cawolfu"),
-		hypercache.WithEvictionInterval(evictionInterval),
-		hypercache.WithMaxEvictionCount(10))
+		hypercache.EvictionAlgorithmName[backend.InMemoryBackend]("cawolfu"),
+		hypercache.WithEvictionInterval[backend.InMemoryBackend](evictionInterval),
+		hypercache.WithMaxEvictionCount[backend.InMemoryBackend](10))
 	if err != nil {
 		fmt.Println(err)
 		return

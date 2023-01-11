@@ -11,7 +11,7 @@ var (
 )
 
 type IBackendConstrain interface {
-	InMemoryBackend
+	InMemoryBackend | RedisBackend
 }
 
 type IInMemoryBackend[T IBackendConstrain] interface {
@@ -19,6 +19,19 @@ type IInMemoryBackend[T IBackendConstrain] interface {
 	IBackend[T]
 	// List the items in the cache that meet the specified criteria.
 	List(options ...FilterOption[InMemoryBackend]) ([]*cache.CacheItem, error)
+
+	// Clear removes all items from the cache.
+	Clear()
+}
+
+type IRedisBackend[T IBackendConstrain] interface {
+	// IBackend[T] is the interface that must be implemented by cache backends.
+	IBackend[T]
+	// List the items in the cache that meet the specified criteria.
+	List(options ...FilterOption[RedisBackend]) ([]*cache.CacheItem, error)
+
+	// Clear removes all items from the cache.
+	Clear() error
 }
 
 // Backend is the interface that must be implemented by cache backends.
@@ -30,12 +43,6 @@ type IBackend[T IBackendConstrain] interface {
 	// Set adds a new item to the cache.
 	Set(item *cache.CacheItem) error
 
-	// Remove deletes the item with the given key from the cache.
-	Remove(key string)
-
-	// Clear removes all items from the cache.
-	Clear()
-
 	// Capacity returns the maximum number of items that can be stored in the cache.
 	Capacity() int
 
@@ -44,12 +51,15 @@ type IBackend[T IBackendConstrain] interface {
 
 	// Size returns the number of items currently stored in the cache.
 	Size() int
+
+	// Remove deletes the item with the given key from the cache.
+	Remove(keys ...string) error
 }
 
 func NewBackend[T IBackendConstrain](backendType string, capacity int) (IBackend[T], error) {
 	switch backendType {
 	case "memory":
-		return NewInMemoryBackend[T](capacity)
+		return NewInMemoryBackend(capacity)
 	// case "redis":
 	// 	return NewRedisBackend(capacity, options...)
 	// case "memcache":

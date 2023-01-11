@@ -3,6 +3,8 @@ package cache
 // CacheItem represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 
 import (
+	"bytes"
+	"encoding/gob"
 	"reflect"
 	"strings"
 	"sync"
@@ -75,4 +77,22 @@ func (item *CacheItem) Touch() {
 func (item *CacheItem) Expired() bool {
 	// If the expiration duration is 0, the item never expires
 	return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+}
+
+// MarshalBinary implements the encoding.BinaryMarshaler interface.
+func (item *CacheItem) MarshalBinary() (data []byte, err error) {
+	buf := bytes.NewBuffer([]byte{})
+	enc := gob.NewEncoder(buf)
+	err = enc.Encode(item)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
+func (item *CacheItem) UnmarshalBinary(data []byte) error {
+	buf := bytes.NewBuffer(data)
+	dec := gob.NewDecoder(buf)
+	return dec.Decode(item)
 }

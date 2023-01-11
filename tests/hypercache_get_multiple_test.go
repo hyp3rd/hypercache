@@ -56,7 +56,7 @@ func TestGetMultiple(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			cache, err := hypercache.NewHyperCache(10, hypercache.WithExpirationInterval(time.Millisecond))
+			cache, err := hypercache.NewHyperCache(10, hypercache.WithExpirationInterval[backend.InMemoryBackend](time.Millisecond))
 			assert.Nil(t, err)
 			test.setup(cache)
 
@@ -67,7 +67,7 @@ func TestGetMultiple(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			cache, err := hypercache.NewHyperCache(10, hypercache.WithExpirationInterval(time.Millisecond))
+			cache, err := hypercache.NewHyperCache(10, hypercache.WithExpirationInterval[backend.InMemoryBackend](time.Millisecond))
 			assert.Nil(t, err)
 			test.setup(cache)
 

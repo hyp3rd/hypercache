@@ -13,6 +13,9 @@ var (
 	// ErrNilValue is returned when a nil value is attempted to be set in the cache.
 	ErrNilValue = errors.New("nil value")
 
+	// ErrNilClient is returned when a nil client is passed to the cache.
+	ErrNilClient = errors.New("nil client")
+
 	// ErrKeyExpired is returned when a key is found in the cache but has expired.
 	ErrKeyExpired = errors.New("key expired")
 

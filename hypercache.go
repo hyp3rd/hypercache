@@ -76,8 +76,7 @@ func NewHyperCache[T backend.IBackendConstrain](capacity int, options ...Option[
 	// Initialize the eviction algorithm
 	if hyperCache.evictionAlgorithmName == "" {
 		// Use the default eviction algorithm if none is specified
-		// hyperCache.evictionAlgorithm, err = NewClockCache(capacity)
-		hyperCache.evictionAlgorithm, err = NewEvictionAlgorithm("cawolfu", int(hyperCache.maxEvictionCount))
+		hyperCache.evictionAlgorithm, err = NewCAWOLFU(int(hyperCache.maxEvictionCount))
 	} else {
 		// Use the specified eviction algorithm
 		hyperCache.evictionAlgorithm, err = NewEvictionAlgorithm(hyperCache.evictionAlgorithmName, int(hyperCache.maxEvictionCount))
@@ -89,13 +88,14 @@ func NewHyperCache[T backend.IBackendConstrain](capacity int, options ...Option[
 	// Initialize the stats collector
 	if hyperCache.statsCollectorName == "" {
 		// Use the default stats collector if none is specified
-		hyperCache.statsCollector, err = NewStatsCollector("default")
+		// hyperCache.statsCollector, err = NewStatsCollector("default")
+		hyperCache.statsCollector = stats.NewHistogramStatsCollector()
 	} else {
 		// Use the specified stats collector
 		hyperCache.statsCollector, err = NewStatsCollector(hyperCache.statsCollectorName)
-	}
-	if err != nil {
-		return
+		if err != nil {
+			return
+		}
 	}
 
 	// Initialize the expiration trigger channel with the buffer size set to half the capacity
@@ -160,6 +160,17 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 	if cb, ok := hyperCache.backend.(*backend.InMemoryBackend); ok {
 		items, err = cb.List(
 			backend.WithSortBy[backend.InMemoryBackend](types.SortByExpiration),
+			backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.CacheItem) bool {
+				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+			}),
+		)
+
+	} else if cb, ok := hyperCache.backend.(*backend.RedisBackend); ok {
+		items, err = cb.List(
+			backend.WithSortBy[backend.RedisBackend](types.SortByExpiration),
+			backend.WithFilterFunc[backend.RedisBackend](func(item *cache.CacheItem) bool {
+				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+			}),
 		)
 	}
 
@@ -370,26 +381,26 @@ func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]
 // It takes in a variadic number of any type as filters, it then checks the backend type, and calls the corresponding
 // implementation of the List function for that backend, with the filters passed in as arguments
 func (hyperCache *HyperCache[T]) List(filters ...any) ([]*cache.CacheItem, error) {
-	var listFunc ListFunc
+	var listInstance listFunc
 
 	// checking the backend type
 	if hyperCache.cacheBackendChecker.IsInMemoryBackend() {
 		// if the backend is an InMemoryBackend, we set the listFunc to the ListInMemory function
-		listFunc = ListInMemory(hyperCache.backend.(*backend.InMemoryBackend))
+		listInstance = listInMemory(hyperCache.backend.(*backend.InMemoryBackend))
 	}
 
 	// calling the corresponding implementation of the list function
-	return listFunc(filters...)
+	return listInstance(filters...)
 }
 
-// ListFunc is a type that defines a function that takes in a variable number of any type as arguments, and returns
+// listFunc is a type that defines a function that takes in a variable number of any type as arguments, and returns
 // a slice of CacheItem pointers, and an error
-type ListFunc func(options ...any) ([]*cache.CacheItem, error)
+type listFunc func(options ...any) ([]*cache.CacheItem, error)
 
-// ListInMemory is a function that takes in an InMemoryBackend, and returns a ListFunc
+// listInMemory is a function that takes in an InMemoryBackend, and returns a ListFunc
 // it takes any type as filters, and converts them to the specific FilterOption type for the InMemoryBackend,
 // and calls the InMemoryBackend's List function with these filters.
-func ListInMemory(cacheBackend *backend.InMemoryBackend) ListFunc {
+func listInMemory(cacheBackend *backend.InMemoryBackend) listFunc {
 	return func(options ...any) ([]*cache.CacheItem, error) {
 		// here we are converting the filters of any type to the specific FilterOption type for the InMemoryBackend
 		filterOptions := make([]backend.FilterOption[backend.InMemoryBackend], len(options))
@@ -402,9 +413,9 @@ func ListInMemory(cacheBackend *backend.InMemoryBackend) ListFunc {
 
 // Remove removes items with the given key from the cache. If an item is not found, it does nothing.
 func (hyperCache *HyperCache[T]) Remove(keys ...string) {
+	hyperCache.backend.Remove(keys...)
 	for _, key := range keys {
 		hyperCache.evictionAlgorithm.Delete(key)
-		hyperCache.backend.Remove(key)
 	}
 }
 
@@ -420,11 +431,20 @@ func (hyperCache *HyperCache[T]) Clear() error {
 		items, err = cb.List(
 			backend.WithSortBy[backend.InMemoryBackend](types.SortByExpiration),
 		)
+		cb.Clear()
+	} else if cb, ok := hyperCache.backend.(*backend.RedisBackend); ok {
+		items, err = cb.List(
+			backend.WithSortBy[backend.RedisBackend](types.SortByExpiration),
+		)
+		if err != nil {
+			return err
+		}
+
+		err = cb.Clear()
 	}
 
 	for _, item := range items {
 		hyperCache.evictionAlgorithm.Delete(item.Key)
-		hyperCache.backend.Remove(item.Key)
 	}
 	return err
 }

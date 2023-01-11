@@ -84,20 +84,10 @@ func (cacheBackend *InMemoryBackend) Set(item *cache.CacheItem) error {
 	return nil
 }
 
-//	func Filter[T any](iter Iterator[T], pred func(T) bool) Iterator[T] {
-//		return &filterIterator[T]{
-//			iter, pred,
-//		}
-//	}
-
 // List the items in the cache that meet the specified criteria.
 func (cacheBackend *InMemoryBackend) List(options ...FilterOption[InMemoryBackend]) ([]*cache.CacheItem, error) {
 	// Apply the filter options
-
-	// ApplyBackendOptions[any](backend *T, options ...FilterOption[T])
-	for _, option := range options {
-		ApplyBackendOptions(cacheBackend, option) // option.(FilterOption[InMemoryBackend]	))
-	}
+	ApplyBackendOptions(cacheBackend, options...)
 
 	items := make([]*cache.CacheItem, 0)
 	for item := range cacheBackend.items.IterBuffered() {
@@ -148,8 +138,12 @@ func (cacheBackend *InMemoryBackend) List(options ...FilterOption[InMemoryBacken
 }
 
 // Remove removes items with the given key from the cacheBackend. If an item is not found, it does nothing.
-func (cacheBackend *InMemoryBackend) Remove(key string) {
-	cacheBackend.items.Remove(key)
+func (cacheBackend *InMemoryBackend) Remove(keys ...string) (err error) {
+	//TODO: determine if handling the error or not
+	for _, key := range keys {
+		cacheBackend.items.Remove(key)
+	}
+	return
 }
 
 // Clear removes all items from the cacheBackend.

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/longbridgeapp/assert"
 )
@@ -67,7 +68,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 			expectedErr:   nil,
 		},
 	}
-	cache, err := hypercache.NewHyperCache(10)
+	cache, err := hypercache.NewHyperCache[backend.InMemoryBackend](10)
 	assert.Nil(t, err)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
