@@ -16,8 +16,9 @@ import (
 
 // CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 type CacheItem struct {
-	Key         string        // key of the item
-	Value       interface{}   // value of the item
+	Key   string // key of the item
+	Value any    // value of the item
+	// Value       []byte        // value of the item
 	Expiration  time.Duration // expiration duration of the item
 	LastAccess  time.Time     // last access time of the item
 	AccessCount uint          // number of times the item has been accessed
@@ -25,7 +26,7 @@ type CacheItem struct {
 
 // CacheItemPool is a pool of CacheItem values.
 var CacheItemPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &CacheItem{}
 	},
 }

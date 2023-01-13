@@ -54,7 +54,7 @@ func (c *ClockAlgorithm) Evict() (string, bool) {
 }
 
 // Set sets the item with the given key and value in the cache.
-func (c *ClockAlgorithm) Set(key string, value interface{}) {
+func (c *ClockAlgorithm) Set(key string, value any) {
 	// c.mutex.RLock()
 	// defer c.mutex.RUnlock()
 
@@ -66,7 +66,7 @@ func (c *ClockAlgorithm) Set(key string, value interface{}) {
 }
 
 // Get retrieves the item with the given key from the cache.
-func (c *ClockAlgorithm) Get(key string) (interface{}, bool) {
+func (c *ClockAlgorithm) Get(key string) (any, bool) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 

@@ -3,6 +3,9 @@ package errors
 import "errors"
 
 var (
+	// ErrInvalidBackendType is returned when an invalid backend type is passed to the cache.
+	ErrInvalidBackendType = errors.New("invalid backend type")
+
 	// ErrInvalidKey is returned when an invalid key is used to access an item in the cache.
 	// An invalid key is a key that is either empty or consists only of whitespace characters.
 	ErrInvalidKey = errors.New("invalid key")

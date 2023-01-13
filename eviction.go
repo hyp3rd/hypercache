@@ -11,9 +11,9 @@ type EvictionAlgorithm interface {
 	// Evict returns the next item to be evicted from the cache.
 	Evict() (string, bool)
 	// Set adds a new item to the cache with the given key.
-	Set(key string, value interface{})
+	Set(key string, value any)
 	// Get retrieves the item with the given key from the cache.
-	Get(key string) (interface{}, bool)
+	Get(key string) (any, bool)
 	// Delete removes the item with the given key from the cache.
 	Delete(key string)
 }

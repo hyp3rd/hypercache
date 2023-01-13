@@ -44,7 +44,7 @@ func NewARC(capacity int) (*ARC, error) {
 
 // Get retrieves the item with the given key from the cache.
 // If the key is not found in the cache, it returns nil.
-func (arc *ARC) Get(key string) (interface{}, bool) {
+func (arc *ARC) Get(key string) (any, bool) {
 	arc.mutex.RLock()
 	defer arc.mutex.RUnlock()
 
@@ -93,7 +93,7 @@ func (arc *ARC) demote(key string) {
 }
 
 // Set adds a new item to the cache with the given key.
-func (arc *ARC) Set(key string, value interface{}) {
+func (arc *ARC) Set(key string, value any) {
 	arc.mutex.RLock()
 	defer arc.mutex.RUnlock()
 	// Check if key is already in cache

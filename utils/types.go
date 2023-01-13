@@ -2,9 +2,7 @@ package utils
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/hyp3rd/hypercache/backend"
 )
@@ -50,56 +48,3 @@ func (c *CacheBackendChecker[T]) IsRedisBackend() bool {
 //     obj, ok := c.backend.(*backend.RedisBackend)
 //     return *obj, ok
 // }
-
-type TypeRegistry interface {
-	CacheObject(val interface{})
-	GetCachedObject(t reflect.Type) (interface{}, reflect.Type)
-	IsCached(t reflect.Type) bool
-	RemoveObject(t reflect.Type)
-	ClearRegistry()
-}
-
-type typeRegistry struct {
-	registry sync.Map
-}
-
-var instance *typeRegistry
-var once sync.Once
-
-var GetTypeRegistry = func() TypeRegistry {
-	return NewTypeRegistry()
-}
-
-func NewTypeRegistry() TypeRegistry {
-	once.Do(func() {
-		instance = &typeRegistry{
-			registry: sync.Map{},
-		}
-	})
-	return instance
-}
-
-func (tr *typeRegistry) CacheObject(val interface{}) {
-	t := reflect.TypeOf(val)
-	tr.registry.Store(t, val)
-}
-
-func (tr *typeRegistry) GetCachedObject(t reflect.Type) (interface{}, reflect.Type) {
-	if val, ok := tr.registry.Load(t); ok {
-		return val, t
-	}
-	return nil, t
-}
-
-func (tr *typeRegistry) IsCached(t reflect.Type) bool {
-	_, ok := tr.registry.Load(t)
-	return ok
-}
-
-func (tr *typeRegistry) RemoveObject(t reflect.Type) {
-	tr.registry.Delete(t)
-}
-
-func (tr *typeRegistry) ClearRegistry() {
-	tr.registry = sync.Map{}
-}

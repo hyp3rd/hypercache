@@ -11,30 +11,28 @@ import (
 )
 
 type RedisBackend struct {
-	client   *redis.Client // redis client to interact with the redis server
-	capacity int           // capacity of the cache, limits the number of items that can be stored in the cache
-	// sortBy is the field to sort the items by.
-	// The field can be any of the fields in the `CacheItem` struct.
-	sortBy string
-	// sortAscending is a boolean indicating whether the items should be sorted in ascending order.
-	// If set to false, the items will be sorted in descending order.
-	sortAscending bool
-	// filterFunc is a predicate that takes a `CacheItem` as an argument and returns a boolean indicating whether the item should be included in the cache.
-	filterFunc func(item *cache.CacheItem) bool // filters applied when listing the items in the cache
+	client      *redis.Client // redis client to interact with the redis server
+	capacity    int           // capacity of the cache, limits the number of items that can be stored in the cache
+	SortFilters               // SortFilters holds the filters applied when listing the items in the cache
 }
 
-func NewRedisBackend[T RedisBackend](client *redis.Client, capacity int) (backend IRedisBackend[T], err error) {
-	if client == nil {
+// func NewRedisBackend[T RedisBackend](client *redis.Client, capacity int) (backend IRedisBackend[T], err error) {
+func NewRedisBackend[T RedisBackend](redisOptions ...BackendOption[RedisBackend]) (backend IRedisBackend[T], err error) {
+	rb := &RedisBackend{}
+	// Apply the backend options
+	ApplyBackendOptions(rb, redisOptions...)
+
+	// Check if the client is nil
+	if rb.client == nil {
 		return nil, errors.ErrNilClient
 	}
-	if capacity < 0 {
+	// Check if the capacity is valid
+	if rb.capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
 	}
 
-	return &RedisBackend{
-		client:   client,
-		capacity: capacity,
-	}, nil
+	// return the new backend
+	return rb, nil
 }
 
 // Capacity returns the maximum number of items that can be stored in the cache.
@@ -90,7 +88,7 @@ func (cacheBackend *RedisBackend) Set(item *cache.CacheItem) error {
 
 func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*cache.CacheItem, error) {
 	// Apply the filter options
-	ApplyBackendOptions(cacheBackend, options...)
+	ApplyFilterOptions(cacheBackend, options...)
 
 	// Get all keys
 	keys, _ := cacheBackend.client.Keys("*").Result()
@@ -102,43 +100,43 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 		if !ok {
 			continue
 		}
-		if cacheBackend.filterFunc != nil && !cacheBackend.filterFunc(item) {
+		if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
 			continue
 		}
 		items = append(items, item)
 	}
 
 	// Sort items
-	if cacheBackend.sortBy == "" {
+	if cacheBackend.SortBy == "" {
 		return items, nil
 	}
 
 	sort.Slice(items, func(i, j int) bool {
-		a := items[i].FieldByName(cacheBackend.sortBy)
-		b := items[j].FieldByName(cacheBackend.sortBy)
-		switch cacheBackend.sortBy {
+		a := items[i].FieldByName(cacheBackend.SortBy)
+		b := items[j].FieldByName(cacheBackend.SortBy)
+		switch cacheBackend.SortBy {
 		case types.SortByKey.String():
-			if cacheBackend.sortAscending {
+			if cacheBackend.SortAscending {
 				return a.Interface().(string) < b.Interface().(string)
 			}
 			return a.Interface().(string) > b.Interface().(string)
 		case types.SortByValue.String():
-			if cacheBackend.sortAscending {
+			if cacheBackend.SortAscending {
 				return a.Interface().(string) < b.Interface().(string)
 			}
 			return a.Interface().(string) > b.Interface().(string)
 		case types.SortByLastAccess.String():
-			if cacheBackend.sortAscending {
+			if cacheBackend.SortAscending {
 				return a.Interface().(time.Time).Before(b.Interface().(time.Time))
 			}
 			return a.Interface().(time.Time).After(b.Interface().(time.Time))
 		case types.SortByAccessCount.String():
-			if cacheBackend.sortAscending {
+			if cacheBackend.SortAscending {
 				return a.Interface().(uint) < b.Interface().(uint)
 			}
 			return a.Interface().(uint) > b.Interface().(uint)
 		case types.SortByExpiration.String():
-			if cacheBackend.sortAscending {
+			if cacheBackend.SortAscending {
 				return a.Interface().(time.Duration) < b.Interface().(time.Duration)
 			}
 			return a.Interface().(time.Duration) > b.Interface().(time.Duration)

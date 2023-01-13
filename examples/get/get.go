@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/backend"
 )
 
 func main() {
 	// Create a new HyperCache with a capacity of 10
-	cache, err := hypercache.NewHyperCache[backend.InMemoryBackend](10)
+	cache, err := hypercache.NewHyperCacheInMemoryWithDefaults(10)
+	defer cache.Stop()
 	if err != nil {
 		fmt.Println(err)
 		return

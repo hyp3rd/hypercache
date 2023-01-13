@@ -12,10 +12,19 @@ import (
 
 func main() {
 	// Create a new HyperCache with a capacity of 100
-	hyperCache, err := hypercache.NewHyperCache(200,
-		hypercache.WithExpirationInterval[backend.InMemoryBackend](3*time.Second),
-		hypercache.WithEvictionInterval[backend.InMemoryBackend](3*time.Second))
+	config := hypercache.NewConfig[backend.InMemoryBackend]()
+	config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+		hypercache.WithEvictionInterval[backend.InMemoryBackend](3 * time.Second),
+		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("lru"),
+		hypercache.WithExpirationInterval[backend.InMemoryBackend](3 * time.Second),
+	}
 
+	config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+		backend.WithCapacity(100),
+	}
+
+	// Create a new HyperCache with a capacity of 10
+	hyperCache, err := hypercache.NewHyperCache(config)
 	if err != nil {
 		fmt.Println(err)
 		return

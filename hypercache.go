@@ -22,55 +22,78 @@ import (
 // and a capacity field that limits the number of items that can be stored in the cache.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
 type HyperCache[T backend.IBackendConstrain] struct {
-	backend               backend.IBackend[T]              // backend to use to store the items in the cache
-	cacheBackendChecker   utils.CacheBackendChecker[T]     // cache backend type checker
-	stop                  chan bool                        // channel to signal the expiration and eviction loops to stop
-	expirationTriggerCh   chan bool                        // channel to signal the expiration trigger loop to start
-	evictCh               chan bool                        // channel to signal the eviction loop to start
-	statsCollectorName    string                           // name of the stats collector to use when collecting cache statistics
-	statsCollector        StatsCollector                   // stats collector to collect cache statistics
-	evictionAlgorithmName string                           // name of the eviction algorithm to use when evicting items
-	evictionAlgorithm     EvictionAlgorithm                // eviction algorithm to use when evicting items
-	expirationInterval    time.Duration                    // interval at which the expiration loop should run
-	evictionInterval      time.Duration                    // interval at which the eviction loop should run
-	maxEvictionCount      uint                             // maximum number of items that can be evicted in a single eviction loop iteration
-	SortBy                string                           // field to sort the items by
-	SortAscending         bool                             // whether to sort the items in ascending order
-	FilterFn              func(item *cache.CacheItem) bool // filter function to select items that meet certain criteria
-	mutex                 sync.RWMutex                     // mutex to protect the eviction algorithm
-	once                  sync.Once                        // used to ensure that the expiration and eviction loops are only started once
+	backend               backend.IBackend[T]          // backend to use to store the items in the cache
+	backendType           *T                           // backend type
+	cacheBackendChecker   utils.CacheBackendChecker[T] // cache backend type checker
+	stop                  chan bool                    // channel to signal the expiration and eviction loops to stop
+	expirationTriggerCh   chan bool                    // channel to signal the expiration trigger loop to start
+	evictCh               chan bool                    // channel to signal the eviction loop to start
+	statsCollectorName    string                       // name of the stats collector to use when collecting cache statistics
+	statsCollector        StatsCollector               // stats collector to collect cache statistics
+	evictionAlgorithmName string                       // name of the eviction algorithm to use when evicting items
+	evictionAlgorithm     EvictionAlgorithm            // eviction algorithm to use when evicting items
+	expirationInterval    time.Duration                // interval at which the expiration loop should run
+	evictionInterval      time.Duration                // interval at which the eviction loop should run
+	maxEvictionCount      uint                         // maximum number of items that can be evicted in a single eviction loop iteration
+	mutex                 sync.RWMutex                 // mutex to protect the eviction algorithm
+	once                  sync.Once                    // used to ensure that the expiration and eviction loops are only started once
 }
 
-// NewHyperCache creates a new in-memory cache with the given capacity.
-// If the capacity is negative, it returns an error.
-// The function initializes the items map, and starts the expiration and eviction loops in separate goroutines.
-func NewHyperCache[T backend.IBackendConstrain](capacity int, options ...Option[T]) (hyperCache *HyperCache[T], err error) {
+func NewHyperCacheInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMemoryBackend], err error) {
+	config := NewConfig[backend.InMemoryBackend]()
+	config.HyperCacheOptions = []HyperCacheOption[backend.InMemoryBackend]{
+		WithEvictionInterval[backend.InMemoryBackend](10 * time.Minute),
+		WithEvictionAlgorithm[backend.InMemoryBackend]("lru"),
+		WithExpirationInterval[backend.InMemoryBackend](30 * time.Minute),
+	}
 
-	// Initialize the backend
-	cacheBackend, err := backend.NewBackend[T]("memory", capacity)
+	config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+		backend.WithCapacity(capacity),
+	}
+	hyperCache, err = NewHyperCache(config)
 	if err != nil {
 		return nil, err
 	}
+	return hyperCache, nil
+}
 
-	// Initialize the cache backend type checker
-	checker := utils.CacheBackendChecker[T]{
-		Backend: cacheBackend,
-	}
+// NewHyperCache initializes a new HyperCache with the given config.
+func NewHyperCache[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache[T], err error) {
 
 	// Initialize the cache
 	hyperCache = &HyperCache[T]{
-		backend:             cacheBackend,
-		cacheBackendChecker: checker,
-		stop:                make(chan bool, 1),
-		evictCh:             make(chan bool, 1),
-		expirationInterval:  10 * time.Minute,
-		evictionInterval:    1 * time.Minute,
-		maxEvictionCount:    uint(capacity),
+		stop: make(chan bool, 2),
+		// evictCh:            make(chan bool, 1),
+		expirationInterval: 10 * time.Minute,
+		evictionInterval:   1 * time.Minute,
+	}
+
+	// Initialize the backend
+	t, _ := utils.TypeName(hyperCache.backendType) // Get the backend type name
+	switch t {
+	case "backend.InMemoryBackend":
+		hyperCache.backend, err = backend.NewInMemoryBackend(config.InMemoryBackendOptions...)
+	case "backend.RedisBackend":
+		hyperCache.backend, err = backend.NewRedisBackend(config.RedisBackendOptions...)
+	default:
+		err = errors.ErrInvalidBackendType
+	}
+	// No, or invalid backend specified, we return
+	if err != nil {
+		return
+	}
+
+	// Initialize the cache backend type checker
+	hyperCache.cacheBackendChecker = utils.CacheBackendChecker[T]{
+		Backend: hyperCache.backend,
 	}
 
 	// Apply options
-	for _, option := range options {
-		option(hyperCache)
+	ApplyHyperCacheOptions(hyperCache, config.HyperCacheOptions...)
+
+	// Set the max eviction count to the capacity if it is not set or is zero
+	if hyperCache.maxEvictionCount == 0 {
+		hyperCache.maxEvictionCount = uint(hyperCache.backend.Capacity())
 	}
 
 	// Initialize the eviction algorithm
@@ -98,12 +121,12 @@ func NewHyperCache[T backend.IBackendConstrain](capacity int, options ...Option[
 		}
 	}
 
-	// Initialize the expiration trigger channel with the buffer size set to half the capacity
-	hyperCache.expirationTriggerCh = make(chan bool, capacity/2)
-
-	if capacity < 0 {
+	if hyperCache.backend.Capacity() < 0 {
 		return
 	}
+
+	// Initialize the expiration trigger channel with the buffer size set to half the capacity
+	hyperCache.expirationTriggerCh = make(chan bool, hyperCache.backend.Capacity()/2)
 
 	// Start expiration and eviction loops if capacity is greater than zero
 	hyperCache.once.Do(func() {
@@ -121,13 +144,16 @@ func NewHyperCache[T backend.IBackendConstrain](capacity int, options ...Option[
 					// trigger eviction
 					hyperCache.evictionLoop()
 				case <-hyperCache.stop:
-					// stop the loop
+					// stop the loops
 					return
 				}
 			}
 		}()
 		// Start eviction loop if eviction interval is greater than zero
 		if hyperCache.evictionInterval > 0 {
+			// Initialize the eviction channel with the buffer size set to half the capacity
+			hyperCache.evictCh = make(chan bool, 1)
+			// Start the eviction loop
 			tick := time.NewTicker(hyperCache.evictionInterval)
 			go func() {
 				for {
@@ -246,7 +272,7 @@ func (hyperCache *HyperCache[T]) SetCapacity(capacity int) {
 // Set adds an item to the cache with the given key and value. If an item with the same key already exists, it updates the value of the existing item.
 // If the expiration duration is greater than zero, the item will expire after the specified duration.
 // If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
-func (hyperCache *HyperCache[T]) Set(key string, value interface{}, expiration time.Duration) error {
+func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Duration) error {
 	item := cache.CacheItemPool.Get().(*cache.CacheItem)
 	item.Key = key
 	item.Value = value
@@ -297,7 +323,7 @@ func (hyperCache *HyperCache[T]) Get(key string) (value interface{}, ok bool) {
 
 // GetOrSet retrieves the item with the given key from the hyperCache. If the item is not found, it adds the item to the cache with the given value and expiration duration.
 // If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
-func (hyperCache *HyperCache[T]) GetOrSet(key string, value interface{}, expiration time.Duration) (interface{}, error) {
+func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time.Duration) (interface{}, error) {
 	// if the item is found, return the value
 	if item, ok := hyperCache.backend.Get(key); ok {
 
@@ -337,18 +363,20 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value interface{}, expirat
 		return nil, err
 	}
 
-	hyperCache.evictionAlgorithm.Set(key, item.Value)
-	if hyperCache.evictionInterval == 0 && hyperCache.Capacity() > 0 && hyperCache.Size() > hyperCache.Capacity() {
-		hyperCache.evictItem()
-	}
-
+	go func() {
+		hyperCache.evictionAlgorithm.Set(key, item.Value)
+		if hyperCache.evictionInterval == 0 && hyperCache.Capacity() > 0 && hyperCache.Size() > hyperCache.Capacity() {
+			cache.CacheItemPool.Put(item)
+			hyperCache.evictItem()
+		}
+	}()
 	return value, nil
 }
 
 // GetMultiple retrieves the items with the given keys from the cache. If an item is not found, it is not included in the returned map.
-func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]interface{}, failed map[string]error) {
-	result = make(map[string]interface{}, len(keys)) // Preallocate the result map
-	failed = make(map[string]error, len(keys))       // Preallocate the errors map
+func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]any, failed map[string]error) {
+	result = make(map[string]any, len(keys))   // Preallocate the result map
+	failed = make(map[string]error, len(keys)) // Preallocate the errors map
 
 	for _, key := range keys {
 		item, ok := hyperCache.backend.Get(key)
@@ -467,10 +495,14 @@ func (cache *HyperCache[T]) TriggerEviction() {
 // Stop function stops the expiration and eviction loops and closes the stop channel.
 func (cache *HyperCache[T]) Stop() {
 	// Stop the expiration and eviction loops
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cache.stop <- true
+	}()
+	wg.Wait()
 	cache.once = sync.Once{}
-	cache.stop <- true
-	close(cache.stop)
-	close(cache.evictCh)
 }
 
 // GetStats returns the stats collected by the cache.

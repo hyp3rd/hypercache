@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"reflect"
 	"testing"
 	"time"
 
@@ -56,26 +55,21 @@ func TestGetMultiple(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			cache, err := hypercache.NewHyperCache(10, hypercache.WithExpirationInterval[backend.InMemoryBackend](time.Millisecond))
+			config := &hypercache.Config[backend.InMemoryBackend]{
+				HyperCacheOptions: []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+					hypercache.WithExpirationInterval[backend.InMemoryBackend](time.Millisecond),
+				},
+				InMemoryBackendOptions: []backend.BackendOption[backend.InMemoryBackend]{
+					backend.WithCapacity(10),
+				},
+			}
+			cache, err := hypercache.NewHyperCache(config)
 			assert.Nil(t, err)
 			test.setup(cache)
 
 			gotValues, gotErrs := cache.GetMultiple(test.keys...)
 			assert.Equal(t, test.wantValues, gotValues)
 			assert.Equal(t, test.wantErrs, gotErrs)
-		})
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			cache, err := hypercache.NewHyperCache(10, hypercache.WithExpirationInterval[backend.InMemoryBackend](time.Millisecond))
-			assert.Nil(t, err)
-			test.setup(cache)
-
-			got, gotErr := cache.GetMultiple(test.keys...)
-			if !reflect.DeepEqual(got, test.wantValues) {
-				t.Errorf("got %v, want %v", got, test.wantValues)
-				t.Errorf("got %v, want %v", gotErr, test.wantErrs)
-			}
 		})
 	}
 }

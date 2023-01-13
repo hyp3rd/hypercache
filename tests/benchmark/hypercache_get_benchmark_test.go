@@ -10,7 +10,8 @@ import (
 
 func BenchmarkHyperCache_Get(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
-	cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval[backend.InMemoryBackend](30*time.Second))
+	// cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval[backend.InMemoryBackend](30*time.Second))
+	cache, _ := hypercache.NewHyperCacheInMemoryWithDefaults(1000)
 
 	// Store a value in the cache with a key and expiration duration
 	cache.Set("key", "value", time.Hour)
@@ -24,7 +25,18 @@ func BenchmarkHyperCache_Get(b *testing.B) {
 
 func BenchmarkHyperCache_Get_ProactiveEviction(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
-	cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval[backend.InMemoryBackend](0))
+	config := hypercache.NewConfig[backend.InMemoryBackend]()
+	config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+		hypercache.WithEvictionInterval[backend.InMemoryBackend](0),
+		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("lru"),
+	}
+
+	config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+		backend.WithCapacity(1000),
+	}
+
+	// Create a new HyperCache with a capacity of 10
+	cache, _ := hypercache.NewHyperCache(config)
 
 	// Store a value in the cache with a key and expiration duration
 	cache.Set("key", "value", time.Hour)

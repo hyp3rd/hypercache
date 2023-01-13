@@ -13,9 +13,7 @@ import (
 // This example demonstrates how to list items from the cache
 func main() {
 	// Create a new HyperCache with a capacity of 100
-	hyperCache, err := hypercache.NewHyperCache(200,
-		hypercache.WithExpirationInterval[backend.InMemoryBackend](3*time.Second),
-		hypercache.WithEvictionInterval[backend.InMemoryBackend](3*time.Second))
+	hyperCache, err := hypercache.NewHyperCacheInMemoryWithDefaults(100)
 
 	if err != nil {
 		fmt.Println(err)
@@ -27,7 +25,7 @@ func main() {
 	// Add 100 items to the cache
 	for i := 0; i < 100; i++ {
 		key := fmt.Sprintf("key%d", i)
-		val := fmt.Sprintf("val%d", i)
+		val := fmt.Sprintf("%d", i)
 
 		err = hyperCache.Set(key, val, time.Minute)
 
@@ -39,10 +37,10 @@ func main() {
 
 	// Retrieve the list of items from the cache
 	list, err := hyperCache.List(
-		backend.WithSortBy[backend.InMemoryBackend](types.SortByLastAccess),
+		backend.WithSortBy[backend.InMemoryBackend](types.SortByKey),
 		backend.WithSortDescending[backend.InMemoryBackend](),
 		backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.CacheItem) bool {
-			return item.Expiration > time.Second
+			return item.Value != "val98"
 		}),
 	)
 
@@ -53,7 +51,7 @@ func main() {
 	}
 
 	// Print the list of items
-	for i, ci := range list {
-		fmt.Println(i, ci.Value)
+	for _, ci := range list {
+		fmt.Println(ci.Key, ci.Value)
 	}
 }
