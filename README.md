@@ -4,18 +4,23 @@
 
 ## Synopsis
 
-HyperCache is a **thread-safe** and **high-performance** in-memory cache implementation in Go that supports items' background expiration and eviction.
-It is optimized for performance and flexibility. It uses a read/write lock to synchronize access to the cache with a custom implementation of a concurrent map. It also allows the user to specify the expiration and eviction intervals.
-It also enables devs to collect stats about the cache with the default [stats collector](./stats/collector.go) or a custom one and to inject their own eviction algorithm and register it alongside the default ones:
+HyperCache is a **thread-safe** **high-performance** cache implementation in Go that supports multiple backends with the expiration and eviction of items supporting custom algorithms alongside the defaults. It can be used as a standalone cache or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept cache methods and decorate em with middleware (default or custom).
+It is optimized for performance and flexibility allowing to specify the expiration and eviction intervals, provide and register new eviction algorithms, stats collectors, middleware(s).
+It ships with a default [historigram stats collector](./stats/statscollector.go) and several eviction algorithms, but you can develop and register your own as long as it implements the [EvictionAlgorithm interface](./eviction/eviction.go).:
 
-- [Recently Used (LRU) eviction algorithm](./lru.go)
-- [The Adaptive Replacement Cache (ARC) algorithm](./arc.go)
-- [The clock eviction algorithm](./clock.go)
-- [The Least Frequently Used (LFU) algorithm](./lfu.go)
-- [Cache-Aware Write-Optimized LFU (CAWOLFU)](./cawolfu.go)
+- [Recently Used (LRU) eviction algorithm](./eviction/lru.go)
+- [The Least Frequently Used (LFU) algorithm](./eviction/lfu.go)
+- [Cache-Aware Write-Optimized LFU (CAWOLFU)](./eviction/cawolfu.go)
+- [The Adaptive Replacement Cache (ARC) algorithm](./eviction/arc.go)
+- [The clock eviction algorithm](./eviction/clock.go)
 
 ### Features
 
+- Thread-safe
+- High-performance
+- Supports multiple backends, default backends are:
+    1. [In-memory](./backend/inmemory.go)
+    2. [Redis](./backend/redis.go)
 - Store items in the cache with a key and expiration duration
 - Retrieve items from the cache by their key
 - Delete items from the cache by their key
@@ -23,14 +28,15 @@ It also enables devs to collect stats about the cache with the default [stats co
 - Evitc items in the background based on the cache capacity and items access leveraging several custom eviction algorithms
 - Expire items in the background based on their duration
 - [EvictionAlgorithm interface](./eviction.go) to implement custom eviction algorithms.
-- Stats collection with a default [stats collector](./stats/collector.go) or a custom one that implements the StatsCollector interface.
+- Stats collection with a default [stats collector](./stats/statscollector.go) or a custom one that implements the StatsCollector interface.
+- [Service interface implementation](./service.go) to allow intercepting cache methods and decorate them with custom or default middleware(s).
 
 ## Installation
 
 Install HyperCache:
 
 ```bash
-go get github.com/hyp3rd/hypercache
+go get -u github.com/hyp3rd/hypercache
 ```
 
 ### performance
@@ -64,16 +70,44 @@ For a full list of examples, refer to the [examples](./examples/README.md) direc
 
 ## API
 
-The `NewHyperCache` function creates a new `HyperCache` instance with the given capacity and initializes the `eviction` algorithm, applying any other configuration [option](./options.go). It also starts the expiration and eviction loops in separate goroutines.
+The `NewHyperCacheInMemoryWithDefaults` function creates a new `HyperCache` instance with the defaults:
+
+1. The eviction interval is set to 10 minutes.
+2. The eviction algorithm is set to LRU.
+3. The expiration interval is set to 30 minutes.
+4. The capacity of the in-memory backend is set to 1000 items.
 
 To create a new cache with a given capacity, use the NewHyperCache function as described below:
 
 ```golang
-cache, err := hypercache.NewHyperCache(100)
+cache, err := hypercache.NewHyperCacheInMemoryWithDefaults(100)
 if err != nil {
     // handle error
 }
 ```
+
+For a fine grained control over the cache configuration, use the `NewHyperCache` function, for instance:
+
+```golang
+config := hypercache.NewConfig[backend.InMemoryBackend]()
+config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+    hypercache.WithEvictionInterval[backend.InMemoryBackend](time.Minute * 10),
+    hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("cawolfu"),
+}
+
+config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+    backend.WithCapacity(10),
+}
+
+// Create a new HyperCache with a capacity of 10
+cache, err := hypercache.NewHyperCache(config)
+if err != nil {
+    fmt.Println(err)
+    return
+}
+```
+
+**For the full set of configuration options, refer to the [config.go](./config.go) file.**
 
 ### Set
 
@@ -116,6 +150,58 @@ The `Remove` function takes a variadic number of keys as arguments and returns a
 
 **For a comprehensive API overview, see the [documentation](https://pkg.go.dev/github.com/hyp3rd/hypercache).**
 
+## Service interface for microservices implementation
+
+The `Service` interface allows intercepting cache methods and decorate them with custom or default middleware(s).
+
+```golang
+var svc hypercache.HyperCacheService
+hyperCache, err := hypercache.NewHyperCacheInMemoryWithDefaults(10)
+
+if err != nil {
+    fmt.Println(err)
+    return
+}
+// assign statsCollector of the backend to use it in middleware
+statsCollector := hyperCache.StatsCollector
+svc = hyperCache
+
+if err != nil {
+    fmt.Println(err)
+    return
+}
+
+// Example of using zap logger from uber
+logger, _ := zap.NewProduction()
+
+sugar := logger.Sugar()
+defer sugar.Sync()
+defer logger.Sync()
+
+// apply middleware in the same order as you want to execute them
+svc = hypercache.ApplyMiddleware(svc,
+    // middleware.YourMiddleware,
+    func(next hypercache.HyperCacheService) hypercache.HyperCacheService {
+        return middleware.NewLoggingMiddleware(next, sugar)
+    },
+    func(next hypercache.HyperCacheService) hypercache.HyperCacheService {
+        return middleware.NewStatsCollectorMiddleware(next, statsCollector)
+    },
+)
+
+err = svc.Set("key string", "value any", 0)
+if err != nil {
+    fmt.Println(err)
+    return
+}
+key, ok := svc.Get("key string")
+if !ok {
+    fmt.Println("key not found")
+    return
+}
+fmt.Println(key)
+```
+
 ## Usage
 
 Here is an example of using the HyperCache package. For a more comprehensive overview, see the [examples](./examples/README.md) directory.
@@ -125,36 +211,69 @@ package main
 
 import (
     "fmt"
+    "log"
     "time"
 
     "github.com/hyp3rd/hypercache"
 )
 
 func main() {
-    // create a new cache with a capacity of 100 items
-    cache := hypercache.NewHyperCache(100)
-    defer cache.Stop()
-
-    // set a key-value pair in the cache with an expiration duration of 1 minute
-    cache.Set("key", "value", time.Minute)
-
-    // get the value for the key from the cache
-    val, err := cache.Get("key")
+    // Create a new HyperCache with a capacity of 10
+    cache, err := hypercache.NewHyperCacheInMemoryWithDefaults(10)
     if err != nil {
         fmt.Println(err)
-    } else {
-        fmt.Println(val) // "value"
+        return
+    }
+    // Stop the cache when the program exits
+    defer cache.Stop()
+
+    log.Println("adding items to the cache")
+    // Add 10 items to the cache
+    for i := 0; i < 10; i++ {
+        key := fmt.Sprintf("key%d", i)
+        val := fmt.Sprintf("val%d", i)
+
+        err = cache.Set(key, val, time.Minute)
+
+        if err != nil {
+            fmt.Printf("unexpected error: %v\n", err)
+            return
+        }
     }
 
-    // wait for the item to expire
-    time.Sleep(time.Minute)
+    log.Println("fetching items from the cache using the `GetMultiple` method, key11 does not exist")
+    // Retrieve the specific of items from the cache
+    items, errs := cache.GetMultiple("key1", "key7", "key9", "key11")
 
-    // try to get the value for the key again
-    val, err = cache.Get("key")
+    // Print the errors if any
+    for k, e := range errs {
+        log.Printf("error fetching item %s: %s\n", k, e)
+    }
+
+    // Print the items
+    for k, v := range items {
+        fmt.Println(k, v)
+    }
+
+    log.Println("fetching items from the cache using the `GetOrSet` method")
+    // Retrieve a specific of item from the cache
+    // If the item is not found, set it and return the value
+    val, err := cache.GetOrSet("key11", "val11", time.Minute)
     if err != nil {
-        fmt.Println(err) // "key not found"
+        fmt.Println(err)
+        return
     }
+    fmt.Println(val)
+
+    log.Println("fetching items from the cache using the simple `Get` method")
+    item, ok := cache.Get("key7")
+    if !ok {
+        fmt.Println("item not found")
+        return
+    }
+    fmt.Println(item)
 }
+
 ```
 
 ## License

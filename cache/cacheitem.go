@@ -1,27 +1,31 @@
-package hypercache
+package cache
 
 // CacheItem represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 
 import (
+	"bytes"
+	"encoding/gob"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hyp3rd/hypercache/errors"
 )
 
 // CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 type CacheItem struct {
-	// Key        string        // key of the item
-	Value      interface{}   // value of the item
-	Expiration time.Duration // expiration duration of the item
-	// Expiration  int64     // monotonic clock value in nanoseconds
-	LastAccess  time.Time // last access time of the item
-	AccessCount uint      // number of times the item has been accessed
+	Key         string        // key of the item
+	Value       any           // Value of the item
+	Expiration  time.Duration // Expiration duration of the item
+	LastAccess  time.Time     // LastAccess time of the item
+	AccessCount uint          // AccessCount of times the item has been accessed
 }
 
 // CacheItemPool is a pool of CacheItem values.
 var CacheItemPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &CacheItem{}
 	},
 }
@@ -45,15 +49,20 @@ func (item *CacheItem) FieldByName(name string) reflect.Value {
 
 // Valid returns an error if the item is invalid, nil otherwise.
 func (item *CacheItem) Valid() error {
+	// Check for empty key
+	if item.Key == "" || strings.TrimSpace(item.Key) == "" {
+		return errors.ErrInvalidKey
+	}
+
 	// Check for nil value
 	if item.Value == nil {
-		return ErrNilValue
+		return errors.ErrNilValue
 	}
 
 	// Check for negative expiration
 	if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
-		// atomic.StoreInt64((*int64)(&item.Expiration), 0)
-		return ErrInvalidExpiration
+		atomic.StoreInt64((*int64)(&item.Expiration), 0)
+		return errors.ErrInvalidExpiration
 	}
 	return nil
 }
@@ -68,4 +77,22 @@ func (item *CacheItem) Touch() {
 func (item *CacheItem) Expired() bool {
 	// If the expiration duration is 0, the item never expires
 	return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+}
+
+// MarshalBinary implements the encoding.BinaryMarshaler interface.
+func (item *CacheItem) MarshalBinary() (data []byte, err error) {
+	buf := bytes.NewBuffer([]byte{})
+	enc := gob.NewEncoder(buf)
+	err = enc.Encode(item)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
+func (item *CacheItem) UnmarshalBinary(data []byte) error {
+	buf := bytes.NewBuffer(data)
+	dec := gob.NewDecoder(buf)
+	return dec.Decode(item)
 }

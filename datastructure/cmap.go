@@ -2,6 +2,7 @@ package datastructure
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -143,12 +144,17 @@ func (m ConcurrentMap[K, V]) Has(key K) bool {
 }
 
 // Remove removes an element from the map.
-func (m ConcurrentMap[K, V]) Remove(key K) {
+func (m ConcurrentMap[K, V]) Remove(key K) (err error) {
 	// Try to get shard.
 	shard := m.GetShard(key)
+	if shard == nil {
+		return errors.New("key not found")
+	}
+
 	shard.Lock()
 	delete(shard.items, key)
 	shard.Unlock()
+	return
 }
 
 // RemoveCb is a callback executed in a map.RemoveCb() call, while Lock is held

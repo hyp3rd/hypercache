@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/errors"
 	"github.com/longbridgeapp/assert"
 )
 
@@ -12,9 +13,9 @@ func TestHyperCache_Set(t *testing.T) {
 	tests := []struct {
 		name          string
 		key           string
-		value         interface{}
+		value         any
 		expiry        time.Duration
-		expectedValue interface{}
+		expectedValue any
 		expectedErr   error
 	}{
 		{
@@ -33,21 +34,21 @@ func TestHyperCache_Set(t *testing.T) {
 			expectedValue: "value2",
 			expectedErr:   nil,
 		},
-		// {
-		// 	name:          "set with empty key",
-		// 	key:           "",
-		// 	value:         "value3",
-		// 	expiry:        0,
-		// 	expectedValue: nil,
-		// 	expectedErr:   hypercache.ErrInvalidKey,
-		// },
+		{
+			name:          "set with empty key",
+			key:           "",
+			value:         "value3",
+			expiry:        0,
+			expectedValue: nil,
+			expectedErr:   errors.ErrInvalidKey,
+		},
 		{
 			name:          "set with nil value",
 			key:           "key4",
 			value:         nil,
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   hypercache.ErrNilValue,
+			expectedErr:   errors.ErrNilValue,
 		},
 		{
 			name:          "overwrite existing key",
@@ -66,7 +67,7 @@ func TestHyperCache_Set(t *testing.T) {
 			expectedErr:   nil,
 		},
 	}
-	cache, err := hypercache.NewHyperCache(10)
+	cache, err := hypercache.NewHyperCacheInMemoryWithDefaults(10)
 	assert.Nil(t, err)
 	defer cache.Stop()
 

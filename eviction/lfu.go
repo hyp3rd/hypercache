@@ -1,9 +1,11 @@
-package hypercache
+package eviction
 
 // Least Frequently Used (LFU) eviction algorithm implementation
 
 import (
 	"sync"
+
+	"github.com/hyp3rd/hypercache/errors"
 )
 
 // LFUAlgorithm is an eviction algorithm that uses the Least Frequently Used (LFU) policy to select items for eviction.
@@ -17,11 +19,11 @@ type LFUAlgorithm struct {
 
 // Node is a struct that represents a node in the linked list. It has a key, value, and access count field.
 type Node struct {
-	key   string      // key of the item
-	value interface{} // value of the item
-	count int         // number of times the item has been accessed
-	prev  *Node       // previous node in the linked list
-	next  *Node       // next node in the linked list
+	key   string // key of the item
+	value any    // value of the item
+	count int    // number of times the item has been accessed
+	prev  *Node  // previous node in the linked list
+	next  *Node  // next node in the linked list
 }
 
 // LFUNodePool is a pool of Node values.
@@ -40,7 +42,7 @@ type LinkedList struct {
 // NewLFUAlgorithm returns a new LFUAlgorithm with the given capacity.
 func NewLFUAlgorithm(capacity int) (*LFUAlgorithm, error) {
 	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+		return nil, errors.ErrInvalidCapacity
 	}
 
 	return &LFUAlgorithm{
@@ -70,7 +72,7 @@ func (l *LFUAlgorithm) Evict() (string, bool) {
 }
 
 // Set adds a new item to the cache with the given key.
-func (l *LFUAlgorithm) Set(key string, value interface{}) {
+func (l *LFUAlgorithm) Set(key string, value any) {
 	l.mutex.Lock()
 	// if the cache is full, evict an item
 	if l.length == l.cap {
@@ -82,7 +84,6 @@ func (l *LFUAlgorithm) Set(key string, value interface{}) {
 	// add the new item to the cache
 	node := LFUNodePool.Get().(*Node)
 	node.count = 1
-	node.key = key
 	node.value = value
 
 	l.items[key] = node
@@ -92,7 +93,7 @@ func (l *LFUAlgorithm) Set(key string, value interface{}) {
 }
 
 // Get returns the value for the given key from the cache. If the key is not in the cache, it returns false.
-func (l *LFUAlgorithm) Get(key string) (interface{}, bool) {
+func (l *LFUAlgorithm) Get(key string) (any, bool) {
 	l.mutex.RLock()
 	defer l.mutex.RUnlock()
 	node, ok := l.items[key]

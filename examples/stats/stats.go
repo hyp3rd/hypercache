@@ -5,21 +5,32 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/cache"
 	"github.com/hyp3rd/hypercache/types"
 )
 
 func main() {
 	// Create a new HyperCache with a capacity of 100
-	cache, err := hypercache.NewHyperCache(200,
-		hypercache.WithExpirationInterval(3*time.Second),
-		hypercache.WithEvictionInterval(3*time.Second))
+	config := hypercache.NewConfig[backend.InMemoryBackend]()
+	config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+		hypercache.WithEvictionInterval[backend.InMemoryBackend](3 * time.Second),
+		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("lru"),
+		hypercache.WithExpirationInterval[backend.InMemoryBackend](3 * time.Second),
+	}
 
+	config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+		backend.WithCapacity(100),
+	}
+
+	// Create a new HyperCache with a capacity of 10
+	hyperCache, err := hypercache.NewHyperCache(config)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	// Stop the cache when the program exits
-	defer cache.Stop()
+	defer hyperCache.Stop()
 
 	fmt.Println("Adding 300 items to the cache")
 	// Add 300 items to the cache
@@ -27,7 +38,7 @@ func main() {
 		key := fmt.Sprintf("key%d", i)
 		val := fmt.Sprintf("val%d", i)
 
-		err = cache.Set(key, val, time.Minute)
+		err = hyperCache.Set(key, val, time.Minute)
 
 		if err != nil {
 			fmt.Printf("unexpected error: %v\n", err)
@@ -36,13 +47,13 @@ func main() {
 	}
 
 	fmt.Println("Sleeping for 5 seconds to allow the cache to run its eviction cycle")
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second * 7)
 
 	// Retrieve the list of items from the cache
-	list, err := cache.List(
-		hypercache.WithSortBy(types.SortByValue),
-		hypercache.WithSortDescending(),
-		hypercache.WithFilter(func(item *hypercache.CacheItem) bool {
+	list, err := hyperCache.List(
+		backend.WithSortBy[backend.InMemoryBackend](types.SortByValue),
+		backend.WithSortDescending[backend.InMemoryBackend](),
+		backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.CacheItem) bool {
 			return item.Expiration > time.Second
 		}),
 	)
@@ -53,15 +64,15 @@ func main() {
 		return
 	}
 
-	fmt.Printf("Printing the list of items in the cache (should be %v items)\n\n", cache.Capacity())
+	fmt.Printf("Printing the list of items in the cache (should be %v items)\n\n", hyperCache.Capacity())
 	// Print the list of items
 	for i, ci := range list {
 		fmt.Println(i, ci.Value)
 	}
 
-	fmt.Printf("\nDisplaying the stats for the cache (should be %v items) with 1 eviction cycle\n\n", cache.Capacity())
+	fmt.Printf("\nDisplaying the stats for the cache (should be %v items) with 1 eviction cycle\n\n", hyperCache.Capacity())
 
-	stats := cache.GetStats()
+	stats := hyperCache.GetStats()
 
 	// iterate over the stats and print them
 	for stat, s := range stats {

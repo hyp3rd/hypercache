@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/types"
 )
 
@@ -21,10 +22,18 @@ func main() {
 // executeExample runs the example
 func executeExample(evictionInterval time.Duration) {
 	// Create a new HyperCache with a capacity of 10
-	cache, err := hypercache.NewHyperCache(10,
-		hypercache.EvictionAlgorithmName("cawolfu"),
-		hypercache.WithEvictionInterval(evictionInterval),
-		hypercache.WithMaxEvictionCount(10))
+	config := hypercache.NewConfig[backend.InMemoryBackend]()
+	config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+		hypercache.WithEvictionInterval[backend.InMemoryBackend](evictionInterval),
+		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("cawolfu"),
+	}
+
+	config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+		backend.WithCapacity(10),
+	}
+
+	// Create a new HyperCache with a capacity of 10
+	cache, err := hypercache.NewHyperCache(config)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -51,7 +60,7 @@ func executeExample(evictionInterval time.Duration) {
 	log.Println("capacity after adding 15 items", cache.Capacity())
 
 	log.Println("listing all items in the cache")
-	list, err := cache.List(hypercache.WithSortBy(types.SortByValue))
+	list, err := cache.List(backend.WithSortBy[backend.InMemoryBackend](types.SortByValue))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -63,10 +72,10 @@ func executeExample(evictionInterval time.Duration) {
 	}
 
 	if evictionInterval > 0 {
-		fmt.Println("sleeping to allow two evition loops", evictionInterval+3*time.Second)
-		time.Sleep(evictionInterval + evictionInterval + 3*time.Second)
+		fmt.Println("sleeping to allow the evition loop to complete", evictionInterval+2*time.Second)
+		time.Sleep(evictionInterval + 2*time.Second)
 		log.Println("listing all items in the cache the eviction is triggered")
-		list, err = cache.List(hypercache.WithSortBy(types.SortByValue))
+		list, err = cache.List(backend.WithSortBy[backend.InMemoryBackend](types.SortByValue))
 		if err != nil {
 			fmt.Println(err)
 			return
