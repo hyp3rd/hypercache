@@ -1,10 +1,9 @@
-package hypercache
+package stats
 
 import (
 	"fmt"
 
 	"github.com/hyp3rd/hypercache/errors"
-	"github.com/hyp3rd/hypercache/stats"
 	"github.com/hyp3rd/hypercache/types"
 )
 
@@ -21,7 +20,7 @@ type StatsCollector interface {
 	// Histogram records the statistical distribution of a set of values.
 	Histogram(stat types.Stat, value int64)
 	// GetStats returns the collected statistics.
-	GetStats() stats.Stats
+	GetStats() Stats
 }
 
 // StatsCollectorRegistry holds the a registry of stats collectors.
@@ -52,10 +51,10 @@ func init() {
 	// Register the default stats collector.
 	RegisterStatsCollector("default", func() (StatsCollector, error) {
 		var err error
-		collector := stats.NewHistogramStatsCollector()
+		collector := NewHistogramStatsCollector()
 		if collector == nil {
 			err = fmt.Errorf("%s: %s", errors.ErrStatsCollectorNotFound, "default")
 		}
-		return stats.NewHistogramStatsCollector(), err
+		return NewHistogramStatsCollector(), err
 	})
 }

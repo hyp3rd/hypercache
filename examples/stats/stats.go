@@ -47,7 +47,7 @@ func main() {
 	}
 
 	fmt.Println("Sleeping for 5 seconds to allow the cache to run its eviction cycle")
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second * 7)
 
 	// Retrieve the list of items from the cache
 	list, err := hyperCache.List(

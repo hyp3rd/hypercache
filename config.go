@@ -16,6 +16,16 @@ type Config[T backend.IBackendConstrain] struct {
 	HyperCacheOptions []HyperCacheOption[T]
 }
 
+// NewConfig returns a new `Config` struct with default values:
+// - `InMemoryBackendOptions` is empty
+// - `RedisBackendOptions` is empty
+// - `HyperCacheOptions` is set to:
+//   - `WithExpirationInterval[T](30 * time.Minute)`
+//   - `WithEvictionAlgorithm[T]("lfu")`
+//   - `WithEvictionInterval[T](10 * time.Minute)`
+//
+// Each of the above options can be overridden by passing a different option to the `NewConfig` function.
+// It can be used to configure `HyperCache` and its backend and customize the behavior of the cache.
 func NewConfig[T backend.IBackendConstrain]() *Config[T] {
 	return &Config[T]{
 		InMemoryBackendOptions: []backend.BackendOption[backend.InMemoryBackend]{},

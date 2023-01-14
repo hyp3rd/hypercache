@@ -1,4 +1,4 @@
-package hypercache
+package eviction
 
 // Least Frequently Used (LFU) eviction algorithm implementation
 

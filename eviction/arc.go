@@ -1,4 +1,4 @@
-package hypercache
+package eviction
 
 // ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
 // It has a map of items to store the items in the cache, and a capacity field that limits the number of items that can be stored in the cache.

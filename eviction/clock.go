@@ -1,4 +1,4 @@
-package hypercache
+package eviction
 
 // The clock eviction algorithm is a page replacement algorithm that uses a clock-like data structure to keep track of which pages in a computer's memory have been used recently and which have not.
 // It works by maintaining a circular buffer of pages, with a "hand" that points to the next page to be replaced.

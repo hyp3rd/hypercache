@@ -1,4 +1,4 @@
-package hypercache
+package eviction
 
 // The Least Recently Used (LRU) eviction algorithm is a page replacement algorithm that discards the least recently used pages first.
 // It works by maintaining a queue of pages in memory, with the most recently used page at the front of the queue and the least recently used page at the back.

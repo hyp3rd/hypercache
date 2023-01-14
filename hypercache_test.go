@@ -38,7 +38,7 @@ func TestHyperCache_WithStatsCollector(t *testing.T) {
 	// Test with default stats collector
 	cache, err := NewHyperCacheInMemoryWithDefaults(10)
 	assert.Nil(t, err)
-	assert.NotNil(t, cache.statsCollector)
+	assert.NotNil(t, cache.StatsCollector)
 }
 
 func TestHyperCache_WithExpirationInterval(t *testing.T) {

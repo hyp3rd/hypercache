@@ -1,4 +1,4 @@
-package hypercache
+package eviction
 
 import (
 	"fmt"
