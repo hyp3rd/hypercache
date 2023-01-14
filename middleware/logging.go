@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/stats"
 )
 
 // Logger describes a logging interface allowing to implement different external, or custom logger.
@@ -53,4 +55,83 @@ func (mw LoggingMiddleware) GetOrSet(key string, value any, expiration time.Dura
 
 	mw.logger.Infof("GetOrSet method invoked with key: %s value: %s", key, value)
 	return mw.next.GetOrSet(key, value, expiration)
+}
+
+// GetMultiple logs the time it takes to execute the next middleware.
+func (mw LoggingMiddleware) GetMultiple(keys ...string) (result map[string]any, failed map[string]error) {
+	defer func(begin time.Time) {
+		mw.logger.Infof("method GetMultiple took: %s", time.Since(begin))
+	}(time.Now())
+
+	mw.logger.Infof("GetMultiple method invoked with keys: %s", keys)
+	return mw.next.GetMultiple(keys...)
+}
+
+// List
+func (mw LoggingMiddleware) List(filters ...any) ([]*cache.CacheItem, error) {
+	defer func(begin time.Time) {
+		mw.logger.Infof("method List took: %s", time.Since(begin))
+	}(time.Now())
+
+	mw.logger.Infof("List method invoked with filters: %s", filters)
+	return mw.next.List(filters...)
+}
+
+// Remove
+func (mw LoggingMiddleware) Remove(keys ...string) {
+	defer func(begin time.Time) {
+		mw.logger.Infof("method Remove took: %s", time.Since(begin))
+	}(time.Now())
+
+	mw.logger.Infof("Remove method invoked with keys: %s", keys)
+	mw.next.Remove(keys...)
+}
+
+// Clear
+func (mw LoggingMiddleware) Clear() error {
+	defer func(begin time.Time) {
+		mw.logger.Infof("method Clear took: %s", time.Since(begin))
+	}(time.Now())
+
+	mw.logger.Infof("Clear method invoked")
+	return mw.next.Clear()
+}
+
+// Capacity
+func (mw LoggingMiddleware) Capacity() int {
+	return mw.next.Capacity()
+}
+
+// Size
+func (mw LoggingMiddleware) Size() int {
+	return mw.next.Size()
+}
+
+func (mw LoggingMiddleware) TriggerEviction() {
+	defer func(begin time.Time) {
+		mw.logger.Infof("method TriggerEviction took: %s", time.Since(begin))
+	}(time.Now())
+
+	mw.logger.Infof("TriggerEviction method invoked")
+	mw.next.TriggerEviction()
+}
+
+// Stop
+func (mw LoggingMiddleware) Stop() {
+	defer func(begin time.Time) {
+		mw.logger.Infof("method Stop took: %s", time.Since(begin))
+	}(time.Now())
+
+	mw.logger.Infof("Stop method invoked")
+	mw.next.Stop()
+}
+
+// GetStats
+func (mw LoggingMiddleware) GetStats() stats.Stats {
+	defer func(begin time.Time) {
+		mw.logger.Infof("method GetStats took: %s", time.Since(begin))
+	}(time.Now())
+
+	mw.logger.Infof("GetStats method invoked")
+	return mw.next.GetStats()
 }

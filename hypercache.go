@@ -328,6 +328,42 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	return nil
 }
 
+func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration time.Duration) error {
+	// Create a new cache item and set its properties
+	cacheItems := make([]*cache.CacheItem, 0, len(items))
+	for key, value := range items {
+		item := cache.CacheItemPool.Get().(*cache.CacheItem)
+		item.Key = key
+		item.Value = value
+		item.Expiration = expiration
+		item.LastAccess = time.Now()
+		cacheItems = append(cacheItems, item)
+	}
+
+	hyperCache.mutex.Lock()
+	defer hyperCache.mutex.Unlock()
+
+	// Insert the items into the cache
+	for _, item := range cacheItems {
+		err := hyperCache.backend.Set(item)
+		if err != nil {
+			for _, item := range cacheItems {
+				cache.CacheItemPool.Put(item)
+			}
+			return err
+		}
+		// Set the item in the eviction algorithm
+		hyperCache.evictionAlgorithm.Set(item.Key, item.Value)
+	}
+
+	// If the cache is at capacity, evict an item when the eviction interval is zero
+	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Size() > hyperCache.backend.Capacity() {
+		hyperCache.evictionLoop()
+	}
+
+	return nil
+}
+
 // Get retrieves the item with the given key from the cache.
 func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
 	item, ok := hyperCache.backend.Get(key)
@@ -486,18 +522,13 @@ func (hyperCache *HyperCache[T]) Clear() error {
 
 	// get all expired items
 	if cb, ok := hyperCache.backend.(*backend.InMemoryBackend); ok {
-		items, err = cb.List(
-			backend.WithSortBy[backend.InMemoryBackend](types.SortByExpiration),
-		)
+		items, err = cb.List()
 		cb.Clear()
 	} else if cb, ok := hyperCache.backend.(*backend.RedisBackend); ok {
-		items, err = cb.List(
-			backend.WithSortBy[backend.RedisBackend](types.SortByExpiration),
-		)
+		items, err = cb.List()
 		if err != nil {
 			return err
 		}
-
 		err = cb.Clear()
 	}
 
