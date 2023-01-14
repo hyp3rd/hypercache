@@ -16,6 +16,7 @@ func main() {
 		fmt.Println(err)
 		return
 	}
+	// assign statsCollector of the backend to use it in middleware
 	statsCollector := hyperCache.StatsCollector
 	svc = hyperCache
 
@@ -24,16 +25,16 @@ func main() {
 		return
 	}
 
-	// logger := logrus.New()
-	// logger.SetFormatter(&logrus.JSONFormatter{})
+	// Example of using zap logger from uber
 	logger, _ := zap.NewProduction()
 
 	sugar := logger.Sugar()
 	defer sugar.Sync()
 	defer logger.Sync()
 
+	// apply middleware in the same order as you want to execute them
 	svc = hypercache.ApplyMiddleware(svc,
-		// middleware.NewLoggingMiddleware,
+		// middleware.YourMiddleware,
 		func(next hypercache.HyperCacheService) hypercache.HyperCacheService {
 			return middleware.NewLoggingMiddleware(next, sugar)
 		},

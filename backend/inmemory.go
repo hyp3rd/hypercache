@@ -11,7 +11,7 @@ import (
 	"github.com/hyp3rd/hypercache/types"
 )
 
-// InMemoryBackend is a cache backend that stores the items in memory, leveraging a custom concurrent map.
+// InMemoryBackend is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
 type InMemoryBackend struct {
 	items       datastructure.ConcurrentMap[string, *cache.CacheItem] // map to store the items in the cache
 	capacity    int                                                   // capacity of the cache, limits the number of items that can be stored in the cache
@@ -19,7 +19,7 @@ type InMemoryBackend struct {
 	SortFilters                                                       // filters applied when listing the items in the cache
 }
 
-// NewInMemoryBackend creates a new in-memory cache with the given capacity.
+// NewInMemoryBackend creates a new in-memory cache with the given options.
 func NewInMemoryBackend[T InMemoryBackend](opts ...BackendOption[InMemoryBackend]) (backend IInMemoryBackend[T], err error) {
 
 	inMemoryBackend := &InMemoryBackend{
@@ -35,8 +35,7 @@ func NewInMemoryBackend[T InMemoryBackend](opts ...BackendOption[InMemoryBackend
 	return inMemoryBackend, nil
 }
 
-// SetCapacity sets the capacity of the cacheBackend. If the new capacity is smaller than the current number of items in the cache,
-// it evicts the excess items from the cacheBackend.
+// SetCapacity sets the capacity of the cache.
 func (cacheBackend *InMemoryBackend) SetCapacity(capacity int) {
 	if capacity < 0 {
 		return
@@ -45,7 +44,7 @@ func (cacheBackend *InMemoryBackend) SetCapacity(capacity int) {
 	cacheBackend.capacity = capacity
 }
 
-// itemCount returns the number of items in the cacheBackend.
+// itemCount returns the number of items in the cache.
 func (cacheBackend *InMemoryBackend) itemCount() int {
 	return cacheBackend.items.Count()
 }
@@ -61,9 +60,7 @@ func (cacheBackend *InMemoryBackend) Get(key string) (item *cache.CacheItem, ok 
 	return item, true
 }
 
-// Set adds an item to the cache with the given key and value. If an item with the same key already exists, it updates the value of the existing item.
-// If the expiration duration is greater than zero, the item will expire after the specified duration.
-// If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
+// Set adds a CacheItem to the cache.
 func (cacheBackend *InMemoryBackend) Set(item *cache.CacheItem) error {
 	// Check for invalid key, value, or duration
 	if err := item.Valid(); err != nil {
@@ -176,6 +173,7 @@ func (cacheBackend *InMemoryBackend) Set(item *cache.CacheItem) error {
 // 	return items, nil
 // }
 
+// List returns a list of all items in the cache filtered and ordered by the given options
 func (cacheBackend *InMemoryBackend) List(options ...FilterOption[InMemoryBackend]) ([]*cache.CacheItem, error) {
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)

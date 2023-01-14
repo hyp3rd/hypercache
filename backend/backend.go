@@ -1,19 +1,16 @@
 package backend
 
 import (
-	"errors"
-
 	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/errors"
 )
 
-var (
-	ErrInvalidBackendType = errors.New("invalid backend type")
-)
-
+// IBackendConstrain is the interface that defines the constrain type that must be implemented by cache backends.
 type IBackendConstrain interface {
 	InMemoryBackend | RedisBackend
 }
 
+// InMemoryBackend is the interface that must be implemented by in-memory cache backends.
 type IInMemoryBackend[T IBackendConstrain] interface {
 	// IBackend[T] is the interface that must be implemented by cache backends.
 	IBackend[T]
@@ -23,6 +20,7 @@ type IInMemoryBackend[T IBackendConstrain] interface {
 	Clear()
 }
 
+// RedisBackend is the interface that must be implemented by Redis cache backends.
 type IRedisBackend[T IBackendConstrain] interface {
 	// IBackend[T] is the interface that must be implemented by cache backends.
 	IBackend[T]
@@ -49,6 +47,7 @@ type IBackend[T IBackendConstrain] interface {
 	Remove(keys ...string) error
 }
 
+// Deprecated: NewBackend creates a new cache backend.
 func NewBackend[T IBackendConstrain](backendType string, opts ...any) (IBackend[T], error) {
 	switch backendType {
 	case "memory":
@@ -64,6 +63,6 @@ func NewBackend[T IBackendConstrain](backendType string, opts ...any) (IBackend[
 		}
 		return NewRedisBackend(backendOptions...)
 	default:
-		return nil, ErrInvalidBackendType
+		return nil, errors.ErrInvalidBackendType
 	}
 }

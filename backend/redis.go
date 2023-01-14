@@ -10,13 +10,14 @@ import (
 	"github.com/hyp3rd/hypercache/types"
 )
 
+// RedisBackend is a cache backend that stores the items in a redis implementation.
 type RedisBackend struct {
 	client      *redis.Client // redis client to interact with the redis server
 	capacity    int           // capacity of the cache, limits the number of items that can be stored in the cache
 	SortFilters               // SortFilters holds the filters applied when listing the items in the cache
 }
 
-// func NewRedisBackend[T RedisBackend](client *redis.Client, capacity int) (backend IRedisBackend[T], err error) {
+// NewRedisBackend creates a new redis cache with the given options.
 func NewRedisBackend[T RedisBackend](redisOptions ...BackendOption[RedisBackend]) (backend IRedisBackend[T], err error) {
 	rb := &RedisBackend{}
 	// Apply the backend options
@@ -40,23 +41,26 @@ func (cacheBackend *RedisBackend) Capacity() int {
 	return cacheBackend.capacity
 }
 
+// SetCapacity sets the capacity of the cache.
 func (cacheBackend *RedisBackend) SetCapacity(capacity int) {
 	if capacity < 0 {
 		return
 	}
-
 	cacheBackend.capacity = capacity
 }
 
+// itemCount returns the number of items in the cache.
 func (cacheBackend *RedisBackend) itemCount() int {
 	count, _ := cacheBackend.client.DBSize().Result()
 	return int(count)
 }
 
+// Size returns the number of items in the cache.
 func (cacheBackend *RedisBackend) Size() int {
 	return cacheBackend.itemCount()
 }
 
+// Get retrieves the CacheItem with the given key from the cacheBackend. If the item is not found, it returns nil.
 func (cacheBackend *RedisBackend) Get(key string) (item *cache.CacheItem, ok bool) {
 	data, err := cacheBackend.client.Get(key).Result()
 	if err != nil {
@@ -71,6 +75,7 @@ func (cacheBackend *RedisBackend) Get(key string) (item *cache.CacheItem, ok boo
 	return item, true
 }
 
+// Set stores the CacheItem in the cacheBackend.
 func (cacheBackend *RedisBackend) Set(item *cache.CacheItem) error {
 	if err := item.Valid(); err != nil {
 		return err
@@ -86,6 +91,7 @@ func (cacheBackend *RedisBackend) Set(item *cache.CacheItem) error {
 	return nil
 }
 
+// List returns a list of all the items in the cacheBackend that match the given filter options.
 func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*cache.CacheItem, error) {
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
