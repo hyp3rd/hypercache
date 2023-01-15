@@ -7,6 +7,7 @@ import (
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/backend/redis"
+	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
 
@@ -39,24 +40,29 @@ func main() {
 		}
 	}
 
-	value, ok := hyperCache.Get("key-100")
+	// value, ok := hyperCache.Get("key-100")
 
-	if !ok {
-		fmt.Println("key not found")
-	}
+	// if !ok {
+	// 	fmt.Println("key not found")
+	// }
 
 	allItems, err := hyperCache.List(
-		backend.WithSortBy[backend.RedisBackend](types.SortByValue),
+		backend.WithSortBy[backend.RedisBackend](types.SortByKey),
 		backend.WithSortOrderAsc[backend.RedisBackend](true),
+		backend.WithFilterFunc[backend.RedisBackend](func(item *models.Item) bool {
+			return item.Value == "value-210"
+		}),
 	)
+
+	// Check for errors
 	if err != nil {
 		panic(err)
 	}
 
+	// Print the list of items
 	for _, item := range allItems {
 		fmt.Println(item.Key, item.Value)
 	}
 
-	fmt.Println(value)
-
+	// fmt.Println(value)
 }

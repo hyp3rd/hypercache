@@ -12,8 +12,8 @@ import (
 
 // This example demonstrates how to list items from the cache
 func main() {
-	// Create a new HyperCache with a capacity of 100
-	hyperCache, err := hypercache.NewInMemoryWithDefaults(100)
+	// Create a new HyperCache with a capacity of 400
+	hyperCache, err := hypercache.NewInMemoryWithDefaults(400)
 
 	if err != nil {
 		fmt.Println(err)
@@ -23,9 +23,9 @@ func main() {
 	defer hyperCache.Stop()
 
 	// Add 100 items to the cache
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 400; i++ {
 		key := fmt.Sprintf("key%d", i)
-		val := i //fmt.Sprintf("%d", i)
+		val := fmt.Sprintf("val%d", i)
 
 		err = hyperCache.Set(key, val, time.Minute)
 
@@ -37,10 +37,10 @@ func main() {
 
 	// Retrieve the list of items from the cache
 	list, err := hyperCache.List(
-		backend.WithSortBy[backend.InMemory](types.SortByValue),
-		backend.WithSortAscending[backend.InMemory](),
+		backend.WithSortBy[backend.InMemory](types.SortByKey),
+		backend.WithSortOrderAsc[backend.InMemory](true),
 		backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
-			return item.Value != "val98"
+			return item.Value == "val98"
 		}),
 	)
 
