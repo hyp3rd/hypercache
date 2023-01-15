@@ -1,4 +1,4 @@
-package hypercache
+package eviction
 
 // The Least Recently Used (LRU) eviction algorithm is a page replacement algorithm that discards the least recently used pages first.
 // It works by maintaining a queue of pages in memory, with the most recently used page at the front of the queue and the least recently used page at the back.
@@ -12,12 +12,14 @@ package hypercache
 
 import (
 	"sync"
+
+	"github.com/hyp3rd/hypercache/errors"
 )
 
 // LRUCacheItem represents an item in the LRU cache
 type LRUCacheItem struct {
 	Key   string
-	Value interface{}
+	Value any
 	prev  *LRUCacheItem
 	next  *LRUCacheItem
 }
@@ -41,7 +43,7 @@ type LRU struct {
 // NewLRU creates a new LRU cache with the given capacity
 func NewLRU(capacity int) (*LRU, error) {
 	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+		return nil, errors.ErrInvalidCapacity
 	}
 	return &LRU{
 		capacity: capacity,
@@ -50,7 +52,7 @@ func NewLRU(capacity int) (*LRU, error) {
 }
 
 // Get retrieves the value for the given key from the cache. If the key is not
-func (lru *LRU) Get(key string) (interface{}, bool) {
+func (lru *LRU) Get(key string) (any, bool) {
 	lru.mutex.RLock()
 	defer lru.mutex.RUnlock()
 	item, ok := lru.items[key]
@@ -63,7 +65,7 @@ func (lru *LRU) Get(key string) (interface{}, bool) {
 
 // Set sets the value for the given key in the cache. If the key is not already	in the cache, it is added.
 // If the cache is full, the least recently used item is evicted.
-func (lru *LRU) Set(key string, value interface{}) {
+func (lru *LRU) Set(key string, value any) {
 	lru.mutex.Lock()
 	defer lru.mutex.Unlock()
 	item, ok := lru.items[key]

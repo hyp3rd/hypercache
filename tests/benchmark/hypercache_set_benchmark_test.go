@@ -6,11 +6,12 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/backend"
 )
 
 func BenchmarkHyperCache_Set(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
-	cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval(30*time.Second))
+	cache, _ := hypercache.NewInMemoryWithDefaults(1000)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -21,7 +22,18 @@ func BenchmarkHyperCache_Set(b *testing.B) {
 
 func BenchmarkHyperCache_Set_Proactive_Eviction(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
-	cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval(0))
+	config := hypercache.NewConfig[backend.InMemory]()
+	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
+		hypercache.WithEvictionInterval[backend.InMemory](0),
+		hypercache.WithEvictionAlgorithm[backend.InMemory]("cawolfu"),
+	}
+
+	config.InMemoryOptions = []backend.Option[backend.InMemory]{
+		backend.WithCapacity(1000),
+	}
+
+	// Create a new HyperCache with a capacity of 10
+	cache, _ := hypercache.New(config)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

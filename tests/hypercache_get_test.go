@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/errors"
 	"github.com/longbridgeapp/assert"
 )
 
@@ -12,9 +13,9 @@ func TestHyperCache_Get(t *testing.T) {
 	tests := []struct {
 		name          string
 		key           string
-		value         interface{}
+		value         any
 		expiry        time.Duration
-		expectedValue interface{}
+		expectedValue any
 		expectedErr   error
 		sleep         time.Duration
 		shouldSet     bool
@@ -58,11 +59,11 @@ func TestHyperCache_Get(t *testing.T) {
 			value:         "value5",
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   hypercache.ErrKeyNotFound,
+			expectedErr:   errors.ErrKeyNotFound,
 			shouldSet:     false,
 		},
 	}
-	cache, err := hypercache.NewHyperCache(10)
+	cache, err := hypercache.NewInMemoryWithDefaults(10)
 	assert.Nil(t, err)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

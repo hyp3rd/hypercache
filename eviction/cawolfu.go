@@ -1,4 +1,4 @@
-package hypercache
+package eviction
 
 // CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
 
@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/hyp3rd/hypercache/datastructure"
+	"github.com/hyp3rd/hypercache/errors"
 )
 
 // CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
@@ -19,7 +20,7 @@ type CAWOLFU struct {
 // CAWOLFUNode is a struct that represents a node in the linked list. It has a key, value, and access count field.
 type CAWOLFUNode struct {
 	key   string       // key of the item
-	value interface{}  // value of the item
+	value any          // value of the item
 	count int          // number of times the item has been accessed
 	prev  *CAWOLFUNode // previous node in the linked list
 	next  *CAWOLFUNode // next node in the linked list
@@ -27,7 +28,7 @@ type CAWOLFUNode struct {
 
 // CAWOLFUNodePool is a pool of CAWOLFUNode values.
 var CAWOLFUNodePool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &CAWOLFUNode{}
 	},
 }
@@ -41,7 +42,7 @@ type CAWOLFULinkedList struct {
 // NewCAWOLFU returns a new CAWOLFU with the given capacity.
 func NewCAWOLFU(capacity int) (*CAWOLFU, error) {
 	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+		return nil, errors.ErrInvalidCapacity
 	}
 
 	return &CAWOLFU{
@@ -64,11 +65,13 @@ func (c *CAWOLFU) Evict() (string, bool) {
 	c.items.Remove(node.key)
 	c.length--
 
+	CAWOLFUNodePool.Put(node)
+
 	return node.key, true
 }
 
 // Set adds a new item to the cache with the given key.
-func (c *CAWOLFU) Set(key string, value interface{}) {
+func (c *CAWOLFU) Set(key string, value any) {
 	// if the cache is full, evict an item
 	if c.length == c.cap {
 		_, _ = c.Evict() // evict an item
@@ -86,7 +89,7 @@ func (c *CAWOLFU) Set(key string, value interface{}) {
 }
 
 // Get returns the value for the given key from the cache. If the key is not in the cache, it returns false.
-func (c *CAWOLFU) Get(key string) (interface{}, bool) {
+func (c *CAWOLFU) Get(key string) (any, bool) {
 	node, ok := c.items.Get(key)
 	if !ok {
 		return nil, false

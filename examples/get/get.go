@@ -10,7 +10,7 @@ import (
 
 func main() {
 	// Create a new HyperCache with a capacity of 10
-	cache, err := hypercache.NewHyperCache(10)
+	cache, err := hypercache.NewInMemoryWithDefaults(10)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -32,7 +32,7 @@ func main() {
 		}
 	}
 
-	log.Println("fetching items from the cache using the `GetMultiple` method")
+	log.Println("fetching items from the cache using the `GetMultiple` method, key11 does not exist")
 	// Retrieve the specific of items from the cache
 	items, errs := cache.GetMultiple("key1", "key7", "key9", "key11")
 

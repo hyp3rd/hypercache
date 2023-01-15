@@ -3,286 +3,381 @@ package hypercache
 // Copyright 2023 F. All rights reserved.
 // Use of this source code is governed by a Mozilla Public License 2.0
 // license that can be found in the LICENSE file.
-// HyperCache is an in-memory cache implementation in Go that supports the expiration and eviction of items.
+// HyperCache is a cache implementation for Go that supports multiple backends with the expiration and eviction of items.
+// It can be used as a standalone cache or as a cache middleware for a service.
+// It can implement a service interface to interact with the cache with middleware support (default or custom).
 
 import (
-	"errors"
-	"sort"
 	"sync"
 	"time"
 
-	"github.com/hyp3rd/hypercache/datastructure"
+	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/eviction"
+	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/stats"
 	"github.com/hyp3rd/hypercache/types"
+	"github.com/hyp3rd/hypercache/utils"
 )
 
-var (
-	// ErrInvalidKey is returned when an invalid key is used to access an item in the cache.
-	// An invalid key is a key that is either empty or consists only of whitespace characters.
-	ErrInvalidKey = errors.New("invalid key")
-
-	// ErrKeyNotFound is returned when a key is not found in the cache.
-	ErrKeyNotFound = errors.New("key not found")
-
-	// ErrNilValue is returned when a nil value is attempted to be set in the cache.
-	ErrNilValue = errors.New("nil value")
-
-	// ErrKeyExpired is returned when a key is found in the cache but has expired.
-	ErrKeyExpired = errors.New("key expired")
-
-	// ErrInvalidExpiration is returned when an invalid expiration is passed to a cache item.
-	ErrInvalidExpiration = errors.New("expiration cannot be negative")
-
-	// ErrInvalidCapacity is returned when an invalid capacity is passed to the cache.
-	ErrInvalidCapacity = errors.New("capacity cannot be negative")
-
-	// ErrAlgorithmNotFound is returned when an algorithm is not found.
-	ErrAlgorithmNotFound = errors.New("algorithm not found")
-
-	// ErrStatsCollectorNotFound is returned when an algorithm is not found.
-	ErrStatsCollectorNotFound = errors.New("stats collector not found")
-
-	// ErrParamCannotBeEmpty is returned when a parameter cannot be empty.
-	ErrParamCannotBeEmpty = errors.New("param cannot be empty")
-)
-
-// HyperCache is an in-memory cache that stores items with a key and expiration duration.
-// It has a custom ConcurrentMap to store the items in the cache,
-// and a capacity field that limits the number of items that can be stored in the cache.
+// HyperCache is a cache that stores items with a key and expiration duration. It supports multiple backends and multiple eviction algorithms.
+// The default in-memory implementation has a custom `ConcurrentMap` to store the items in the cache,
+// The configuration is provided by the `Config` struct and can be customized by using the `With` functions.
+// The cache has two loops that run in the background:
+//   - The expiration loop runs every `expirationInterval` and checks for expired items.
+//   - The eviction loop runs every `evictionInterval` and evicts items using the eviction algorithm.
+//
+// The cache leverages two channels to signal the expiration and eviction loops to start:
+//   - The expirationTriggerCh channel is used to signal the expiration loop to start.
+//   - The evictCh channel is used to signal the eviction loop to start.
+//
+// The cache also has a mutex that is used to protect the eviction algorithm from concurrent access.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
-type HyperCache struct {
-	items                 datastructure.ConcurrentMap[string, *CacheItem] // map to store the items in the cache
-	capacity              int                                             // capacity of the cache, limits the number of items that can be stored in the cache
-	stop                  chan bool                                       // channel to signal the expiration and eviction loops to stop
-	expirationTriggerCh   chan bool                                       // channel to signal the expiration trigger loop to start
-	evictCh               chan bool                                       // channel to signal the eviction loop to start
-	statsCollectorName    string                                          // name of the stats collector to use when collecting cache statistics
-	statsCollector        StatsCollector                                  // stats collector to collect cache statistics
-	evictionAlgorithmName string                                          // name of the eviction algorithm to use when evicting items
-	evictionAlgorithm     EvictionAlgorithm                               // eviction algorithm to use when evicting items
-	expirationInterval    time.Duration                                   // interval at which the expiration loop should run
-	evictionInterval      time.Duration                                   // interval at which the eviction loop should run
-	maxEvictionCount      uint                                            // maximum number of items that can be evicted in a single eviction loop iteration
-	sortBy                string                                          // field to sort the items by
-	sortAscending         bool                                            // whether to sort the items in ascending order
-	filterFn              func(item *CacheItem) bool                      // filter function to select items that meet certain criteria
-	mutex                 sync.RWMutex                                    // mutex to protect the eviction algorithm
-	once                  sync.Once                                       // used to ensure that the expiration and eviction loops are only started once
+type HyperCache[T backend.IBackendConstrain] struct {
+	backend               backend.IBackend[T]          // `backend`` holds the backend that the cache uses to store the items. It must implement the IBackend interface.
+	backendType           *T                           // `backendType`` holds a pointer to the backend type.
+	cacheBackendChecker   utils.CacheBackendChecker[T] // `cacheBackendChecker` holds an instance of the CacheBackendChecker interface. It helps to determine the type of the backend.
+	stop                  chan bool                    // `stop` channel to signal the expiration and eviction loops to stop
+	expirationTriggerCh   chan bool                    // `expirationTriggerCh` channel to signal the expiration trigger loop to start
+	evictCh               chan bool                    // `evictCh` channel to signal the eviction loop to start
+	evictionAlgorithmName string                       // `evictionAlgorithmName` name of the eviction algorithm to use when evicting items
+	evictionAlgorithm     eviction.Algorithm           // `evictionAlgorithm` eviction algorithm to use when evicting items
+	expirationInterval    time.Duration                // `expirationInterval` interval at which the expiration loop should run
+	evictionInterval      time.Duration                // interval at which the eviction loop should run
+	maxEvictionCount      uint                         // `evictionInterval` maximum number of items that can be evicted in a single eviction loop iteration
+	mutex                 sync.RWMutex                 // `mutex` holds a RWMutex (Read-Write Mutex) that is used to protect the eviction algorithm from concurrent access
+	once                  sync.Once                    // `once` holds a Once struct that is used to ensure that the expiration and eviction loops are only started once
+	statsCollectorName    string                       // `statsCollectorName` holds the name of the stats collector that the cache should use when collecting cache statistics
+	// StatsCollector to collect cache statistics
+	StatsCollector stats.Collector
 }
 
-// NewHyperCache creates a new in-memory cache with the given capacity.
-// If the capacity is negative, it returns an error.
-// The function initializes the items map, and starts the expiration and eviction loops in separate goroutines.
-func NewHyperCache(capacity int, options ...Option) (cache *HyperCache, err error) {
-	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+// NewInMemoryWithDefaults initializes a new HyperCache with the default configuration.
+// The default configuration is:
+//   - The eviction interval is set to 10 minutes.
+//   - The eviction algorithm is set to LRU.
+//   - The expiration interval is set to 30 minutes.
+//   - The capacity of the in-memory backend is set to 1000 items.
+func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMemory], err error) {
+	// Initialize the configuration
+	config := NewConfig[backend.InMemory]()
+	// Set the default options
+	config.HyperCacheOptions = []Option[backend.InMemory]{
+		WithEvictionInterval[backend.InMemory](10 * time.Minute),
+		WithEvictionAlgorithm[backend.InMemory]("lru"),
+		WithExpirationInterval[backend.InMemory](30 * time.Minute),
 	}
 
-	cache = &HyperCache{
-		items:              datastructure.New[*CacheItem](),
-		capacity:           capacity,
-		stop:               make(chan bool, 1),
-		evictCh:            make(chan bool, 1),
-		expirationInterval: 10 * time.Minute,
-		evictionInterval:   1 * time.Minute,
-		maxEvictionCount:   uint(capacity),
+	// Set the in-memory backend options
+	config.InMemoryOptions = []backend.Option[backend.InMemory]{
+		backend.WithCapacity(capacity),
+	}
+	// Initialize the cache
+	hyperCache, err = New(config)
+	if err != nil {
+		return nil, err
+	}
+	return hyperCache, nil
+}
+
+// New initializes a new HyperCache with the given configuration.
+// The default configuration is:
+//   - The eviction interval is set to 10 minutes.
+//   - The eviction algorithm is set to CAWOLFU.
+//   - The expiration interval is set to 30 minutes.
+//   - The stats collector is set to the HistogramStatsCollector stats collector.
+func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache[T], err error) {
+
+	// Initialize the cache
+	hyperCache = &HyperCache[T]{
+		stop:               make(chan bool, 2),
+		expirationInterval: 30 * time.Minute,
+		evictionInterval:   10 * time.Minute,
+	}
+
+	// Initialize the backend
+	t, _ := utils.TypeName(hyperCache.backendType) // Get the backend type name
+	switch t {
+	case "backend.InMemory":
+		hyperCache.backend, err = backend.NewInMemory(config.InMemoryOptions...)
+	case "backend.RedisBackend":
+		hyperCache.backend, err = backend.NewRedisBackend(config.RedisOptions...)
+	default:
+		err = errors.ErrInvalidBackendType
+	}
+	// No, or invalid backend specified, we return
+	if err != nil {
+		return
+	}
+
+	// Initialize the cache backend type checker
+	hyperCache.cacheBackendChecker = utils.CacheBackendChecker[T]{
+		Backend: hyperCache.backend,
 	}
 
 	// Apply options
-	for _, option := range options {
-		option(cache)
+	ApplyHyperCacheOptions(hyperCache, config.HyperCacheOptions...)
+
+	// Set the max eviction count to the capacity if it is not set or is zero
+	if hyperCache.maxEvictionCount == 0 {
+		hyperCache.maxEvictionCount = uint(hyperCache.backend.Capacity())
 	}
 
 	// Initialize the eviction algorithm
-	if cache.evictionAlgorithmName == "" {
+	if hyperCache.evictionAlgorithmName == "" {
 		// Use the default eviction algorithm if none is specified
-		// cache.evictionAlgorithm, err = NewClockCache(capacity)
-		// cache.evictionAlgorithm, err = NewEvictionAlgorithm("clock", int(cache.maxEvictionCount))
-		cache.evictionAlgorithm, err = NewEvictionAlgorithm("cawolfu", int(cache.maxEvictionCount))
+		hyperCache.evictionAlgorithm, err = eviction.NewCAWOLFU(int(hyperCache.maxEvictionCount))
 	} else {
 		// Use the specified eviction algorithm
-		cache.evictionAlgorithm, err = NewEvictionAlgorithm(cache.evictionAlgorithmName, int(cache.maxEvictionCount))
+		hyperCache.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hyperCache.evictionAlgorithmName, int(hyperCache.maxEvictionCount))
 	}
 	if err != nil {
 		return
 	}
 
 	// Initialize the stats collector
-	if cache.statsCollectorName == "" {
+	if hyperCache.statsCollectorName == "" {
 		// Use the default stats collector if none is specified
-		cache.statsCollector, err = NewStatsCollector("default")
+		// hyperCache.statsCollector, err = NewCollector("default")
+		hyperCache.StatsCollector = stats.NewHistogramStatsCollector()
 	} else {
 		// Use the specified stats collector
-		cache.statsCollector, err = NewStatsCollector(cache.statsCollectorName)
+		hyperCache.StatsCollector, err = stats.NewCollector(hyperCache.statsCollectorName)
+		if err != nil {
+			return
+		}
 	}
-	if err != nil {
+
+	// If the capacity is less than zero, we return
+	if hyperCache.backend.Capacity() < 0 {
 		return
 	}
 
 	// Initialize the expiration trigger channel with the buffer size set to half the capacity
-	cache.expirationTriggerCh = make(chan bool, capacity/2)
+	hyperCache.expirationTriggerCh = make(chan bool, hyperCache.backend.Capacity()/2)
 
 	// Start expiration and eviction loops if capacity is greater than zero
-	if capacity > 0 {
-		cache.once.Do(func() {
-			tick := time.NewTicker(cache.expirationInterval)
+	hyperCache.once.Do(func() {
+		tick := time.NewTicker(hyperCache.expirationInterval)
+		go func() {
+			for {
+				select {
+				case <-tick.C:
+					// trigger expiration
+					hyperCache.expirationLoop()
+				case <-hyperCache.expirationTriggerCh:
+					// trigger expiration
+					hyperCache.expirationLoop()
+				case <-hyperCache.evictCh:
+					// trigger eviction
+					hyperCache.evictionLoop()
+				case <-hyperCache.stop:
+					// stop the loops
+					return
+				}
+			}
+		}()
+		// Start eviction loop if eviction interval is greater than zero
+		if hyperCache.evictionInterval > 0 {
+			// Initialize the eviction channel with the buffer size set to half the capacity
+			hyperCache.evictCh = make(chan bool, 1)
+			// Start the eviction loop
+			tick := time.NewTicker(hyperCache.evictionInterval)
 			go func() {
 				for {
 					select {
 					case <-tick.C:
-						// trigger expiration
-						cache.expirationLoop()
-					case <-cache.expirationTriggerCh:
-						// trigger expiration
-						cache.expirationLoop()
-					case <-cache.evictCh:
-						// trigger eviction
-						cache.evictionLoop()
-					case <-cache.stop:
-						// stop the loop
+						hyperCache.evictionLoop()
+					case <-hyperCache.stop:
 						return
 					}
 				}
 			}()
-			// Start eviction loop if eviction interval is greater than zero
-			if cache.evictionInterval > 0 {
-				tick := time.NewTicker(cache.evictionInterval)
-				go func() {
-					for {
-						select {
-						case <-tick.C:
-							cache.evictionLoop()
-						case <-cache.stop:
-							return
-						}
-					}
-				}()
-			}
-		})
-	}
+		}
+	})
 
 	return
 }
 
 // expirationLoop is a function that runs in a separate goroutine and expires items in the cache based on their expiration duration.
-func (cache *HyperCache) expirationLoop() {
-	cache.statsCollector.Incr("expiration_loop_count", 1)
-	defer cache.statsCollector.Timing("expiration_loop_duration", time.Now().UnixNano())
+func (hyperCache *HyperCache[T]) expirationLoop() {
+	hyperCache.StatsCollector.Incr("expiration_loop_count", 1)
+	defer hyperCache.StatsCollector.Timing("expiration_loop_duration", time.Now().UnixNano())
 
-	var expiredCount int64
+	var (
+		expiredCount int64
+		items        []*models.Item
+		err          error
+	)
 
-	for item := range cache.items.IterBuffered() {
-		if item.Val.Expiration > 0 && time.Since(item.Val.LastAccess) > item.Val.Expiration {
-			expiredCount++
-			cache.items.Remove(item.Key)
-			CacheItemPool.Put(item.Val)
-			cache.statsCollector.Incr("item_expired_count", 1)
-		}
+	// get all expired items
+	if cb, ok := hyperCache.backend.(*backend.InMemory); ok {
+		items, err = cb.List(
+			backend.WithSortBy[backend.InMemory](types.SortByExpiration),
+			backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
+				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+			}),
+		)
+
+	} else if cb, ok := hyperCache.backend.(*backend.RedisBackend); ok {
+		items, err = cb.List(
+			backend.WithSortBy[backend.RedisBackend](types.SortByExpiration),
+			backend.WithFilterFunc[backend.RedisBackend](func(item *models.Item) bool {
+				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+			}),
+		)
 	}
 
-	cache.statsCollector.Gauge("item_count", int64(cache.itemCount()))
-	cache.statsCollector.Gauge("expired_item_count", expiredCount)
+	// when error, return
+	if err != nil {
+		return
+	}
+	// iterate all expired items and remove them
+	for _, item := range items {
+		expiredCount++
+		hyperCache.backend.Remove(item.Key)
+		models.ItemPool.Put(item)
+		hyperCache.StatsCollector.Incr("item_expired_count", 1)
+	}
+
+	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Size()))
+	hyperCache.StatsCollector.Gauge("expired_item_count", expiredCount)
 }
 
 // evictionLoop is a function that runs in a separate goroutine and evicts items from the cache based on the cache's capacity and the max eviction count.
-func (cache *HyperCache) evictionLoop() {
-	cache.statsCollector.Incr("eviction_loop_count", 1)
-	defer cache.statsCollector.Timing("eviction_loop_duration", time.Now().UnixNano())
+// The eviction is determined by the eviction algorithm.
+func (hyperCache *HyperCache[T]) evictionLoop() {
+	hyperCache.StatsCollector.Incr("eviction_loop_count", 1)
+	defer hyperCache.StatsCollector.Timing("eviction_loop_duration", time.Now().UnixNano())
 	var evictedCount int64
 
 	for {
-		if cache.itemCount() <= cache.capacity {
+		if hyperCache.backend.Size() <= hyperCache.backend.Capacity() {
 			break
 		}
 
-		if cache.maxEvictionCount == uint(evictedCount) {
+		if hyperCache.maxEvictionCount == uint(evictedCount) {
 			break
 		}
-		key, ok := cache.evictionAlgorithm.Evict()
+		key, ok := hyperCache.evictionAlgorithm.Evict()
 
 		if !ok {
 			// no more items to evict
 			break
 		}
 
-		cache.items.Remove(key)
+		hyperCache.backend.Remove(key)
 		evictedCount++
-		cache.statsCollector.Incr("item_evicted_count", 1)
+		hyperCache.StatsCollector.Incr("item_evicted_count", 1)
 	}
 
-	cache.statsCollector.Gauge("item_count", int64(cache.itemCount()))
-	cache.statsCollector.Gauge("evicted_item_count", evictedCount)
+	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Size()))
+	hyperCache.StatsCollector.Gauge("evicted_item_count", evictedCount)
 }
 
 // evictItem is a helper function that removes an item from the cache and returns the key of the evicted item.
 // If no item can be evicted, it returns a false.
-func (cache *HyperCache) evictItem() (string, bool) {
-	key, ok := cache.evictionAlgorithm.Evict()
+func (hyperCache *HyperCache[T]) evictItem() (string, bool) {
+	key, ok := hyperCache.evictionAlgorithm.Evict()
 	if !ok {
 		return "", false
 	}
 
-	cache.items.Remove(key)
+	hyperCache.backend.Remove(key)
 	return key, true
 }
 
 // SetCapacity sets the capacity of the cache. If the new capacity is smaller than the current number of items in the cache,
 // it evicts the excess items from the cache.
-func (cache *HyperCache) SetCapacity(capacity int) {
-	if capacity < 0 {
-		return
+func (hyperCache *HyperCache[T]) SetCapacity(capacity int) {
+	// set capacity of the backend
+	hyperCache.backend.SetCapacity(capacity)
+	// if the cache size is greater than the new capacity, evict items
+	if hyperCache.backend.Size() > hyperCache.Capacity() {
+		hyperCache.evictionLoop()
 	}
-
-	cache.capacity = capacity
-	if cache.itemCount() > cache.capacity {
-		cache.evictionLoop()
-	}
-}
-
-// itemCount returns the number of items in the cache.
-func (cache *HyperCache) itemCount() int {
-	return cache.items.Count()
 }
 
 // Set adds an item to the cache with the given key and value. If an item with the same key already exists, it updates the value of the existing item.
 // If the expiration duration is greater than zero, the item will expire after the specified duration.
-// If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
-func (cache *HyperCache) Set(key string, value interface{}, expiration time.Duration) error {
-	item := CacheItemPool.Get().(*CacheItem)
-	// item.Key = key
+// If the capacity of the cache is reached, the cache will leverage the eviction algorithm proactively if the evictionInterval is zero. If not, the background process will take care of the eviction.
+func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Duration) error {
+	// Create a new cache item and set its properties
+	item := models.ItemPool.Get().(*models.Item)
+	item.Key = key
 	item.Value = value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
 
-	// Check for invalid key, value, or duration
-	if err := item.Valid(); err != nil {
-		CacheItemPool.Put(item)
+	hyperCache.mutex.Lock()
+	defer hyperCache.mutex.Unlock()
+
+	// Insert the item into the cache
+	err := hyperCache.backend.Set(item)
+	if err != nil {
+		models.ItemPool.Put(item)
 		return err
 	}
 
-	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
+	// Set the item in the eviction algorithm
+	hyperCache.evictionAlgorithm.Set(key, item.Value)
 
-	cache.items.Set(key, item)
-	cache.evictionAlgorithm.Set(key, item.Value)
-	if cache.evictionInterval == 0 && cache.capacity > 0 && cache.itemCount() > cache.capacity {
-		cache.evictItem()
+	// If the cache is at capacity, evict an item when the eviction interval is zero
+	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Size() > hyperCache.backend.Capacity() {
+		hyperCache.evictItem()
 	}
 
 	return nil
 }
 
-// Get retrieves the item with the given key from the cache. If the item is not found, it returns nil.
-func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
-	item, ok := cache.items.Get(key)
+func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration time.Duration) error {
+	// Create a new cache item and set its properties
+	cacheItems := make([]*models.Item, 0, len(items))
+	for key, value := range items {
+		item := models.ItemPool.Get().(*models.Item)
+		item.Key = key
+		item.Value = value
+		item.Expiration = expiration
+		item.LastAccess = time.Now()
+		cacheItems = append(cacheItems, item)
+	}
+
+	hyperCache.mutex.Lock()
+	defer hyperCache.mutex.Unlock()
+
+	// Insert the items into the cache
+	for _, item := range cacheItems {
+		err := hyperCache.backend.Set(item)
+		if err != nil {
+			for _, item := range cacheItems {
+				models.ItemPool.Put(item)
+			}
+			return err
+		}
+		// Set the item in the eviction algorithm
+		hyperCache.evictionAlgorithm.Set(item.Key, item.Value)
+	}
+
+	// If the cache is at capacity, evict an item when the eviction interval is zero
+	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Size() > hyperCache.backend.Capacity() {
+		hyperCache.evictionLoop()
+	}
+
+	return nil
+}
+
+// Get retrieves the item with the given key from the cache.
+func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
+	item, ok := hyperCache.backend.Get(key)
 	if !ok {
 		return nil, false
 	}
 
+	// Check if the item has expired, if so, trigger the expiration loop
 	if item.Expired() {
 		go func() {
-			CacheItemPool.Put(item)
-			cache.expirationTriggerCh <- true
+			models.ItemPool.Put(item)
+			hyperCache.expirationTriggerCh <- true
 		}()
 		return nil, false
 	}
@@ -292,19 +387,19 @@ func (cache *HyperCache) Get(key string) (value interface{}, ok bool) {
 	return item.Value, true
 }
 
-// GetOrSet retrieves the item with the given key from the cache. If the item is not found, it adds the item to the cache with the given value and expiration duration.
-// If the capacity of the cache is reached, the cache will evict the least recently used item before adding the new item.
-func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time.Duration) (interface{}, error) {
+// GetOrSet retrieves the item with the given key. If the item is not found, it adds the item to the cache with the given value and expiration duration.
+// If the capacity of the cache is reached, leverage the eviction algorithm.
+func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time.Duration) (any, error) {
 	// if the item is found, return the value
-	if item, ok := cache.items.Get(key); ok {
+	if item, ok := hyperCache.backend.Get(key); ok {
 
 		// Check if the item has expired
 		if item.Expired() {
 			go func() {
-				CacheItemPool.Put(item)
-				cache.expirationTriggerCh <- true
+				models.ItemPool.Put(item)
+				hyperCache.expirationTriggerCh <- true
 			}()
-			return nil, ErrKeyExpired
+			return nil, errors.ErrKeyExpired
 		}
 
 		// Update the last access time and access count
@@ -314,51 +409,59 @@ func (cache *HyperCache) GetOrSet(key string, value interface{}, expiration time
 	}
 
 	// if the item is not found, add it to the cache
-	item := CacheItemPool.Get().(*CacheItem)
-	// item.Key = key
+	item := models.ItemPool.Get().(*models.Item)
+	item.Key = key
 	item.Value = value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
 
 	// Check for invalid key, value, or duration
 	if err := item.Valid(); err != nil {
-		CacheItemPool.Put(item)
+		models.ItemPool.Put(item)
 		return nil, err
 	}
 
-	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
-	cache.items.Set(key, item)
-
-	cache.evictionAlgorithm.Set(key, item.Value)
-	if cache.evictionInterval == 0 && cache.capacity > 0 && cache.itemCount() > cache.capacity {
-		cache.evictItem()
+	hyperCache.mutex.Lock()
+	defer hyperCache.mutex.Unlock()
+	err := hyperCache.backend.Set(item)
+	if err != nil {
+		models.ItemPool.Put(item)
+		return nil, err
 	}
 
+	go func() {
+		// Set the item in the eviction algorithm
+		hyperCache.evictionAlgorithm.Set(key, item.Value)
+		// If the cache is at capacity, evict an item when the eviction interval is zero
+		if hyperCache.evictionInterval == 0 && hyperCache.Capacity() > 0 && hyperCache.Size() > hyperCache.Capacity() {
+			models.ItemPool.Put(item)
+			hyperCache.evictItem()
+		}
+	}()
 	return value, nil
 }
 
-// GetMultiple retrieves the items with the given keys from the cache. If an item is not found, it is not included in the returned map.
-func (cache *HyperCache) GetMultiple(keys ...string) (result map[string]interface{}, errors map[string]error) {
-	result = make(map[string]interface{}, len(keys)) // Preallocate the result map
-	errors = make(map[string]error, len(keys))       // Preallocate the errors map
+// GetMultiple retrieves the items with the given keys from the cache.
+func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]any, failed map[string]error) {
+	result = make(map[string]any, len(keys))   // Preallocate the result map
+	failed = make(map[string]error, len(keys)) // Preallocate the errors map
 
 	for _, key := range keys {
-		item, ok := cache.items.Get(key)
+		item, ok := hyperCache.backend.Get(key)
 		if !ok {
 			// Add the key to the errors map and continue
-			errors[key] = ErrKeyNotFound
+			failed[key] = errors.ErrKeyNotFound
 			continue
 		}
 
 		// Check if the item has expired
 		if item.Expired() {
 			// Put the item back in the pool
-			CacheItemPool.Put(item)
+			models.ItemPool.Put(item)
 			// Add the key to the errors map
-			errors[key] = ErrKeyExpired
+			failed[key] = errors.ErrKeyExpired
 			// Trigger the expiration loop
-			go cache.expirationLoop()
+			go hyperCache.expirationLoop()
 		} else {
 			item.Touch() // Update the last access time and access count
 			// Add the item to the result map
@@ -366,111 +469,113 @@ func (cache *HyperCache) GetMultiple(keys ...string) (result map[string]interfac
 		}
 
 	}
-	return result, errors
+
+	return
 }
 
 // List lists the items in the cache that meet the specified criteria.
-func (cache *HyperCache) List(options ...FilteringOption) ([]*CacheItem, error) {
-	for _, option := range options {
-		option(cache)
+// It takes in a variadic number of any type as filters, it then checks the backend type, and calls the corresponding
+// implementation of the List function for that backend, with the filters passed in as arguments
+func (hyperCache *HyperCache[T]) List(filters ...any) ([]*models.Item, error) {
+	var listInstance listFunc
+
+	// checking the backend type
+	if hyperCache.cacheBackendChecker.IsInMemory() {
+		// if the backend is an InMemory, we set the listFunc to the ListInMemory function
+		listInstance = listInMemory(hyperCache.backend.(*backend.InMemory))
 	}
 
-	items := make([]*CacheItem, 0)
-	for item := range cache.items.IterBuffered() {
-		if cache.filterFn == nil || cache.filterFn(item.Val) {
-			items = append(items, item.Val)
+	// calling the corresponding implementation of the list function
+	return listInstance(filters...)
+}
+
+// listFunc is a type that defines a function that takes in a variable number of any type as arguments, and returns
+// a slice of Item pointers, and an error
+type listFunc func(options ...any) ([]*models.Item, error)
+
+// listInMemory is a function that takes in an InMemory, and returns a ListFunc
+// it takes any type as filters, and converts them to the specific FilterOption type for the InMemory,
+// and calls the InMemory's List function with these filters.
+func listInMemory(cacheBackend *backend.InMemory) listFunc {
+	return func(options ...any) ([]*models.Item, error) {
+		// here we are converting the filters of any type to the specific FilterOption type for the InMemory
+		filterOptions := make([]backend.FilterOption[backend.InMemory], len(options))
+		for i, option := range options {
+			filterOptions[i] = option.(backend.FilterOption[backend.InMemory])
 		}
+		return cacheBackend.List(filterOptions...)
 	}
-
-	if cache.sortBy == "" {
-		return items, nil
-	}
-
-	sort.Slice(items, func(i, j int) bool {
-		a := items[i].FieldByName(cache.sortBy)
-		b := items[j].FieldByName(cache.sortBy)
-		switch cache.sortBy {
-		case types.SortByKey.String():
-			if cache.sortAscending {
-				return a.Interface().(string) < b.Interface().(string)
-			}
-			return a.Interface().(string) > b.Interface().(string)
-		case types.SortByValue.String():
-			if cache.sortAscending {
-				return a.Interface().(string) < b.Interface().(string)
-			}
-			return a.Interface().(string) > b.Interface().(string)
-		case types.SortByLastAccess.String():
-			if cache.sortAscending {
-				return a.Interface().(time.Time).Before(b.Interface().(time.Time))
-			}
-			return a.Interface().(time.Time).After(b.Interface().(time.Time))
-		case types.SortByAccessCount.String():
-			if cache.sortAscending {
-				return a.Interface().(uint) < b.Interface().(uint)
-			}
-			return a.Interface().(uint) > b.Interface().(uint)
-		case types.SortByExpiration.String():
-			if cache.sortAscending {
-				return a.Interface().(time.Duration) < b.Interface().(time.Duration)
-			}
-			return a.Interface().(time.Duration) > b.Interface().(time.Duration)
-		default:
-			return false
-		}
-	})
-
-	return items, nil
 }
 
 // Remove removes items with the given key from the cache. If an item is not found, it does nothing.
-func (cache *HyperCache) Remove(keys ...string) {
+func (hyperCache *HyperCache[T]) Remove(keys ...string) {
+	hyperCache.backend.Remove(keys...)
 	for _, key := range keys {
-		cache.evictionAlgorithm.Delete(key)
-		cache.items.Remove(key)
+		hyperCache.evictionAlgorithm.Delete(key)
 	}
 }
 
 // Clear removes all items from the cache.
-func (cache *HyperCache) Clear() {
-	for item := range cache.items.IterBuffered() {
-		cache.evictionAlgorithm.Delete(item.Key)
-		cache.items.Remove(item.Key)
+func (hyperCache *HyperCache[T]) Clear() error {
+	var (
+		items []*models.Item
+		err   error
+	)
+
+	// get all expired items
+	if cb, ok := hyperCache.backend.(*backend.InMemory); ok {
+		items, err = cb.List()
+		cb.Clear()
+	} else if cb, ok := hyperCache.backend.(*backend.RedisBackend); ok {
+		items, err = cb.List()
+		if err != nil {
+			return err
+		}
+		err = cb.Clear()
 	}
+
+	for _, item := range items {
+		hyperCache.evictionAlgorithm.Delete(item.Key)
+	}
+	return err
 }
 
 // Capacity returns the capacity of the cache.
-func (cache *HyperCache) Capacity() int {
-	return cache.capacity
+func (hyperCache *HyperCache[T]) Capacity() int {
+	return hyperCache.backend.Capacity()
 }
 
 // Size returns the number of items in the cache.
-func (cache *HyperCache) Size() int {
-	return cache.itemCount()
+func (hyperCache *HyperCache[T]) Size() int {
+	return hyperCache.backend.Size()
 }
 
 // TriggerEviction sends a signal to the eviction loop to start.
-func (cache *HyperCache) TriggerEviction() {
-	cache.evictCh <- true
+func (hyperCache *HyperCache[T]) TriggerEviction() {
+	hyperCache.evictCh <- true
 }
 
 // Stop function stops the expiration and eviction loops and closes the stop channel.
-func (cache *HyperCache) Stop() {
+func (hyperCache *HyperCache[T]) Stop() {
 	// Stop the expiration and eviction loops
-	cache.once = sync.Once{}
-	cache.stop <- true
-	close(cache.stop)
-	close(cache.evictCh)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		hyperCache.stop <- true
+	}()
+	wg.Wait()
+	hyperCache.once = sync.Once{}
 }
 
 // GetStats returns the stats collected by the cache.
-// It returns a map where the keys are the stat names and the values are the stat values.
-func (cache *HyperCache) GetStats() stats.Stats {
+func (hyperCache *HyperCache[T]) GetStats() stats.Stats {
 	// Lock the cache's mutex to ensure thread-safety
-	cache.mutex.RLock()
-	defer cache.mutex.RUnlock()
+	hyperCache.mutex.RLock()
+	defer hyperCache.mutex.RUnlock()
 
-	stats := cache.statsCollector.GetStats()
+	// Get the stats from the stats collector
+	stats := hyperCache.StatsCollector.GetStats()
 
 	return stats
 }

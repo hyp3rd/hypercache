@@ -11,3 +11,7 @@ All the code in this directory is for demonstration purposes only.
 3. [`Eviction`](./eviction/eviction.go) - An example of using the HyperCache package to store a list of items and evict items from the cache based on several different algorithms.
 
 4. [`Stats`](./stats/stats.go) - An example of using the HyperCache package to store a list of items and retrieve the cache stats.
+
+5. [`Clear`](./clear/clear.go) - An example of using the HyperCache package to store a list of items and clear the cache.
+
+6. [`Service`](./service/service.go) - An example of implementing `HyperCacheService` and register middleware.

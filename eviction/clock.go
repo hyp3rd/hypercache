@@ -1,4 +1,4 @@
-package hypercache
+package eviction
 
 // The clock eviction algorithm is a page replacement algorithm that uses a clock-like data structure to keep track of which pages in a computer's memory have been used recently and which have not.
 // It works by maintaining a circular buffer of pages, with a "hand" that points to the next page to be replaced.
@@ -9,11 +9,14 @@ package hypercache
 import (
 	"sync"
 	"time"
+
+	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/models"
 )
 
 // ClockAlgorithm is an in-memory cache with the Clock algorithm.
 type ClockAlgorithm struct {
-	items    map[string]*CacheItem
+	items    map[string]*models.Item
 	mutex    sync.RWMutex
 	capacity int
 }
@@ -21,11 +24,11 @@ type ClockAlgorithm struct {
 // NewClockAlgorithm creates a new in-memory cache with the given capacity and the Clock algorithm.
 func NewClockAlgorithm(capacity int) (*ClockAlgorithm, error) {
 	if capacity < 0 {
-		return nil, ErrInvalidCapacity
+		return nil, errors.ErrInvalidCapacity
 	}
 
 	return &ClockAlgorithm{
-		items:    make(map[string]*CacheItem, capacity),
+		items:    make(map[string]*models.Item, capacity),
 		capacity: capacity,
 	}, nil
 }
@@ -51,11 +54,11 @@ func (c *ClockAlgorithm) Evict() (string, bool) {
 }
 
 // Set sets the item with the given key and value in the cache.
-func (c *ClockAlgorithm) Set(key string, value interface{}) {
+func (c *ClockAlgorithm) Set(key string, value any) {
 	// c.mutex.RLock()
 	// defer c.mutex.RUnlock()
 
-	item := CacheItemPool.Get().(*CacheItem)
+	item := models.ItemPool.Get().(*models.Item)
 	item.Value = value
 	item.LastAccess = time.Now()
 	item.AccessCount = 0
@@ -63,7 +66,7 @@ func (c *ClockAlgorithm) Set(key string, value interface{}) {
 }
 
 // Get retrieves the item with the given key from the cache.
-func (c *ClockAlgorithm) Get(key string) (interface{}, bool) {
+func (c *ClockAlgorithm) Get(key string) (any, bool) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
@@ -86,5 +89,5 @@ func (c *ClockAlgorithm) Delete(key string) {
 		return
 	}
 	delete(c.items, key)
-	CacheItemPool.Put(item)
+	models.ItemPool.Put(item)
 }
