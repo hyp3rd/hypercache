@@ -7,9 +7,9 @@ import (
 	"github.com/hyp3rd/hypercache/stats"
 )
 
-// HyperCacheService is the service interface for the HyperCache.
+// Service is the service interface for the HyperCache.
 // It enables middleware to be added to the service.
-type HyperCacheService interface {
+type Service interface {
 	// Get retrieves a value from the cache using the key
 	Get(key string) (value interface{}, ok bool)
 	// Set stores a value in the cache using the key and expiration duration
@@ -37,10 +37,10 @@ type HyperCacheService interface {
 }
 
 // Middleware describes a service middleware.
-type Middleware func(HyperCacheService) HyperCacheService
+type Middleware func(Service) Service
 
 // ApplyMiddleware applies middlewares to a service.
-func ApplyMiddleware(svc HyperCacheService, mw ...Middleware) HyperCacheService {
+func ApplyMiddleware(svc Service, mw ...Middleware) Service {
 	// Apply each middleware in the chain
 	for _, m := range mw {
 		svc = m(svc)

@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	var svc hypercache.HyperCacheService
+	var svc hypercache.Service
 	hyperCache, err := hypercache.NewHyperCacheInMemoryWithDefaults(10)
 	defer hyperCache.Stop()
 
@@ -36,10 +36,10 @@ func main() {
 	// apply middleware in the same order as you want to execute them
 	svc = hypercache.ApplyMiddleware(svc,
 		// middleware.YourMiddleware,
-		func(next hypercache.HyperCacheService) hypercache.HyperCacheService {
+		func(next hypercache.Service) hypercache.Service {
 			return middleware.NewLoggingMiddleware(next, sugar)
 		},
-		func(next hypercache.HyperCacheService) hypercache.HyperCacheService {
+		func(next hypercache.Service) hypercache.Service {
 			return middleware.NewStatsCollectorMiddleware(next, statsCollector)
 		},
 	)

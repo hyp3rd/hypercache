@@ -9,14 +9,14 @@ import (
 )
 
 // StatsCollectorMiddleware is a middleware that collects stats. It can and should re-use the same stats collector as the hypercache.
-// Must implement the hypercache.HyperCacheService interface.
+// Must implement the hypercache.Service interface.
 type StatsCollectorMiddleware struct {
-	next           hypercache.HyperCacheService
+	next           hypercache.Service
 	statsCollector stats.StatsCollector
 }
 
 // NewStatsCollectorMiddleware returns a new StatsCollectorMiddleware
-func NewStatsCollectorMiddleware(next hypercache.HyperCacheService, statsCollector stats.StatsCollector) hypercache.HyperCacheService {
+func NewStatsCollectorMiddleware(next hypercache.Service, statsCollector stats.StatsCollector) hypercache.Service {
 	return &StatsCollectorMiddleware{next: next, statsCollector: statsCollector}
 }
 

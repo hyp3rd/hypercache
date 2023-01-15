@@ -16,14 +16,14 @@ type Logger interface {
 }
 
 // LoggingMiddleware is a middleware that logs the time it takes to execute the next middleware.
-// Must implement the hypercache.HyperCacheService interface.
+// Must implement the hypercache.Service interface.
 type LoggingMiddleware struct {
-	next   hypercache.HyperCacheService
+	next   hypercache.Service
 	logger Logger
 }
 
 // NewLoggingMiddleware returns a new LoggingMiddleware.
-func NewLoggingMiddleware(next hypercache.HyperCacheService, logger Logger) hypercache.HyperCacheService {
+func NewLoggingMiddleware(next hypercache.Service, logger Logger) hypercache.Service {
 	return &LoggingMiddleware{next: next, logger: logger}
 }
 
