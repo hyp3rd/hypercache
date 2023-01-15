@@ -47,7 +47,7 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	once                  sync.Once                    // `once` holds a Once struct that is used to ensure that the expiration and eviction loops are only started once
 	statsCollectorName    string                       // `statsCollectorName` holds the name of the stats collector that the cache should use when collecting cache statistics
 	// StatsCollector to collect cache statistics
-	StatsCollector stats.StatsCollector
+	StatsCollector stats.Collector
 }
 
 // NewHyperCacheInMemoryWithDefaults initializes a new HyperCache with the default configuration.
