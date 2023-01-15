@@ -67,7 +67,7 @@ func (mw LoggingMiddleware) GetMultiple(keys ...string) (result map[string]any, 
 	return mw.next.GetMultiple(keys...)
 }
 
-// List
+// List logs the time it takes to execute the next middleware.
 func (mw LoggingMiddleware) List(filters ...any) ([]*models.Item, error) {
 	defer func(begin time.Time) {
 		mw.logger.Infof("method List took: %s", time.Since(begin))
@@ -77,7 +77,7 @@ func (mw LoggingMiddleware) List(filters ...any) ([]*models.Item, error) {
 	return mw.next.List(filters...)
 }
 
-// Remove
+// Remove logs the time it takes to execute the next middleware.
 func (mw LoggingMiddleware) Remove(keys ...string) {
 	defer func(begin time.Time) {
 		mw.logger.Infof("method Remove took: %s", time.Since(begin))
@@ -87,7 +87,7 @@ func (mw LoggingMiddleware) Remove(keys ...string) {
 	mw.next.Remove(keys...)
 }
 
-// Clear
+// Clear logs the time it takes to execute the next middleware.
 func (mw LoggingMiddleware) Clear() error {
 	defer func(begin time.Time) {
 		mw.logger.Infof("method Clear took: %s", time.Since(begin))
@@ -97,16 +97,17 @@ func (mw LoggingMiddleware) Clear() error {
 	return mw.next.Clear()
 }
 
-// Capacity
+// Capacity logs the time it takes to execute the next middleware.
 func (mw LoggingMiddleware) Capacity() int {
 	return mw.next.Capacity()
 }
 
-// Size
+// Size logs the time it takes to execute the next middleware.
 func (mw LoggingMiddleware) Size() int {
 	return mw.next.Size()
 }
 
+// TriggerEviction logs the time it takes to execute the next middleware.
 func (mw LoggingMiddleware) TriggerEviction() {
 	defer func(begin time.Time) {
 		mw.logger.Infof("method TriggerEviction took: %s", time.Since(begin))
@@ -116,7 +117,7 @@ func (mw LoggingMiddleware) TriggerEviction() {
 	mw.next.TriggerEviction()
 }
 
-// Stop
+// Stop logs the time it takes to execute the next middleware.
 func (mw LoggingMiddleware) Stop() {
 	defer func(begin time.Time) {
 		mw.logger.Infof("method Stop took: %s", time.Since(begin))
@@ -126,7 +127,7 @@ func (mw LoggingMiddleware) Stop() {
 	mw.next.Stop()
 }
 
-// GetStats
+// GetStats logs the time it takes to execute the next middleware.
 func (mw LoggingMiddleware) GetStats() stats.Stats {
 	defer func(begin time.Time) {
 		mw.logger.Infof("method GetStats took: %s", time.Since(begin))

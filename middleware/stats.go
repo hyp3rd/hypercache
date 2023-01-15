@@ -30,7 +30,7 @@ func (mw StatsCollectorMiddleware) Get(key string) (interface{}, bool) {
 	return mw.next.Get(key)
 }
 
-// Set
+// Set collects stats for the Set method.
 func (mw StatsCollectorMiddleware) Set(key string, value any, expiration time.Duration) error {
 	start := time.Now()
 	defer func() {
@@ -40,7 +40,7 @@ func (mw StatsCollectorMiddleware) Set(key string, value any, expiration time.Du
 	return mw.next.Set(key, value, expiration)
 }
 
-// GetOrSet
+// GetOrSet collects stats for the GetOrSet method.
 func (mw StatsCollectorMiddleware) GetOrSet(key string, value any, expiration time.Duration) (any, error) {
 	start := time.Now()
 	defer func() {
@@ -50,7 +50,7 @@ func (mw StatsCollectorMiddleware) GetOrSet(key string, value any, expiration ti
 	return mw.next.GetOrSet(key, value, expiration)
 }
 
-// GetMultiple
+// GetMultiple collects stats for the GetMultiple method.
 func (mw StatsCollectorMiddleware) GetMultiple(keys ...string) (result map[string]any, failed map[string]error) {
 	start := time.Now()
 	defer func() {
@@ -60,7 +60,7 @@ func (mw StatsCollectorMiddleware) GetMultiple(keys ...string) (result map[strin
 	return mw.next.GetMultiple(keys...)
 }
 
-// List
+// List collects stats for the List method.
 func (mw StatsCollectorMiddleware) List(filters ...any) ([]*models.Item, error) {
 	start := time.Now()
 	defer func() {
@@ -70,6 +70,7 @@ func (mw StatsCollectorMiddleware) List(filters ...any) ([]*models.Item, error) 
 	return mw.next.List(filters...)
 }
 
+// Remove collects stats for the Remove method.
 func (mw StatsCollectorMiddleware) Remove(keys ...string) {
 	start := time.Now()
 	defer func() {
@@ -79,7 +80,7 @@ func (mw StatsCollectorMiddleware) Remove(keys ...string) {
 	mw.next.Remove(keys...)
 }
 
-// Clear
+// Clear collects stats for the Clear method.
 func (mw StatsCollectorMiddleware) Clear() error {
 	start := time.Now()
 	defer func() {
@@ -89,12 +90,12 @@ func (mw StatsCollectorMiddleware) Clear() error {
 	return mw.next.Clear()
 }
 
-// Capacity
+// Capacity returns the capacity of the cache
 func (mw StatsCollectorMiddleware) Capacity() int {
 	return mw.next.Capacity()
 }
 
-// TriggerEviction
+// TriggerEviction triggers the eviction of the cache
 func (mw StatsCollectorMiddleware) TriggerEviction() {
 	start := time.Now()
 	defer func() {
@@ -104,12 +105,12 @@ func (mw StatsCollectorMiddleware) TriggerEviction() {
 	mw.next.TriggerEviction()
 }
 
-// Size
+// Size returns the size of the cache
 func (mw StatsCollectorMiddleware) Size() int {
 	return mw.next.Size()
 }
 
-// Stop stops the cache
+// Stop collects the stats for Stop methods and stops the cache and all its goroutines (if any)
 func (mw StatsCollectorMiddleware) Stop() {
 	start := time.Now()
 	defer func() {
@@ -119,7 +120,7 @@ func (mw StatsCollectorMiddleware) Stop() {
 	mw.next.Stop()
 }
 
-// GetStats
+// GetStats returns the stats of the cache
 func (mw StatsCollectorMiddleware) GetStats() stats.Stats {
 	return mw.next.GetStats()
 }
