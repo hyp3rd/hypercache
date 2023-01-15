@@ -7,6 +7,7 @@ import (
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/backend/redis"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 func main() {
@@ -44,7 +45,10 @@ func main() {
 		fmt.Println("key not found")
 	}
 
-	allItems, err := hyperCache.List()
+	allItems, err := hyperCache.List(
+		backend.WithSortBy[backend.RedisBackend](types.SortByValue),
+		backend.WithSortOrderAsc[backend.RedisBackend](true),
+	)
 	if err != nil {
 		panic(err)
 	}

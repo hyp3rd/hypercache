@@ -1,8 +1,6 @@
 package backend
 
 import (
-	"fmt"
-
 	"github.com/go-redis/redis/v8"
 	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
@@ -32,10 +30,10 @@ func WithRedisClient[T RedisBackend](client *redis.Client) Option[RedisBackend] 
 	}
 }
 
-// WithPrefix is an option that sets the prefix to use for the keys of the items in the cache.
-func WithPrefix[T RedisBackend](prefix string) Option[RedisBackend] {
+// WithKeysSetName is an option that sets the name of the set that holds the keys of the items in the cache
+func WithKeysSetName[T RedisBackend](keysSetName string) Option[RedisBackend] {
 	return func(backend *RedisBackend) {
-		backend.prefix = fmt.Sprintf("%s:", prefix)
+		backend.keysSetName = keysSetName
 	}
 }
 
@@ -43,7 +41,7 @@ func WithPrefix[T RedisBackend](prefix string) Option[RedisBackend] {
 type FilterOption[T any] func(*T)
 
 // ApplyFilterOptions applies the given options to the given filter.
-func ApplyFilterOptions[T any](backend *T, options ...FilterOption[T]) {
+func ApplyFilterOptions[T IBackendConstrain](backend *T, options ...FilterOption[T]) {
 	for _, option := range options {
 		option(backend)
 	}
@@ -51,10 +49,12 @@ func ApplyFilterOptions[T any](backend *T, options ...FilterOption[T]) {
 
 // WithSortBy is an option that sets the field to sort the items by.
 // The field can be any of the fields in the `Item` struct.
-func WithSortBy[T any](field types.SortingField) FilterOption[T] {
+func WithSortBy[T IBackendConstrain](field types.SortingField) FilterOption[T] {
 	return func(a *T) {
 		switch filter := any(a).(type) {
 		case *InMemory:
+			filter.SortBy = field.String()
+		case *RedisBackend:
 			filter.SortBy = field.String()
 		}
 	}
@@ -62,10 +62,13 @@ func WithSortBy[T any](field types.SortingField) FilterOption[T] {
 
 // WithSortAscending is an option that sets the sort order to ascending.
 // When sorting the items in the cache, they will be sorted in ascending order based on the field specified with the `WithSortBy` option.
-func WithSortAscending[T any]() FilterOption[T] {
+// Deprecated: Use `WithSortOrderAsc` instead.
+func WithSortAscending[T IBackendConstrain]() FilterOption[T] {
 	return func(a *T) {
 		switch filter := any(a).(type) {
 		case *InMemory:
+			filter.SortAscending = true
+		case *RedisBackend:
 			filter.SortAscending = true
 		}
 	}
@@ -73,11 +76,27 @@ func WithSortAscending[T any]() FilterOption[T] {
 
 // WithSortDescending is an option that sets the sort order to descending.
 // When sorting the items in the cache, they will be sorted in descending order based on the field specified with the `WithSortBy` option.
-func WithSortDescending[T any]() FilterOption[T] {
+// Deprecated: Use `WithSortOrderAsc` instead.
+func WithSortDescending[T IBackendConstrain]() FilterOption[T] {
 	return func(a *T) {
 		switch filter := any(a).(type) {
 		case *InMemory:
 			filter.SortAscending = false
+		case *RedisBackend:
+			filter.SortAscending = false
+		}
+	}
+}
+
+// WithSortOrderAsc is an option that sets the sort order to ascending or descending.
+// When sorting the items in the cache, they will be sorted in ascending or descending order based on the field specified with the `WithSortBy` option.
+func WithSortOrderAsc[T IBackendConstrain](ascending bool) FilterOption[T] {
+	return func(a *T) {
+		switch filter := any(a).(type) {
+		case *InMemory:
+			filter.SortAscending = ascending
+		case *RedisBackend:
+			filter.SortAscending = ascending
 		}
 	}
 }

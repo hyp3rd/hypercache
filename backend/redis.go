@@ -2,8 +2,8 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"sort"
-	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/hyp3rd/hypercache/errors"
@@ -16,7 +16,7 @@ import (
 type RedisBackend struct {
 	rdb         *redis.Client          // redis client to interact with the redis server
 	capacity    int                    // capacity of the cache, limits the number of items that can be stored in the cache
-	prefix      string                 // prefix is the prefix used to prefix the keys of the items in the cache
+	keysSetName string                 // keysSetName is the name of the set that holds the keys of the items in the cache
 	Serializer  serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
 	SortFilters                        // SortFilters holds the filters applied when listing the items in the cache
 }
@@ -36,8 +36,8 @@ func NewRedisBackend[T RedisBackend](redisOptions ...Option[RedisBackend]) (back
 		return nil, errors.ErrInvalidCapacity
 	}
 
-	if rb.prefix == "" {
-		rb.prefix = "hypercache-"
+	if rb.keysSetName == "" {
+		rb.keysSetName = "hypercache"
 	}
 
 	rb.Serializer = serializer.New()
@@ -72,9 +72,17 @@ func (cacheBackend *RedisBackend) Size() int {
 
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
 func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
+	// Check if the key is in the set of keys
+	isMember, err := cacheBackend.rdb.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
+	if err != nil {
+		return nil, false
+	}
+	if !isMember {
+		return nil, false
+	}
+
 	// Get the item from the cacheBackend
 	item = models.ItemPool.Get().(*models.Item)
-	// fmt.Println(fmt.Sprintf("%s%s", cacheBackend.prefix, key))
 	data, err := cacheBackend.rdb.HGet(context.Background(), key, "data").Bytes()
 	if err != nil {
 		// Check if the item is not found
@@ -91,15 +99,6 @@ func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
 	return item, true
 }
 
-// generateKey
-// @param key
-// func generateKey(key string) string {
-// 	hash := fnv.New64a()
-// 	_, _ = hash.Write([]byte(key))
-
-// 	return strconv.FormatUint(hash.Sum64(), 36)
-// }
-
 // Set stores the Item in the cacheBackend.
 func (cacheBackend *RedisBackend) Set(item *models.Item) error {
 	// Check if the item is valid
@@ -115,8 +114,7 @@ func (cacheBackend *RedisBackend) Set(item *models.Item) error {
 
 	expiration := item.Expiration.String()
 
-	// Set the item in the cacheBackend
-	// fmt.Println(fmt.Sprintf("%s%s", cacheBackend.prefix, item.Key))
+	// Store the item in the cacheBackend
 	err = cacheBackend.rdb.HSet(context.Background(), item.Key, map[string]interface{}{
 		"data":       data,
 		"expiration": expiration,
@@ -125,6 +123,9 @@ func (cacheBackend *RedisBackend) Set(item *models.Item) error {
 	if err != nil {
 		return err
 	}
+
+	// Add the key to the set of keys associated with the cache prefix
+	cacheBackend.rdb.SAdd(context.Background(), cacheBackend.keysSetName, item.Key)
 
 	// Set the expiration if it is not zero
 	if item.Expiration > 0 {
@@ -139,27 +140,10 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
 
-	var (
-		cursor uint64   // cursor used to iterate over the keys
-		keys   []string // keys of the items in the cacheBackend
-		err    error    // error returned by the redis client
-	)
-
-	// Iterate over the keys in the cacheBackend
-	for {
-		var nextCursor uint64 // next cursor returned by the redis client
-		// Scan the keys in the cacheBackend
-		// fmt.Println(fmt.Sprintf("%s*", cacheBackend.prefix))
-		keys, nextCursor, err = cacheBackend.rdb.Scan(context.Background(), cursor, "*", 100).Result()
-		if err != nil {
-			return nil, err
-		}
-		// Update the cursor
-		cursor = nextCursor
-		if cursor == 0 {
-			// No more keys to iterate over
-			break
-		}
+	// Get the set of keys
+	keys, err := cacheBackend.rdb.SMembers(context.Background(), cacheBackend.keysSetName).Result()
+	if err != nil {
+		return nil, err
 	}
 
 	// Create a slice to hold the items
@@ -168,16 +152,14 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 	// Iterate over the keys and retrieve the items
 	for _, key := range keys {
 		// Get the item from the cacheBackend
-		// fmt.Println("gettimg key", key)
 		item, ok := cacheBackend.Get(key)
-		if !ok {
-			continue
+		if ok {
+			// Check if the item matches the filter options
+			if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
+				continue
+			}
+			items = append(items, item)
 		}
-		// Check if the item matches the filter options
-		if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
-			continue
-		}
-		items = append(items, item)
 	}
 
 	// Sort the items
@@ -186,42 +168,82 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 		return items, nil
 	}
 
-	sort.Slice(items, func(i, j int) bool {
-		a := items[i].FieldByName(cacheBackend.SortBy)
-		b := items[j].FieldByName(cacheBackend.SortBy)
-		switch cacheBackend.SortBy {
-		case types.SortByKey.String():
-			if cacheBackend.SortAscending {
-				return a.Interface().(string) < b.Interface().(string)
-			}
-			return a.Interface().(string) > b.Interface().(string)
-		case types.SortByValue.String():
-			if cacheBackend.SortAscending {
-				return a.Interface().(string) < b.Interface().(string)
-			}
-			return a.Interface().(string) > b.Interface().(string)
-		case types.SortByLastAccess.String():
-			if cacheBackend.SortAscending {
-				return a.Interface().(time.Time).Before(b.Interface().(time.Time))
-			}
-			return a.Interface().(time.Time).After(b.Interface().(time.Time))
-		case types.SortByAccessCount.String():
-			if cacheBackend.SortAscending {
-				return a.Interface().(uint) < b.Interface().(uint)
-			}
-			return a.Interface().(uint) > b.Interface().(uint)
-		case types.SortByExpiration.String():
-			if cacheBackend.SortAscending {
-				return a.Interface().(time.Duration) < b.Interface().(time.Duration)
-			}
-			return a.Interface().(time.Duration) > b.Interface().(time.Duration)
-		default:
-			return false
-		}
-	})
+	var sorter sort.Interface
+	switch cacheBackend.SortBy {
+	case types.SortByKey.String():
+		sorter = &itemSorterByKey{items: items}
+	case types.SortByValue.String():
+		sorter = &itemSorterByValue{items: items}
+	case types.SortByLastAccess.String():
+		sorter = &itemSorterByLastAccess{items: items}
+	case types.SortByAccessCount.String():
+		sorter = &itemSorterByAccessCount{items: items}
+	case types.SortByExpiration.String():
+		sorter = &itemSorterByExpiration{items: items}
+	default:
+		return nil, fmt.Errorf("unknown sortBy field: %s", cacheBackend.SortBy)
+	}
+
+	if !cacheBackend.SortAscending {
+		sorter = sort.Reverse(sorter)
+	}
+
+	sort.Sort(sorter)
 
 	return items, nil
 }
+
+// func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*models.Item, error) {
+// 	// Apply the filter options
+// 	// Apply the filter options
+// 	ApplyFilterOptions(cacheBackend, options...)
+
+// 	// Initialize the score range
+// 	var min, max string
+// 	if cacheBackend.SortAscending {
+// 		min = "-inf"
+// 		max = "+inf"
+// 	} else {
+// 		min = "+inf"
+// 		max = "-inf"
+// 	}
+
+// 	// Get the keys from the sorted set
+// 	var keys []string
+// 	var err error
+// 	zrangeby := &redis.ZRangeBy{
+// 		Min: min, Max: max,
+// 	}
+// 	if cacheBackend.SortBy == types.SortByLastAccess.String() {
+// 		keys, err = cacheBackend.rdb.ZRangeByScore(context.Background(), "last_access_sort", zrangeby).Result()
+// 	} else if cacheBackend.SortBy == types.SortByAccessCount.String() {
+// 		keys, err = cacheBackend.rdb.ZRangeByScore(context.Background(), "access_count_sort", zrangeby).Result()
+// 	} else {
+// 		return nil, fmt.Errorf("invalid sorting criteria: %s", cacheBackend.SortBy)
+// 	}
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	// Create a slice to hold the items
+// 	items := make([]*models.Item, 0, len(keys))
+
+// 	// Iterate over the keys and retrieve the items
+// 	for _, key := range keys {
+// 		// Get the item from the cacheBackend
+// 		item, ok := cacheBackend.Get(key)
+// 		if !ok {
+// 			continue
+// 		}
+// 		// Check if the item matches the filter options
+// 		if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
+// 			continue
+// 		}
+// 		items = append(items, item)
+// 	}
+
+// 	return items, nil
+// }
 
 // Remove removes an item from the cache with the given key
 func (cacheBackend *RedisBackend) Remove(keys ...string) error {
