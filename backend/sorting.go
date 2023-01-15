@@ -6,19 +6,20 @@ import (
 	"github.com/hyp3rd/hypercache/cache"
 )
 
+// SortFilters holds the filters applied when listing the items in the cache
 type SortFilters struct {
 	// SortBy is the field to sort the items by.
-	// The field can be any of the fields in the `CacheItem` struct.
+	// The field can be any of the fields in the `Item` struct.
 	SortBy string
 	// SortAscending is a boolean indicating whether the items should be sorted in ascending order.
 	// If set to false, the items will be sorted in descending order.
 	SortAscending bool
-	// FilterFunc is a predicate that takes a `CacheItem` as an argument and returns a boolean indicating whether the item should be included in the cache.
-	FilterFunc func(item *cache.CacheItem) bool // filters applied when listing the items in the cache
+	// FilterFunc is a predicate that takes a `Item` as an argument and returns a boolean indicating whether the item should be included in the cache.
+	FilterFunc func(item *cache.Item) bool // filters applied when listing the items in the cache
 }
 
 type itemSorterByKey struct {
-	items []*cache.CacheItem
+	items []*cache.Item
 }
 
 func (s *itemSorterByKey) Len() int           { return len(s.items) }
@@ -26,7 +27,7 @@ func (s *itemSorterByKey) Swap(i, j int)      { s.items[i], s.items[j] = s.items
 func (s *itemSorterByKey) Less(i, j int) bool { return s.items[i].Key < s.items[j].Key }
 
 type itemSorterByValue struct {
-	items []*cache.CacheItem
+	items []*cache.Item
 }
 
 // func (s *itemSorterByValue) Len() int      { return len(s.items) }
@@ -75,7 +76,7 @@ func (s *itemSorterByValue) Less(i, j int) bool {
 }
 
 type itemSorterByExpiration struct {
-	items []*cache.CacheItem
+	items []*cache.Item
 }
 
 func (s *itemSorterByExpiration) Len() int      { return len(s.items) }
@@ -85,7 +86,7 @@ func (s *itemSorterByExpiration) Less(i, j int) bool {
 }
 
 type itemSorterByLastAccess struct {
-	items []*cache.CacheItem
+	items []*cache.Item
 }
 
 func (s *itemSorterByLastAccess) Len() int      { return len(s.items) }
@@ -95,7 +96,7 @@ func (s *itemSorterByLastAccess) Less(i, j int) bool {
 }
 
 type itemSorterByAccessCount struct {
-	items []*cache.CacheItem
+	items []*cache.Item
 }
 
 func (s *itemSorterByAccessCount) Len() int      { return len(s.items) }

@@ -60,8 +60,8 @@ func (cacheBackend *RedisBackend) Size() int {
 	return cacheBackend.itemCount()
 }
 
-// Get retrieves the CacheItem with the given key from the cacheBackend. If the item is not found, it returns nil.
-func (cacheBackend *RedisBackend) Get(key string) (item *cache.CacheItem, ok bool) {
+// Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
+func (cacheBackend *RedisBackend) Get(key string) (item *cache.Item, ok bool) {
 	data, err := cacheBackend.client.HGetAll(key).Result()
 	if err != nil {
 		if err == redis.Nil {
@@ -70,15 +70,15 @@ func (cacheBackend *RedisBackend) Get(key string) (item *cache.CacheItem, ok boo
 		return nil, false
 	}
 
-	item = cache.CacheItemPool.Get().(*cache.CacheItem)
+	item = cache.CacheItemPool.Get().(*cache.Item)
 	item.UnmarshalBinary([]byte(data["data"]))
 	item.Expiration, _ = time.ParseDuration(data["expiration"])
 
 	return item, true
 }
 
-// Set stores the CacheItem in the cacheBackend.
-func (cacheBackend *RedisBackend) Set(item *cache.CacheItem) error {
+// Set stores the Item in the cacheBackend.
+func (cacheBackend *RedisBackend) Set(item *cache.Item) error {
 	if err := item.Valid(); err != nil {
 		return err
 	}
@@ -99,14 +99,14 @@ func (cacheBackend *RedisBackend) Set(item *cache.CacheItem) error {
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*cache.CacheItem, error) {
+func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*cache.Item, error) {
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
 
 	// Get all keys
 	keys, _ := cacheBackend.client.HKeys("*").Result()
 
-	items := make([]*cache.CacheItem, 0, len(keys))
+	items := make([]*cache.Item, 0, len(keys))
 
 	for _, key := range keys {
 		item, ok := cacheBackend.Get(key)
@@ -156,14 +156,14 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 	return items, nil
 }
 
-// func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*cache.CacheItem, error) {
+// func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*cache.Item, error) {
 // 	// Apply the filter options
 // 	ApplyFilterOptions(cacheBackend, options...)
 
 // 	// Get all keys
 // 	keys, _ := cacheBackend.client.Keys("*").Result()
 
-// 	items := make([]*cache.CacheItem, 0, len(keys))
+// 	items := make([]*cache.Item, 0, len(keys))
 
 // 	for _, key := range keys {
 // 		item, ok := cacheBackend.Get(key)

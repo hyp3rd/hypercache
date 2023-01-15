@@ -16,7 +16,7 @@ import (
 
 // ClockAlgorithm is an in-memory cache with the Clock algorithm.
 type ClockAlgorithm struct {
-	items    map[string]*cache.CacheItem
+	items    map[string]*cache.Item
 	mutex    sync.RWMutex
 	capacity int
 }
@@ -28,7 +28,7 @@ func NewClockAlgorithm(capacity int) (*ClockAlgorithm, error) {
 	}
 
 	return &ClockAlgorithm{
-		items:    make(map[string]*cache.CacheItem, capacity),
+		items:    make(map[string]*cache.Item, capacity),
 		capacity: capacity,
 	}, nil
 }
@@ -58,7 +58,7 @@ func (c *ClockAlgorithm) Set(key string, value any) {
 	// c.mutex.RLock()
 	// defer c.mutex.RUnlock()
 
-	item := cache.CacheItemPool.Get().(*cache.CacheItem)
+	item := cache.CacheItemPool.Get().(*cache.Item)
 	item.Value = value
 	item.LastAccess = time.Now()
 	item.AccessCount = 0

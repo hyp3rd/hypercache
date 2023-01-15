@@ -39,7 +39,7 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	expirationTriggerCh   chan bool                    // `expirationTriggerCh` channel to signal the expiration trigger loop to start
 	evictCh               chan bool                    // `evictCh` channel to signal the eviction loop to start
 	evictionAlgorithmName string                       // `evictionAlgorithmName` name of the eviction algorithm to use when evicting items
-	evictionAlgorithm     eviction.EvictionAlgorithm   // `evictionAlgorithm` eviction algorithm to use when evicting items
+	evictionAlgorithm     eviction.Algorithm           // `evictionAlgorithm` eviction algorithm to use when evicting items
 	expirationInterval    time.Duration                // `expirationInterval` interval at which the expiration loop should run
 	evictionInterval      time.Duration                // interval at which the eviction loop should run
 	maxEvictionCount      uint                         // `evictionInterval` maximum number of items that can be evicted in a single eviction loop iteration
@@ -204,7 +204,7 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 
 	var (
 		expiredCount int64
-		items        []*cache.CacheItem
+		items        []*cache.Item
 		err          error
 	)
 
@@ -212,7 +212,7 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 	if cb, ok := hyperCache.backend.(*backend.InMemoryBackend); ok {
 		items, err = cb.List(
 			backend.WithSortBy[backend.InMemoryBackend](types.SortByExpiration),
-			backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.CacheItem) bool {
+			backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.Item) bool {
 				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
 			}),
 		)
@@ -220,7 +220,7 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 	} else if cb, ok := hyperCache.backend.(*backend.RedisBackend); ok {
 		items, err = cb.List(
 			backend.WithSortBy[backend.RedisBackend](types.SortByExpiration),
-			backend.WithFilterFunc[backend.RedisBackend](func(item *cache.CacheItem) bool {
+			backend.WithFilterFunc[backend.RedisBackend](func(item *cache.Item) bool {
 				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
 			}),
 		)
@@ -301,7 +301,7 @@ func (hyperCache *HyperCache[T]) SetCapacity(capacity int) {
 // If the capacity of the cache is reached, the cache will leverage the eviction algorithm proactively if the evictionInterval is zero. If not, the background process will take care of the eviction.
 func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Duration) error {
 	// Create a new cache item and set its properties
-	item := cache.CacheItemPool.Get().(*cache.CacheItem)
+	item := cache.CacheItemPool.Get().(*cache.Item)
 	item.Key = key
 	item.Value = value
 	item.Expiration = expiration
@@ -330,9 +330,9 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 
 func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration time.Duration) error {
 	// Create a new cache item and set its properties
-	cacheItems := make([]*cache.CacheItem, 0, len(items))
+	cacheItems := make([]*cache.Item, 0, len(items))
 	for key, value := range items {
-		item := cache.CacheItemPool.Get().(*cache.CacheItem)
+		item := cache.CacheItemPool.Get().(*cache.Item)
 		item.Key = key
 		item.Value = value
 		item.Expiration = expiration
@@ -407,7 +407,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 	}
 
 	// if the item is not found, add it to the cache
-	item := cache.CacheItemPool.Get().(*cache.CacheItem)
+	item := cache.CacheItemPool.Get().(*cache.Item)
 	item.Key = key
 	item.Value = value
 	item.Expiration = expiration
@@ -474,7 +474,7 @@ func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]
 // List lists the items in the cache that meet the specified criteria.
 // It takes in a variadic number of any type as filters, it then checks the backend type, and calls the corresponding
 // implementation of the List function for that backend, with the filters passed in as arguments
-func (hyperCache *HyperCache[T]) List(filters ...any) ([]*cache.CacheItem, error) {
+func (hyperCache *HyperCache[T]) List(filters ...any) ([]*cache.Item, error) {
 	var listInstance listFunc
 
 	// checking the backend type
@@ -488,14 +488,14 @@ func (hyperCache *HyperCache[T]) List(filters ...any) ([]*cache.CacheItem, error
 }
 
 // listFunc is a type that defines a function that takes in a variable number of any type as arguments, and returns
-// a slice of CacheItem pointers, and an error
-type listFunc func(options ...any) ([]*cache.CacheItem, error)
+// a slice of Item pointers, and an error
+type listFunc func(options ...any) ([]*cache.Item, error)
 
 // listInMemory is a function that takes in an InMemoryBackend, and returns a ListFunc
 // it takes any type as filters, and converts them to the specific FilterOption type for the InMemoryBackend,
 // and calls the InMemoryBackend's List function with these filters.
 func listInMemory(cacheBackend *backend.InMemoryBackend) listFunc {
-	return func(options ...any) ([]*cache.CacheItem, error) {
+	return func(options ...any) ([]*cache.Item, error) {
 		// here we are converting the filters of any type to the specific FilterOption type for the InMemoryBackend
 		filterOptions := make([]backend.FilterOption[backend.InMemoryBackend], len(options))
 		for i, option := range options {
@@ -516,7 +516,7 @@ func (hyperCache *HyperCache[T]) Remove(keys ...string) {
 // Clear removes all items from the cache.
 func (hyperCache *HyperCache[T]) Clear() error {
 	var (
-		items []*cache.CacheItem
+		items []*cache.Item
 		err   error
 	)
 

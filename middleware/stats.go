@@ -61,7 +61,7 @@ func (mw StatsCollectorMiddleware) GetMultiple(keys ...string) (result map[strin
 }
 
 // List
-func (mw StatsCollectorMiddleware) List(filters ...any) ([]*cache.CacheItem, error) {
+func (mw StatsCollectorMiddleware) List(filters ...any) ([]*cache.Item, error) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_list_duration", time.Since(start).Nanoseconds())

@@ -13,17 +13,17 @@ import (
 
 // InMemoryBackend is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
 type InMemoryBackend struct {
-	items       datastructure.ConcurrentMap[string, *cache.CacheItem] // map to store the items in the cache
-	capacity    int                                                   // capacity of the cache, limits the number of items that can be stored in the cache
-	mutex       sync.RWMutex                                          // mutex to protect the cache from concurrent access
-	SortFilters                                                       // filters applied when listing the items in the cache
+	items       datastructure.ConcurrentMap[string, *cache.Item] // map to store the items in the cache
+	capacity    int                                              // capacity of the cache, limits the number of items that can be stored in the cache
+	mutex       sync.RWMutex                                     // mutex to protect the cache from concurrent access
+	SortFilters                                                  // filters applied when listing the items in the cache
 }
 
 // NewInMemoryBackend creates a new in-memory cache with the given options.
 func NewInMemoryBackend[T InMemoryBackend](opts ...BackendOption[InMemoryBackend]) (backend IInMemoryBackend[T], err error) {
 
 	inMemoryBackend := &InMemoryBackend{
-		items: datastructure.New[*cache.CacheItem](),
+		items: datastructure.New[*cache.Item](),
 	}
 
 	ApplyBackendOptions(inMemoryBackend, opts...)
@@ -50,7 +50,7 @@ func (cacheBackend *InMemoryBackend) itemCount() int {
 }
 
 // Get retrieves the item with the given key from the cacheBackend. If the item is not found, it returns nil.
-func (cacheBackend *InMemoryBackend) Get(key string) (item *cache.CacheItem, ok bool) {
+func (cacheBackend *InMemoryBackend) Get(key string) (item *cache.Item, ok bool) {
 	item, ok = cacheBackend.items.Get(key)
 	if !ok {
 		return nil, false
@@ -60,8 +60,8 @@ func (cacheBackend *InMemoryBackend) Get(key string) (item *cache.CacheItem, ok 
 	return item, true
 }
 
-// Set adds a CacheItem to the cache.
-func (cacheBackend *InMemoryBackend) Set(item *cache.CacheItem) error {
+// Set adds a Item to the cache.
+func (cacheBackend *InMemoryBackend) Set(item *cache.Item) error {
 	// Check for invalid key, value, or duration
 	if err := item.Valid(); err != nil {
 		cache.CacheItemPool.Put(item)
@@ -76,11 +76,11 @@ func (cacheBackend *InMemoryBackend) Set(item *cache.CacheItem) error {
 }
 
 // List the items in the cache that meet the specified criteria.
-// func (cacheBackend *InMemoryBackend) List(options ...FilterOption[InMemoryBackend]) ([]*cache.CacheItem, error) {
+// func (cacheBackend *InMemoryBackend) List(options ...FilterOption[InMemoryBackend]) ([]*cache.Item, error) {
 // 	// Apply the filter options
 // 	ApplyFilterOptions(cacheBackend, options...)
 
-// 	items := make([]*cache.CacheItem, 0)
+// 	items := make([]*cache.Item, 0)
 // 	for item := range cacheBackend.items.IterBuffered() {
 // 		if cacheBackend.FilterFunc == nil || cacheBackend.FilterFunc(item.Val) {
 // 			items = append(items, item.Val)
@@ -129,11 +129,11 @@ func (cacheBackend *InMemoryBackend) Set(item *cache.CacheItem) error {
 // }
 
 // List returns a list of all items in the cache filtered and ordered by the given options
-func (cacheBackend *InMemoryBackend) List(options ...FilterOption[InMemoryBackend]) ([]*cache.CacheItem, error) {
+func (cacheBackend *InMemoryBackend) List(options ...FilterOption[InMemoryBackend]) ([]*cache.Item, error) {
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
 
-	items := make([]*cache.CacheItem, 0)
+	items := make([]*cache.Item, 0)
 	for item := range cacheBackend.items.IterBuffered() {
 		if cacheBackend.FilterFunc == nil || cacheBackend.FilterFunc(item.Val) {
 			items = append(items, item.Val)

@@ -68,7 +68,7 @@ func (mw LoggingMiddleware) GetMultiple(keys ...string) (result map[string]any, 
 }
 
 // List
-func (mw LoggingMiddleware) List(filters ...any) ([]*cache.CacheItem, error) {
+func (mw LoggingMiddleware) List(filters ...any) ([]*cache.Item, error) {
 	defer func(begin time.Time) {
 		mw.logger.Infof("method List took: %s", time.Since(begin))
 	}(time.Now())

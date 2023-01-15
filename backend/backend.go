@@ -10,33 +10,33 @@ type IBackendConstrain interface {
 	InMemoryBackend | RedisBackend
 }
 
-// InMemoryBackend is the interface that must be implemented by in-memory cache backends.
+// IInMemoryBackend is the interface that must be implemented by in-memory cache backends.
 type IInMemoryBackend[T IBackendConstrain] interface {
 	// IBackend[T] is the interface that must be implemented by cache backends.
 	IBackend[T]
 	// List the items in the cache that meet the specified criteria.
-	List(options ...FilterOption[InMemoryBackend]) ([]*cache.CacheItem, error)
+	List(options ...FilterOption[InMemoryBackend]) ([]*cache.Item, error)
 	// Clear removes all items from the cache.
 	Clear()
 }
 
-// RedisBackend is the interface that must be implemented by Redis cache backends.
+// IRedisBackend is the interface that must be implemented by Redis cache backends.
 type IRedisBackend[T IBackendConstrain] interface {
 	// IBackend[T] is the interface that must be implemented by cache backends.
 	IBackend[T]
 	// List the items in the cache that meet the specified criteria.
-	List(options ...FilterOption[RedisBackend]) ([]*cache.CacheItem, error)
+	List(options ...FilterOption[RedisBackend]) ([]*cache.Item, error)
 	// Clear removes all items from the cache.
 	Clear() error
 }
 
-// Backend is the interface that must be implemented by cache backends.
+// IBackend is the interface that must be implemented by cache backends.
 type IBackend[T IBackendConstrain] interface {
 	// Get retrieves the item with the given key from the cache.
 	// If the key is not found in the cache, it returns nil.
-	Get(key string) (item *cache.CacheItem, ok bool)
+	Get(key string) (item *cache.Item, ok bool)
 	// Set adds a new item to the cache.
-	Set(item *cache.CacheItem) error
+	Set(item *cache.Item) error
 	// Capacity returns the maximum number of items that can be stored in the cache.
 	Capacity() int
 	// SetCapacity sets the maximum number of items that can be stored in the cache.
@@ -47,7 +47,8 @@ type IBackend[T IBackendConstrain] interface {
 	Remove(keys ...string) error
 }
 
-// Deprecated: NewBackend creates a new cache backend.
+// NewBackend creates a new cache backend.
+// Deprecated: Use specific backend constructors instead, e.g. NewInMemoryBackend or NewRedisBackend.
 func NewBackend[T IBackendConstrain](backendType string, opts ...any) (IBackend[T], error) {
 	switch backendType {
 	case "memory":

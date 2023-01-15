@@ -33,6 +33,7 @@ func WithRedisClient[T RedisBackend](client *redis.Client) BackendOption[RedisBa
 // FilterOption is a function type that can be used to configure the `Filter` struct.
 type FilterOption[T any] func(*T)
 
+// ApplyFilterOptions applies the given options to the given filter.
 func ApplyFilterOptions[T any](backend *T, options ...FilterOption[T]) {
 	for _, option := range options {
 		option(backend)
@@ -40,7 +41,7 @@ func ApplyFilterOptions[T any](backend *T, options ...FilterOption[T]) {
 }
 
 // WithSortBy is an option that sets the field to sort the items by.
-// The field can be any of the fields in the `CacheItem` struct.
+// The field can be any of the fields in the `Item` struct.
 func WithSortBy[T any](field types.SortingField) FilterOption[T] {
 	return func(a *T) {
 		switch filter := any(a).(type) {
@@ -73,8 +74,8 @@ func WithSortDescending[T any]() FilterOption[T] {
 }
 
 // WithFilterFunc is an option that sets the filter function to use.
-// The filter function is a predicate that takes a `CacheItem` as an argument and returns a boolean indicating whether the item should be included in the cache.
-func WithFilterFunc[T any](fn func(item *cache.CacheItem) bool) FilterOption[T] {
+// The filter function is a predicate that takes a `Item` as an argument and returns a boolean indicating whether the item should be included in the cache.
+func WithFilterFunc[T any](fn func(item *cache.Item) bool) FilterOption[T] {
 	return func(a *T) {
 		switch filter := any(a).(type) {
 		case *InMemoryBackend:

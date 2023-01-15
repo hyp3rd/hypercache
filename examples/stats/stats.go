@@ -53,7 +53,7 @@ func main() {
 	list, err := hyperCache.List(
 		backend.WithSortBy[backend.InMemoryBackend](types.SortByValue),
 		backend.WithSortDescending[backend.InMemoryBackend](),
-		backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.CacheItem) bool {
+		backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.Item) bool {
 			return item.Expiration > time.Second
 		}),
 	)
