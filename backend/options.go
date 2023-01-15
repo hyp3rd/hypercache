@@ -1,7 +1,9 @@
 package backend
 
 import (
-	"github.com/go-redis/redis"
+	"fmt"
+
+	"github.com/go-redis/redis/v8"
 	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
@@ -26,7 +28,14 @@ func WithCapacity[T InMemory](capacity int) Option[InMemory] {
 // WithRedisClient is an option that sets the redis client to use.
 func WithRedisClient[T RedisBackend](client *redis.Client) Option[RedisBackend] {
 	return func(backend *RedisBackend) {
-		backend.client = client
+		backend.rdb = client
+	}
+}
+
+// WithPrefix is an option that sets the prefix to use for the keys of the items in the cache.
+func WithPrefix[T RedisBackend](prefix string) Option[RedisBackend] {
+	return func(backend *RedisBackend) {
+		backend.prefix = fmt.Sprintf("%s:", prefix)
 	}
 }
 

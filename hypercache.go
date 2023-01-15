@@ -485,6 +485,11 @@ func (hyperCache *HyperCache[T]) List(filters ...any) ([]*models.Item, error) {
 		listInstance = listInMemory(hyperCache.backend.(*backend.InMemory))
 	}
 
+	if hyperCache.cacheBackendChecker.IsRedis() {
+		// if the backend is a Redis, we set the listFunc to the ListRedis function
+		listInstance = listRedis(hyperCache.backend.(*backend.RedisBackend))
+	}
+
 	// calling the corresponding implementation of the list function
 	return listInstance(filters...)
 }
@@ -502,6 +507,17 @@ func listInMemory(cacheBackend *backend.InMemory) listFunc {
 		filterOptions := make([]backend.FilterOption[backend.InMemory], len(options))
 		for i, option := range options {
 			filterOptions[i] = option.(backend.FilterOption[backend.InMemory])
+		}
+		return cacheBackend.List(filterOptions...)
+	}
+}
+
+func listRedis(cacheBackend *backend.RedisBackend) listFunc {
+	return func(options ...any) ([]*models.Item, error) {
+		// here we are converting the filters of any type to the specific FilterOption type for the Redis
+		filterOptions := make([]backend.FilterOption[backend.RedisBackend], len(options))
+		for i, option := range options {
+			filterOptions[i] = option.(backend.FilterOption[backend.RedisBackend])
 		}
 		return cacheBackend.List(filterOptions...)
 	}

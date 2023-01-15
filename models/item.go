@@ -11,7 +11,6 @@ import (
 
 	// "https://github.com/kelindar/binary"
 	"github.com/hyp3rd/hypercache/errors"
-	"github.com/shamaton/msgpack/v2"
 )
 
 // Item is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
@@ -100,11 +99,11 @@ func (item *Item) Expired() bool {
 //
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
-func (item *Item) MarshalBinary() (data []byte, err error) {
-	return msgpack.Marshal(item)
-}
+// func (item *Item) MarshalBinary() (data []byte, err error) {
+// 	return msgpack.Marshal(item)
+// }
 
-// UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
-func (item *Item) UnmarshalBinary(data []byte) error {
-	return msgpack.Unmarshal(data, item)
-}
+// // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
+// func (item *Item) UnmarshalBinary(data []byte) error {
+// 	return msgpack.Unmarshal(data, item)
+// }
