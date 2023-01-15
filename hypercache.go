@@ -549,31 +549,31 @@ func (hyperCache *HyperCache[T]) Size() int {
 }
 
 // TriggerEviction sends a signal to the eviction loop to start.
-func (cache *HyperCache[T]) TriggerEviction() {
-	cache.evictCh <- true
+func (hyperCache *HyperCache[T]) TriggerEviction() {
+	hyperCache.evictCh <- true
 }
 
 // Stop function stops the expiration and eviction loops and closes the stop channel.
-func (cache *HyperCache[T]) Stop() {
+func (hyperCache *HyperCache[T]) Stop() {
 	// Stop the expiration and eviction loops
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		cache.stop <- true
+		hyperCache.stop <- true
 	}()
 	wg.Wait()
-	cache.once = sync.Once{}
+	hyperCache.once = sync.Once{}
 }
 
 // GetStats returns the stats collected by the cache.
-func (cache *HyperCache[T]) GetStats() stats.Stats {
+func (hyperCache *HyperCache[T]) GetStats() stats.Stats {
 	// Lock the cache's mutex to ensure thread-safety
-	cache.mutex.RLock()
-	defer cache.mutex.RUnlock()
+	hyperCache.mutex.RLock()
+	defer hyperCache.mutex.RUnlock()
 
 	// Get the stats from the stats collector
-	stats := cache.StatsCollector.GetStats()
+	stats := hyperCache.StatsCollector.GetStats()
 
 	return stats
 }
