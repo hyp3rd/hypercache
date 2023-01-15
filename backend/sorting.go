@@ -3,7 +3,7 @@ package backend
 import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/models"
 )
 
 // SortFilters holds the filters applied when listing the items in the cache
@@ -15,11 +15,11 @@ type SortFilters struct {
 	// If set to false, the items will be sorted in descending order.
 	SortAscending bool
 	// FilterFunc is a predicate that takes a `Item` as an argument and returns a boolean indicating whether the item should be included in the cache.
-	FilterFunc func(item *cache.Item) bool // filters applied when listing the items in the cache
+	FilterFunc func(item *models.Item) bool // filters applied when listing the items in the cache
 }
 
 type itemSorterByKey struct {
-	items []*cache.Item
+	items []*models.Item
 }
 
 func (s *itemSorterByKey) Len() int           { return len(s.items) }
@@ -27,7 +27,7 @@ func (s *itemSorterByKey) Swap(i, j int)      { s.items[i], s.items[j] = s.items
 func (s *itemSorterByKey) Less(i, j int) bool { return s.items[i].Key < s.items[j].Key }
 
 type itemSorterByValue struct {
-	items []*cache.Item
+	items []*models.Item
 }
 
 // func (s *itemSorterByValue) Len() int      { return len(s.items) }
@@ -76,7 +76,7 @@ func (s *itemSorterByValue) Less(i, j int) bool {
 }
 
 type itemSorterByExpiration struct {
-	items []*cache.Item
+	items []*models.Item
 }
 
 func (s *itemSorterByExpiration) Len() int      { return len(s.items) }
@@ -86,7 +86,7 @@ func (s *itemSorterByExpiration) Less(i, j int) bool {
 }
 
 type itemSorterByLastAccess struct {
-	items []*cache.Item
+	items []*models.Item
 }
 
 func (s *itemSorterByLastAccess) Len() int      { return len(s.items) }
@@ -96,7 +96,7 @@ func (s *itemSorterByLastAccess) Less(i, j int) bool {
 }
 
 type itemSorterByAccessCount struct {
-	items []*cache.Item
+	items []*models.Item
 }
 
 func (s *itemSorterByAccessCount) Len() int      { return len(s.items) }

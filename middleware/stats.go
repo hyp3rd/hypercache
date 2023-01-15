@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/stats"
 )
 
@@ -61,7 +61,7 @@ func (mw StatsCollectorMiddleware) GetMultiple(keys ...string) (result map[strin
 }
 
 // List
-func (mw StatsCollectorMiddleware) List(filters ...any) ([]*cache.Item, error) {
+func (mw StatsCollectorMiddleware) List(filters ...any) ([]*models.Item, error) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_list_duration", time.Since(start).Nanoseconds())

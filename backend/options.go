@@ -2,7 +2,7 @@ package backend
 
 import (
 	"github.com/go-redis/redis"
-	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
 
@@ -75,7 +75,7 @@ func WithSortDescending[T any]() FilterOption[T] {
 
 // WithFilterFunc is an option that sets the filter function to use.
 // The filter function is a predicate that takes a `Item` as an argument and returns a boolean indicating whether the item should be included in the cache.
-func WithFilterFunc[T any](fn func(item *cache.Item) bool) FilterOption[T] {
+func WithFilterFunc[T any](fn func(item *models.Item) bool) FilterOption[T] {
 	return func(a *T) {
 		switch filter := any(a).(type) {
 		case *InMemoryBackend:

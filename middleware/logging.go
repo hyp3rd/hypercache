@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/stats"
 )
 
@@ -68,7 +68,7 @@ func (mw LoggingMiddleware) GetMultiple(keys ...string) (result map[string]any, 
 }
 
 // List
-func (mw LoggingMiddleware) List(filters ...any) ([]*cache.Item, error) {
+func (mw LoggingMiddleware) List(filters ...any) ([]*models.Item, error) {
 	defer func(begin time.Time) {
 		mw.logger.Infof("method List took: %s", time.Since(begin))
 	}(time.Now())

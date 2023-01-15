@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/go-redis/redis"
-	"github.com/hyp3rd/hypercache/cache"
 	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
 
@@ -61,7 +61,7 @@ func (cacheBackend *RedisBackend) Size() int {
 }
 
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
-func (cacheBackend *RedisBackend) Get(key string) (item *cache.Item, ok bool) {
+func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
 	data, err := cacheBackend.client.HGetAll(key).Result()
 	if err != nil {
 		if err == redis.Nil {
@@ -70,7 +70,7 @@ func (cacheBackend *RedisBackend) Get(key string) (item *cache.Item, ok bool) {
 		return nil, false
 	}
 
-	item = cache.CacheItemPool.Get().(*cache.Item)
+	item = models.ItemPool.Get().(*models.Item)
 	item.UnmarshalBinary([]byte(data["data"]))
 	item.Expiration, _ = time.ParseDuration(data["expiration"])
 
@@ -78,7 +78,7 @@ func (cacheBackend *RedisBackend) Get(key string) (item *cache.Item, ok bool) {
 }
 
 // Set stores the Item in the cacheBackend.
-func (cacheBackend *RedisBackend) Set(item *cache.Item) error {
+func (cacheBackend *RedisBackend) Set(item *models.Item) error {
 	if err := item.Valid(); err != nil {
 		return err
 	}
@@ -99,14 +99,14 @@ func (cacheBackend *RedisBackend) Set(item *cache.Item) error {
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*cache.Item, error) {
+func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*models.Item, error) {
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
 
 	// Get all keys
 	keys, _ := cacheBackend.client.HKeys("*").Result()
 
-	items := make([]*cache.Item, 0, len(keys))
+	items := make([]*models.Item, 0, len(keys))
 
 	for _, key := range keys {
 		item, ok := cacheBackend.Get(key)
@@ -156,14 +156,14 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 	return items, nil
 }
 
-// func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*cache.Item, error) {
+// func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*models.Item, error) {
 // 	// Apply the filter options
 // 	ApplyFilterOptions(cacheBackend, options...)
 
 // 	// Get all keys
 // 	keys, _ := cacheBackend.client.Keys("*").Result()
 
-// 	items := make([]*cache.Item, 0, len(keys))
+// 	items := make([]*models.Item, 0, len(keys))
 
 // 	for _, key := range keys {
 // 		item, ok := cacheBackend.Get(key)
