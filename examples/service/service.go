@@ -10,7 +10,7 @@ import (
 
 func main() {
 	var svc hypercache.Service
-	hyperCache, err := hypercache.NewHyperCacheInMemoryWithDefaults(10)
+	hyperCache, err := hypercache.NewInMemoryWithDefaults(10)
 	defer hyperCache.Stop()
 
 	if err != nil {

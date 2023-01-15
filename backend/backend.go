@@ -7,15 +7,15 @@ import (
 
 // IBackendConstrain is the interface that defines the constrain type that must be implemented by cache backends.
 type IBackendConstrain interface {
-	InMemoryBackend | RedisBackend
+	InMemory | RedisBackend
 }
 
-// IInMemoryBackend is the interface that must be implemented by in-memory cache backends.
-type IInMemoryBackend[T IBackendConstrain] interface {
+// IInMemory is the interface that must be implemented by in-memory cache backends.
+type IInMemory[T IBackendConstrain] interface {
 	// IBackend[T] is the interface that must be implemented by cache backends.
 	IBackend[T]
 	// List the items in the cache that meet the specified criteria.
-	List(options ...FilterOption[InMemoryBackend]) ([]*models.Item, error)
+	List(options ...FilterOption[InMemory]) ([]*models.Item, error)
 	// Clear removes all items from the cache.
 	Clear()
 }
@@ -48,21 +48,21 @@ type IBackend[T IBackendConstrain] interface {
 }
 
 // NewBackend creates a new cache backend.
-// Deprecated: Use specific backend constructors instead, e.g. NewInMemoryBackend or NewRedisBackend.
+// Deprecated: Use specific backend constructors instead, e.g. NewInMemory or NewRedisBackend.
 func NewBackend[T IBackendConstrain](backendType string, opts ...any) (IBackend[T], error) {
 	switch backendType {
 	case "memory":
-		backendOptions := make([]BackendOption[InMemoryBackend], len(opts))
+		Options := make([]Option[InMemory], len(opts))
 		for i, option := range opts {
-			backendOptions[i] = option.(BackendOption[InMemoryBackend])
+			Options[i] = option.(Option[InMemory])
 		}
-		return NewInMemoryBackend(backendOptions...)
+		return NewInMemory(Options...)
 	case "redis":
-		backendOptions := make([]BackendOption[RedisBackend], len(opts))
+		Options := make([]Option[RedisBackend], len(opts))
 		for i, option := range opts {
-			backendOptions[i] = option.(BackendOption[RedisBackend])
+			Options[i] = option.(Option[RedisBackend])
 		}
-		return NewRedisBackend(backendOptions...)
+		return NewRedisBackend(Options...)
 	default:
 		return nil, errors.ErrInvalidBackendType
 	}

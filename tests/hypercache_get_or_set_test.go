@@ -67,7 +67,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 			expectedErr:   nil,
 		},
 	}
-	cache, err := hypercache.NewHyperCacheInMemoryWithDefaults(10)
+	cache, err := hypercache.NewInMemoryWithDefaults(10)
 	assert.Nil(t, err)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

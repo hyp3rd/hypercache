@@ -98,6 +98,7 @@ func (item *Item) Expired() bool {
 //		return dec.Decode(item)
 //	}
 //
+
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
 func (item *Item) MarshalBinary() (data []byte, err error) {
 	return msgpack.Marshal(item)

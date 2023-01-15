@@ -9,7 +9,7 @@ import (
 
 func BenchmarkHyperCache_List(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
-	cache, _ := hypercache.NewHyperCacheInMemoryWithDefaults(1000)
+	cache, _ := hypercache.NewInMemoryWithDefaults(1000)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -26,7 +26,7 @@ func BenchmarkHyperCache_List(b *testing.B) {
 
 // func BenchmarkHyperCache_List_ProactiveEviction(b *testing.B) {
 // 	// Create a new HyperCache with a capacity of 1000
-// 	cache, _ := hypercache.NewHyperCache(1000, hypercache.WithEvictionInterval[backend.InMemoryBackend](0))
+// 	cache, _ := hypercache.New(1000, hypercache.WithEvictionInterval[backend.InMemory](0))
 
 // 	// Store a value in the cache with a key and expiration duration
 // 	cache.Set("key", "value", time.Hour)

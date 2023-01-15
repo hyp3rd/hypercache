@@ -22,18 +22,18 @@ func main() {
 // executeExample runs the example
 func executeExample(evictionInterval time.Duration) {
 	// Create a new HyperCache with a capacity of 10
-	config := hypercache.NewConfig[backend.InMemoryBackend]()
-	config.HyperCacheOptions = []hypercache.Option[backend.InMemoryBackend]{
-		hypercache.WithEvictionInterval[backend.InMemoryBackend](evictionInterval),
-		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("cawolfu"),
+	config := hypercache.NewConfig[backend.InMemory]()
+	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
+		hypercache.WithEvictionInterval[backend.InMemory](evictionInterval),
+		hypercache.WithEvictionAlgorithm[backend.InMemory]("cawolfu"),
 	}
 
-	config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+	config.InMemoryOptions = []backend.Option[backend.InMemory]{
 		backend.WithCapacity(10),
 	}
 
 	// Create a new HyperCache with a capacity of 10
-	cache, err := hypercache.NewHyperCache(config)
+	cache, err := hypercache.New(config)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -60,7 +60,7 @@ func executeExample(evictionInterval time.Duration) {
 	log.Println("capacity after adding 15 items", cache.Capacity())
 
 	log.Println("listing all items in the cache")
-	list, err := cache.List(backend.WithSortBy[backend.InMemoryBackend](types.SortByValue))
+	list, err := cache.List(backend.WithSortBy[backend.InMemory](types.SortByValue))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -75,7 +75,7 @@ func executeExample(evictionInterval time.Duration) {
 		fmt.Println("sleeping to allow the evition loop to complete", evictionInterval+2*time.Second)
 		time.Sleep(evictionInterval + 2*time.Second)
 		log.Println("listing all items in the cache the eviction is triggered")
-		list, err = cache.List(backend.WithSortBy[backend.InMemoryBackend](types.SortByValue))
+		list, err = cache.List(backend.WithSortBy[backend.InMemory](types.SortByValue))
 		if err != nil {
 			fmt.Println(err)
 			return

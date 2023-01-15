@@ -18,10 +18,10 @@ type RedisBackend struct {
 }
 
 // NewRedisBackend creates a new redis cache with the given options.
-func NewRedisBackend[T RedisBackend](redisOptions ...BackendOption[RedisBackend]) (backend IRedisBackend[T], err error) {
+func NewRedisBackend[T RedisBackend](redisOptions ...Option[RedisBackend]) (backend IRedisBackend[T], err error) {
 	rb := &RedisBackend{}
 	// Apply the backend options
-	ApplyBackendOptions(rb, redisOptions...)
+	ApplyOptions(rb, redisOptions...)
 
 	// Check if the client is nil
 	if rb.client == nil {

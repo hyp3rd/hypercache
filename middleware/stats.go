@@ -20,7 +20,7 @@ func NewStatsCollectorMiddleware(next hypercache.Service, statsCollector stats.C
 	return &StatsCollectorMiddleware{next: next, statsCollector: statsCollector}
 }
 
-// Get
+// Get collects stats for the Get method.
 func (mw StatsCollectorMiddleware) Get(key string) (interface{}, bool) {
 	start := time.Now()
 	defer func() {
