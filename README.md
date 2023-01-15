@@ -6,7 +6,7 @@
 
 HyperCache is a **thread-safe** **high-performance** cache implementation in Go that supports multiple backends with the expiration and eviction of items supporting custom algorithms alongside the defaults. It can be used as a standalone cache or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept cache methods and decorate em with middleware (default or custom).
 It is optimized for performance and flexibility allowing to specify the expiration and eviction intervals, provide and register new eviction algorithms, stats collectors, middleware(s).
-It ships with a default [historigram stats collector](./stats/statscollector.go) and several eviction algorithms, but you can develop and register your own as long as it implements the [EvictionAlgorithm interface](./eviction/eviction.go).:
+It ships with a default [historigram stats collector](./stats/statscollector.go) and several eviction algorithms, but you can develop and register your own as long as it implements the [Eviction Algorithm interface](./eviction/eviction.go).:
 
 - [Recently Used (LRU) eviction algorithm](./eviction/lru.go)
 - [The Least Frequently Used (LFU) algorithm](./eviction/lfu.go)
@@ -27,7 +27,7 @@ It ships with a default [historigram stats collector](./stats/statscollector.go)
 - Clear the cache of all items
 - Evitc items in the background based on the cache capacity and items access leveraging several custom eviction algorithms
 - Expire items in the background based on their duration
-- [EvictionAlgorithm interface](./eviction.go) to implement custom eviction algorithms.
+- [Eviction Algorithm interface](./eviction.go) to implement custom eviction algorithms.
 - Stats collection with a default [stats collector](./stats/statscollector.go) or a custom one that implements the StatsCollector interface.
 - [Service interface implementation](./service.go) to allow intercepting cache methods and decorate them with custom or default middleware(s).
 
@@ -155,7 +155,7 @@ The `Remove` function takes a variadic number of keys as arguments and returns a
 The `Service` interface allows intercepting cache methods and decorate them with custom or default middleware(s).
 
 ```golang
-var svc hypercache.HyperCacheService
+var svc hypercache.Service
 hyperCache, err := hypercache.NewInMemoryWithDefaults(10)
 
 if err != nil {
@@ -181,11 +181,11 @@ defer logger.Sync()
 // apply middleware in the same order as you want to execute them
 svc = hypercache.ApplyMiddleware(svc,
     // middleware.YourMiddleware,
-    func(next hypercache.HyperCacheService) hypercache.HyperCacheService {
+    func(next hypercache.Service) hypercache.Service {
         return middleware.NewLoggingMiddleware(next, sugar)
     },
-    func(next hypercache.HyperCacheService) hypercache.HyperCacheService {
-        return middleware.NewCollectorMiddleware(next, statsCollector)
+    func(next hypercache.Service) hypercache.Service {
+        return middleware.NewStatsCollectorMiddleware(next, statsCollector)
     },
 )
 

@@ -40,7 +40,7 @@ func main() {
 			return middleware.NewLoggingMiddleware(next, sugar)
 		},
 		func(next hypercache.Service) hypercache.Service {
-			return middleware.NewCollectorMiddleware(next, statsCollector)
+			return middleware.NewStatsCollectorMiddleware(next, statsCollector)
 		},
 	)
 	defer svc.Stop()
