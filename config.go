@@ -8,28 +8,28 @@ import (
 
 // Config is a struct that wraps all the configuration options to setup `HyperCache` and its backend.
 type Config[T backend.IBackendConstrain] struct {
-	// InMemoryBackendOptions is a slice of options that can be used to configure the `InMemoryBackend`.
-	InMemoryBackendOptions []backend.BackendOption[backend.InMemoryBackend]
-	// RedisBackendOptions is a slice of options that can be used to configure the `RedisBackend`.
-	RedisBackendOptions []backend.BackendOption[backend.RedisBackend]
+	// InMemoryOptions is a slice of options that can be used to configure the `InMemory`.
+	InMemoryOptions []backend.Option[backend.InMemory]
+	// RedisOptions is a slice of options that can be used to configure the `RedisBackend`.
+	RedisOptions []backend.Option[backend.RedisBackend]
 	// HyperCacheOptions is a slice of options that can be used to configure `HyperCache`.
 	HyperCacheOptions []Option[T]
 }
 
 // NewConfig returns a new `Config` struct with default values:
-// - `InMemoryBackendOptions` is empty
-// - `RedisBackendOptions` is empty
-// - `HyperCacheOptions` is set to:
-//   - `WithExpirationInterval[T](30 * time.Minute)`
-//   - `WithEvictionAlgorithm[T]("lfu")`
-//   - `WithEvictionInterval[T](10 * time.Minute)`
+//   - `InMemoryOptions` is empty
+//   - `RedisOptions` is empty
+//   - `HyperCacheOptions` is set to:
+//     -- `WithExpirationInterval[T](30 * time.Minute)`
+//     -- `WithEvictionAlgorithm[T]("lfu")`
+//     -- `WithEvictionInterval[T](10 * time.Minute)`
 //
 // Each of the above options can be overridden by passing a different option to the `NewConfig` function.
 // It can be used to configure `HyperCache` and its backend and customize the behavior of the cache.
 func NewConfig[T backend.IBackendConstrain]() *Config[T] {
 	return &Config[T]{
-		InMemoryBackendOptions: []backend.BackendOption[backend.InMemoryBackend]{},
-		RedisBackendOptions:    []backend.BackendOption[backend.RedisBackend]{},
+		InMemoryOptions: []backend.Option[backend.InMemory]{},
+		RedisOptions:    []backend.Option[backend.RedisBackend]{},
 		HyperCacheOptions: []Option[T]{
 			WithExpirationInterval[T](30 * time.Minute),
 			WithEvictionAlgorithm[T]("lfu"),
@@ -51,16 +51,16 @@ func ApplyHyperCacheOptions[T backend.IBackendConstrain](cache *HyperCache[T], o
 // WithEvictionAlgorithm is an option that sets the eviction algorithm name field of the `HyperCache` struct.
 // The eviction algorithm name determines which eviction algorithm will be used to evict items from the cache.
 // The eviction algorithm name must be one of the following:
-// - "LRU" (Least Recently Used) - Implemented in the `lru.go` file
-// - "LFU" (Least Frequently Used) - Implemented in the `lfu.go` file
-// - "CAWOLFU" (Cache-Aware Write-Optimized LFU) - Implemented in the `cawolfu.go` file
-// - "FIFO" (First In First Out)
-// - "RANDOM" (Random)
-// - "CLOCK" (Clock) - Implemented in the `clock.go` file
-// - "ARC" (Adaptive Replacement Cache) - Implemented in the `arc.go` file
-// - "TTL" (Time To Live)
-// - "LFUDA" (Least Frequently Used with Dynamic Aging)
-// - "SLRU" (Segmented Least Recently Used)
+//   - "LRU" (Least Recently Used) - Implemented in the `eviction/lru.go` file
+//   - "LFU" (Least Frequently Used) - Implemented in the `eviction/lfu.go` file
+//   - "CAWOLFU" (Cache-Aware Write-Optimized LFU) - Implemented in the `eviction/cawolfu.go` file
+//   - "FIFO" (First In First Out)
+//   - "RANDOM" (Random)
+//   - "CLOCK" (Clock) - Implemented in the `eviction/clock.go` file
+//   - "ARC" (Adaptive Replacement Cache) - Implemented in the `eviction/arc.go` file
+//   - "TTL" (Time To Live)
+//   - "LFUDA" (Least Frequently Used with Dynamic Aging)
+//   - "SLRU" (Segmented Least Recently Used)
 func WithEvictionAlgorithm[T backend.IBackendConstrain](name string) Option[T] {
 	return func(cache *HyperCache[T]) {
 		cache.evictionAlgorithmName = name

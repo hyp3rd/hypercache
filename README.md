@@ -70,37 +70,37 @@ For a full list of examples, refer to the [examples](./examples/README.md) direc
 
 ## API
 
-The `NewHyperCacheInMemoryWithDefaults` function creates a new `HyperCache` instance with the defaults:
+The `NewInMemoryWithDefaults` function creates a new `HyperCache` instance with the defaults:
 
 1. The eviction interval is set to 10 minutes.
 2. The eviction algorithm is set to LRU.
 3. The expiration interval is set to 30 minutes.
 4. The capacity of the in-memory backend is set to 1000 items.
 
-To create a new cache with a given capacity, use the NewHyperCache function as described below:
+To create a new cache with a given capacity, use the New function as described below:
 
 ```golang
-cache, err := hypercache.NewHyperCacheInMemoryWithDefaults(100)
+cache, err := hypercache.NewInMemoryWithDefaults(100)
 if err != nil {
     // handle error
 }
 ```
 
-For a fine grained control over the cache configuration, use the `NewHyperCache` function, for instance:
+For a fine grained control over the cache configuration, use the `New` function, for instance:
 
 ```golang
-config := hypercache.NewConfig[backend.InMemoryBackend]()
-config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
-    hypercache.WithEvictionInterval[backend.InMemoryBackend](time.Minute * 10),
-    hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("cawolfu"),
+config := hypercache.NewConfig[backend.InMemory]()
+config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemory]{
+    hypercache.WithEvictionInterval[backend.InMemory](time.Minute * 10),
+    hypercache.WithEvictionAlgorithm[backend.InMemory]("cawolfu"),
 }
 
-config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+config.InMemoryOptions = []backend.Option[backend.InMemory]{
     backend.WithCapacity(10),
 }
 
 // Create a new HyperCache with a capacity of 10
-cache, err := hypercache.NewHyperCache(config)
+cache, err := hypercache.New(config)
 if err != nil {
     fmt.Println(err)
     return
@@ -156,7 +156,7 @@ The `Service` interface allows intercepting cache methods and decorate them with
 
 ```golang
 var svc hypercache.HyperCacheService
-hyperCache, err := hypercache.NewHyperCacheInMemoryWithDefaults(10)
+hyperCache, err := hypercache.NewInMemoryWithDefaults(10)
 
 if err != nil {
     fmt.Println(err)
@@ -185,7 +185,7 @@ svc = hypercache.ApplyMiddleware(svc,
         return middleware.NewLoggingMiddleware(next, sugar)
     },
     func(next hypercache.HyperCacheService) hypercache.HyperCacheService {
-        return middleware.NewStatsCollectorMiddleware(next, statsCollector)
+        return middleware.NewCollectorMiddleware(next, statsCollector)
     },
 )
 
@@ -219,7 +219,7 @@ import (
 
 func main() {
     // Create a new HyperCache with a capacity of 10
-    cache, err := hypercache.NewHyperCacheInMemoryWithDefaults(10)
+    cache, err := hypercache.NewInMemoryWithDefaults(10)
     if err != nil {
         fmt.Println(err)
         return

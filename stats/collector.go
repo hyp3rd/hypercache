@@ -26,9 +26,9 @@ type Collector interface {
 // StatsCollectorRegistry holds the a registry of stats collectors.
 var StatsCollectorRegistry = make(map[string]func() (Collector, error))
 
-// NewStatsCollector creates a new stats collector.
+// NewCollector creates a new stats collector.
 // The statsCollectorName parameter is used to select the stats collector from the registry.
-func NewStatsCollector(statsCollectorName string) (Collector, error) {
+func NewCollector(statsCollectorName string) (Collector, error) {
 	// Check the parameters.
 	if statsCollectorName == "" {
 		return nil, fmt.Errorf("%s: %s", errors.ErrParamCannotBeEmpty, "statsCollectorName")
@@ -42,14 +42,14 @@ func NewStatsCollector(statsCollectorName string) (Collector, error) {
 	return createFunc()
 }
 
-// RegisterStatsCollector registers a new stats collector with the given name.
-func RegisterStatsCollector(name string, createFunc func() (Collector, error)) {
+// RegisterCollector registers a new stats collector with the given name.
+func RegisterCollector(name string, createFunc func() (Collector, error)) {
 	StatsCollectorRegistry[name] = createFunc
 }
 
 func init() {
 	// Register the default stats collector.
-	RegisterStatsCollector("default", func() (Collector, error) {
+	RegisterCollector("default", func() (Collector, error) {
 		var err error
 		collector := NewHistogramStatsCollector()
 		if collector == nil {

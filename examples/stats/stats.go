@@ -12,19 +12,19 @@ import (
 
 func main() {
 	// Create a new HyperCache with a capacity of 100
-	config := hypercache.NewConfig[backend.InMemoryBackend]()
-	config.HyperCacheOptions = []hypercache.Option[backend.InMemoryBackend]{
-		hypercache.WithEvictionInterval[backend.InMemoryBackend](3 * time.Second),
-		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("lru"),
-		hypercache.WithExpirationInterval[backend.InMemoryBackend](3 * time.Second),
+	config := hypercache.NewConfig[backend.InMemory]()
+	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
+		hypercache.WithEvictionInterval[backend.InMemory](3 * time.Second),
+		hypercache.WithEvictionAlgorithm[backend.InMemory]("lru"),
+		hypercache.WithExpirationInterval[backend.InMemory](3 * time.Second),
 	}
 
-	config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+	config.InMemoryOptions = []backend.Option[backend.InMemory]{
 		backend.WithCapacity(100),
 	}
 
 	// Create a new HyperCache with a capacity of 10
-	hyperCache, err := hypercache.NewHyperCache(config)
+	hyperCache, err := hypercache.New(config)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -51,9 +51,9 @@ func main() {
 
 	// Retrieve the list of items from the cache
 	list, err := hyperCache.List(
-		backend.WithSortBy[backend.InMemoryBackend](types.SortByValue),
-		backend.WithSortDescending[backend.InMemoryBackend](),
-		backend.WithFilterFunc[backend.InMemoryBackend](func(item *models.Item) bool {
+		backend.WithSortBy[backend.InMemory](types.SortByValue),
+		backend.WithSortDescending[backend.InMemory](),
+		backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
 			return item.Expiration > time.Second
 		}),
 	)

@@ -13,7 +13,7 @@ import (
 // This example demonstrates how to list items from the cache
 func main() {
 	// Create a new HyperCache with a capacity of 100
-	hyperCache, err := hypercache.NewHyperCacheInMemoryWithDefaults(100)
+	hyperCache, err := hypercache.NewInMemoryWithDefaults(100)
 
 	if err != nil {
 		fmt.Println(err)
@@ -37,9 +37,9 @@ func main() {
 
 	// Retrieve the list of items from the cache
 	list, err := hyperCache.List(
-		backend.WithSortBy[backend.InMemoryBackend](types.SortByValue),
-		backend.WithSortAscending[backend.InMemoryBackend](),
-		backend.WithFilterFunc[backend.InMemoryBackend](func(item *models.Item) bool {
+		backend.WithSortBy[backend.InMemory](types.SortByValue),
+		backend.WithSortAscending[backend.InMemory](),
+		backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
 			return item.Value != "val98"
 		}),
 	)

@@ -8,7 +8,7 @@ import (
 
 func main() {
 	// Create a new HyperCache with a capacity of 10000
-	cache, err := hypercache.NewHyperCacheInMemoryWithDefaults(100000)
+	cache, err := hypercache.NewInMemoryWithDefaults(100000)
 	if err != nil {
 		fmt.Println(err)
 		return

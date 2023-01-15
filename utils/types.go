@@ -26,9 +26,9 @@ type CacheBackendChecker[T backend.IBackendConstrain] struct {
 	Backend backend.IBackend[T]
 }
 
-// IsInMemoryBackend returns true if the backend is an InMemoryBackend
-func (c *CacheBackendChecker[T]) IsInMemoryBackend() bool {
-	_, ok := c.Backend.(*backend.InMemoryBackend)
+// IsInMemory returns true if the backend is an InMemory
+func (c *CacheBackendChecker[T]) IsInMemory() bool {
+	_, ok := c.Backend.(*backend.InMemory)
 	return ok
 }
 

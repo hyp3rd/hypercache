@@ -15,8 +15,8 @@ type StatsCollectorMiddleware struct {
 	statsCollector stats.Collector
 }
 
-// NewStatsCollectorMiddleware returns a new StatsCollectorMiddleware
-func NewStatsCollectorMiddleware(next hypercache.Service, statsCollector stats.Collector) hypercache.Service {
+// NewCollectorMiddleware returns a new StatsCollectorMiddleware
+func NewCollectorMiddleware(next hypercache.Service, statsCollector stats.Collector) hypercache.Service {
 	return &StatsCollectorMiddleware{next: next, statsCollector: statsCollector}
 }
 

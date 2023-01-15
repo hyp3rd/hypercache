@@ -24,11 +24,13 @@ import (
 // The default in-memory implementation has a custom `ConcurrentMap` to store the items in the cache,
 // The configuration is provided by the `Config` struct and can be customized by using the `With` functions.
 // The cache has two loops that run in the background:
-// 1. The expiration loop runs every `expirationInterval` and checks for expired items.
-// 2. The eviction loop runs every `evictionInterval` and evicts items using the eviction algorithm.
-// The cache also has two channels that are used to signal the expiration and eviction loops to start:
-// 1. The expirationTriggerCh channel is used to signal the expiration loop to start.
-// 2. The evictCh channel is used to signal the eviction loop to start.
+//   - The expiration loop runs every `expirationInterval` and checks for expired items.
+//   - The eviction loop runs every `evictionInterval` and evicts items using the eviction algorithm.
+//
+// The cache leverages two channels to signal the expiration and eviction loops to start:
+//   - The expirationTriggerCh channel is used to signal the expiration loop to start.
+//   - The evictCh channel is used to signal the eviction loop to start.
+//
 // The cache also has a mutex that is used to protect the eviction algorithm from concurrent access.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
 type HyperCache[T backend.IBackendConstrain] struct {
@@ -50,41 +52,41 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	StatsCollector stats.Collector
 }
 
-// NewHyperCacheInMemoryWithDefaults initializes a new HyperCache with the default configuration.
+// NewInMemoryWithDefaults initializes a new HyperCache with the default configuration.
 // The default configuration is:
-// 1. The eviction interval is set to 10 minutes.
-// 2. The eviction algorithm is set to LRU.
-// 3. The expiration interval is set to 30 minutes.
-// 4. The capacity of the in-memory backend is set to 1000 items.
-func NewHyperCacheInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMemoryBackend], err error) {
+//   - The eviction interval is set to 10 minutes.
+//   - The eviction algorithm is set to LRU.
+//   - The expiration interval is set to 30 minutes.
+//   - The capacity of the in-memory backend is set to 1000 items.
+func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMemory], err error) {
 	// Initialize the configuration
-	config := NewConfig[backend.InMemoryBackend]()
+	config := NewConfig[backend.InMemory]()
 	// Set the default options
-	config.HyperCacheOptions = []Option[backend.InMemoryBackend]{
-		WithEvictionInterval[backend.InMemoryBackend](10 * time.Minute),
-		WithEvictionAlgorithm[backend.InMemoryBackend]("lru"),
-		WithExpirationInterval[backend.InMemoryBackend](30 * time.Minute),
+	config.HyperCacheOptions = []Option[backend.InMemory]{
+		WithEvictionInterval[backend.InMemory](10 * time.Minute),
+		WithEvictionAlgorithm[backend.InMemory]("lru"),
+		WithExpirationInterval[backend.InMemory](30 * time.Minute),
 	}
 
 	// Set the in-memory backend options
-	config.InMemoryBackendOptions = []backend.BackendOption[backend.InMemoryBackend]{
+	config.InMemoryOptions = []backend.Option[backend.InMemory]{
 		backend.WithCapacity(capacity),
 	}
 	// Initialize the cache
-	hyperCache, err = NewHyperCache(config)
+	hyperCache, err = New(config)
 	if err != nil {
 		return nil, err
 	}
 	return hyperCache, nil
 }
 
-// NewHyperCache initializes a new HyperCache with the given configuration.
+// New initializes a new HyperCache with the given configuration.
 // The default configuration is:
-// 1. The eviction interval is set to 10 minutes.
-// 2. The eviction algorithm is set to CAWOLFU.
-// 3. The expiration interval is set to 30 minutes.
-// 4. The stats collector is set to the HistogramStatsCollector stats collector.
-func NewHyperCache[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache[T], err error) {
+//   - The eviction interval is set to 10 minutes.
+//   - The eviction algorithm is set to CAWOLFU.
+//   - The expiration interval is set to 30 minutes.
+//   - The stats collector is set to the HistogramStatsCollector stats collector.
+func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache[T], err error) {
 
 	// Initialize the cache
 	hyperCache = &HyperCache[T]{
@@ -96,10 +98,10 @@ func NewHyperCache[T backend.IBackendConstrain](config *Config[T]) (hyperCache *
 	// Initialize the backend
 	t, _ := utils.TypeName(hyperCache.backendType) // Get the backend type name
 	switch t {
-	case "backend.InMemoryBackend":
-		hyperCache.backend, err = backend.NewInMemoryBackend(config.InMemoryBackendOptions...)
+	case "backend.InMemory":
+		hyperCache.backend, err = backend.NewInMemory(config.InMemoryOptions...)
 	case "backend.RedisBackend":
-		hyperCache.backend, err = backend.NewRedisBackend(config.RedisBackendOptions...)
+		hyperCache.backend, err = backend.NewRedisBackend(config.RedisOptions...)
 	default:
 		err = errors.ErrInvalidBackendType
 	}
@@ -136,11 +138,11 @@ func NewHyperCache[T backend.IBackendConstrain](config *Config[T]) (hyperCache *
 	// Initialize the stats collector
 	if hyperCache.statsCollectorName == "" {
 		// Use the default stats collector if none is specified
-		// hyperCache.statsCollector, err = NewStatsCollector("default")
+		// hyperCache.statsCollector, err = NewCollector("default")
 		hyperCache.StatsCollector = stats.NewHistogramStatsCollector()
 	} else {
 		// Use the specified stats collector
-		hyperCache.StatsCollector, err = stats.NewStatsCollector(hyperCache.statsCollectorName)
+		hyperCache.StatsCollector, err = stats.NewCollector(hyperCache.statsCollectorName)
 		if err != nil {
 			return
 		}
@@ -209,10 +211,10 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 	)
 
 	// get all expired items
-	if cb, ok := hyperCache.backend.(*backend.InMemoryBackend); ok {
+	if cb, ok := hyperCache.backend.(*backend.InMemory); ok {
 		items, err = cb.List(
-			backend.WithSortBy[backend.InMemoryBackend](types.SortByExpiration),
-			backend.WithFilterFunc[backend.InMemoryBackend](func(item *models.Item) bool {
+			backend.WithSortBy[backend.InMemory](types.SortByExpiration),
+			backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
 				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
 			}),
 		)
@@ -478,9 +480,9 @@ func (hyperCache *HyperCache[T]) List(filters ...any) ([]*models.Item, error) {
 	var listInstance listFunc
 
 	// checking the backend type
-	if hyperCache.cacheBackendChecker.IsInMemoryBackend() {
-		// if the backend is an InMemoryBackend, we set the listFunc to the ListInMemory function
-		listInstance = listInMemory(hyperCache.backend.(*backend.InMemoryBackend))
+	if hyperCache.cacheBackendChecker.IsInMemory() {
+		// if the backend is an InMemory, we set the listFunc to the ListInMemory function
+		listInstance = listInMemory(hyperCache.backend.(*backend.InMemory))
 	}
 
 	// calling the corresponding implementation of the list function
@@ -491,15 +493,15 @@ func (hyperCache *HyperCache[T]) List(filters ...any) ([]*models.Item, error) {
 // a slice of Item pointers, and an error
 type listFunc func(options ...any) ([]*models.Item, error)
 
-// listInMemory is a function that takes in an InMemoryBackend, and returns a ListFunc
-// it takes any type as filters, and converts them to the specific FilterOption type for the InMemoryBackend,
-// and calls the InMemoryBackend's List function with these filters.
-func listInMemory(cacheBackend *backend.InMemoryBackend) listFunc {
+// listInMemory is a function that takes in an InMemory, and returns a ListFunc
+// it takes any type as filters, and converts them to the specific FilterOption type for the InMemory,
+// and calls the InMemory's List function with these filters.
+func listInMemory(cacheBackend *backend.InMemory) listFunc {
 	return func(options ...any) ([]*models.Item, error) {
-		// here we are converting the filters of any type to the specific FilterOption type for the InMemoryBackend
-		filterOptions := make([]backend.FilterOption[backend.InMemoryBackend], len(options))
+		// here we are converting the filters of any type to the specific FilterOption type for the InMemory
+		filterOptions := make([]backend.FilterOption[backend.InMemory], len(options))
 		for i, option := range options {
-			filterOptions[i] = option.(backend.FilterOption[backend.InMemoryBackend])
+			filterOptions[i] = option.(backend.FilterOption[backend.InMemory])
 		}
 		return cacheBackend.List(filterOptions...)
 	}
@@ -521,7 +523,7 @@ func (hyperCache *HyperCache[T]) Clear() error {
 	)
 
 	// get all expired items
-	if cb, ok := hyperCache.backend.(*backend.InMemoryBackend); ok {
+	if cb, ok := hyperCache.backend.(*backend.InMemory); ok {
 		items, err = cb.List()
 		cb.Clear()
 	} else if cb, ok := hyperCache.backend.(*backend.RedisBackend); ok {
