@@ -13,7 +13,7 @@ type Config[T backend.IBackendConstrain] struct {
 	// RedisBackendOptions is a slice of options that can be used to configure the `RedisBackend`.
 	RedisBackendOptions []backend.BackendOption[backend.RedisBackend]
 	// HyperCacheOptions is a slice of options that can be used to configure `HyperCache`.
-	HyperCacheOptions []HyperCacheOption[T]
+	HyperCacheOptions []Option[T]
 }
 
 // NewConfig returns a new `Config` struct with default values:
@@ -30,7 +30,7 @@ func NewConfig[T backend.IBackendConstrain]() *Config[T] {
 	return &Config[T]{
 		InMemoryBackendOptions: []backend.BackendOption[backend.InMemoryBackend]{},
 		RedisBackendOptions:    []backend.BackendOption[backend.RedisBackend]{},
-		HyperCacheOptions: []HyperCacheOption[T]{
+		HyperCacheOptions: []Option[T]{
 			WithExpirationInterval[T](30 * time.Minute),
 			WithEvictionAlgorithm[T]("lfu"),
 			WithEvictionInterval[T](10 * time.Minute),
@@ -38,11 +38,11 @@ func NewConfig[T backend.IBackendConstrain]() *Config[T] {
 	}
 }
 
-// HyperCacheOption is a function type that can be used to configure the `HyperCache` struct.
-type HyperCacheOption[T backend.IBackendConstrain] func(*HyperCache[T])
+// Option is a function type that can be used to configure the `HyperCache` struct.
+type Option[T backend.IBackendConstrain] func(*HyperCache[T])
 
 // ApplyHyperCacheOptions applies the given options to the given cache.
-func ApplyHyperCacheOptions[T backend.IBackendConstrain](cache *HyperCache[T], options ...HyperCacheOption[T]) {
+func ApplyHyperCacheOptions[T backend.IBackendConstrain](cache *HyperCache[T], options ...Option[T]) {
 	for _, option := range options {
 		option(cache)
 	}
@@ -61,7 +61,7 @@ func ApplyHyperCacheOptions[T backend.IBackendConstrain](cache *HyperCache[T], o
 // - "TTL" (Time To Live)
 // - "LFUDA" (Least Frequently Used with Dynamic Aging)
 // - "SLRU" (Segmented Least Recently Used)
-func WithEvictionAlgorithm[T backend.IBackendConstrain](name string) HyperCacheOption[T] {
+func WithEvictionAlgorithm[T backend.IBackendConstrain](name string) Option[T] {
 	return func(cache *HyperCache[T]) {
 		cache.evictionAlgorithmName = name
 	}
@@ -69,7 +69,7 @@ func WithEvictionAlgorithm[T backend.IBackendConstrain](name string) HyperCacheO
 
 // WithStatsCollector is an option that sets the stats collector field of the `HyperCache` struct.
 // The stats collector is used to collect statistics about the cache.
-func WithStatsCollector[T backend.IBackendConstrain](name string) HyperCacheOption[T] {
+func WithStatsCollector[T backend.IBackendConstrain](name string) Option[T] {
 	return func(cache *HyperCache[T]) {
 		cache.statsCollectorName = name
 	}
@@ -77,7 +77,7 @@ func WithStatsCollector[T backend.IBackendConstrain](name string) HyperCacheOpti
 
 // WithExpirationInterval is an option that sets the expiration interval field of the `HyperCache` struct.
 // The expiration interval determines how often the cache will check for and remove expired items.
-func WithExpirationInterval[T backend.IBackendConstrain](expirationInterval time.Duration) HyperCacheOption[T] {
+func WithExpirationInterval[T backend.IBackendConstrain](expirationInterval time.Duration) Option[T] {
 	return func(cache *HyperCache[T]) {
 		cache.expirationInterval = expirationInterval
 	}
@@ -85,7 +85,7 @@ func WithExpirationInterval[T backend.IBackendConstrain](expirationInterval time
 
 // WithEvictionInterval is an option that sets the eviction interval field of the `HyperCache` struct.
 // The eviction interval determines how often the cache will run the eviction process to remove the least recently used items.
-func WithEvictionInterval[T backend.IBackendConstrain](evictionInterval time.Duration) HyperCacheOption[T] {
+func WithEvictionInterval[T backend.IBackendConstrain](evictionInterval time.Duration) Option[T] {
 	return func(cache *HyperCache[T]) {
 		cache.evictionInterval = evictionInterval
 	}
@@ -93,7 +93,7 @@ func WithEvictionInterval[T backend.IBackendConstrain](evictionInterval time.Dur
 
 // WithMaxEvictionCount is an option that sets the max eviction count field of the `HyperCache` struct.
 // The max eviction count determines the maximum number of items that can be removed during a single eviction run.
-func WithMaxEvictionCount[T backend.IBackendConstrain](maxEvictionCount uint) HyperCacheOption[T] {
+func WithMaxEvictionCount[T backend.IBackendConstrain](maxEvictionCount uint) Option[T] {
 	return func(cache *HyperCache[T]) {
 		cache.maxEvictionCount = maxEvictionCount
 	}

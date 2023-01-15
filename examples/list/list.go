@@ -25,7 +25,7 @@ func main() {
 	// Add 100 items to the cache
 	for i := 0; i < 100; i++ {
 		key := fmt.Sprintf("key%d", i)
-		val := fmt.Sprintf("%d", i)
+		val := i //fmt.Sprintf("%d", i)
 
 		err = hyperCache.Set(key, val, time.Minute)
 
@@ -37,8 +37,8 @@ func main() {
 
 	// Retrieve the list of items from the cache
 	list, err := hyperCache.List(
-		backend.WithSortBy[backend.InMemoryBackend](types.SortByKey),
-		backend.WithSortDescending[backend.InMemoryBackend](),
+		backend.WithSortBy[backend.InMemoryBackend](types.SortByValue),
+		backend.WithSortAscending[backend.InMemoryBackend](),
 		backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.CacheItem) bool {
 			return item.Value != "val98"
 		}),

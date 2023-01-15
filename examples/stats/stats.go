@@ -13,7 +13,7 @@ import (
 func main() {
 	// Create a new HyperCache with a capacity of 100
 	config := hypercache.NewConfig[backend.InMemoryBackend]()
-	config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+	config.HyperCacheOptions = []hypercache.Option[backend.InMemoryBackend]{
 		hypercache.WithEvictionInterval[backend.InMemoryBackend](3 * time.Second),
 		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("lru"),
 		hypercache.WithExpirationInterval[backend.InMemoryBackend](3 * time.Second),

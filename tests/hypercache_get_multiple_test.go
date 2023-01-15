@@ -56,7 +56,7 @@ func TestGetMultiple(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			config := &hypercache.Config[backend.InMemoryBackend]{
-				HyperCacheOptions: []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+				HyperCacheOptions: []hypercache.Option[backend.InMemoryBackend]{
 					hypercache.WithExpirationInterval[backend.InMemoryBackend](time.Millisecond),
 				},
 				InMemoryBackendOptions: []backend.BackendOption[backend.InMemoryBackend]{

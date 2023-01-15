@@ -3,15 +3,15 @@ package cache
 // CacheItem represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 
 import (
-	"bytes"
-	"encoding/gob"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	// "https://github.com/kelindar/binary"
 	"github.com/hyp3rd/hypercache/errors"
+	"github.com/shamaton/msgpack/v2"
 )
 
 // CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
@@ -80,19 +80,27 @@ func (item *CacheItem) Expired() bool {
 }
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
-func (item *CacheItem) MarshalBinary() (data []byte, err error) {
-	buf := bytes.NewBuffer([]byte{})
-	enc := gob.NewEncoder(buf)
-	err = enc.Encode(item)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
+// func (item *CacheItem) MarshalBinary() (data []byte, err error) {
+// 	buf := bytes.NewBuffer([]byte{})
+// 	enc := gob.NewEncoder(buf)
+// 	err = enc.Encode(item)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return buf.Bytes(), nil
+// }
 
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
+//
+//	func (item *CacheItem) UnmarshalBinary(data []byte) error {
+//		buf := bytes.NewBuffer(data)
+//		dec := gob.NewDecoder(buf)
+//		return dec.Decode(item)
+//	}
+func (item *CacheItem) MarshalBinary() (data []byte, err error) {
+	return msgpack.Marshal(item)
+}
+
 func (item *CacheItem) UnmarshalBinary(data []byte) error {
-	buf := bytes.NewBuffer(data)
-	dec := gob.NewDecoder(buf)
-	return dec.Decode(item)
+	return msgpack.Unmarshal(data, item)
 }

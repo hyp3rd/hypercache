@@ -62,7 +62,7 @@ func (cacheBackend *RedisBackend) Size() int {
 
 // Get retrieves the CacheItem with the given key from the cacheBackend. If the item is not found, it returns nil.
 func (cacheBackend *RedisBackend) Get(key string) (item *cache.CacheItem, ok bool) {
-	data, err := cacheBackend.client.Get(key).Result()
+	data, err := cacheBackend.client.HGetAll(key).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, false
@@ -71,7 +71,9 @@ func (cacheBackend *RedisBackend) Get(key string) (item *cache.CacheItem, ok boo
 	}
 
 	item = cache.CacheItemPool.Get().(*cache.CacheItem)
-	item.UnmarshalBinary([]byte(data))
+	item.UnmarshalBinary([]byte(data["data"]))
+	item.Expiration, _ = time.ParseDuration(data["expiration"])
+
 	return item, true
 }
 
@@ -82,10 +84,15 @@ func (cacheBackend *RedisBackend) Set(item *cache.CacheItem) error {
 	}
 
 	data, _ := item.MarshalBinary()
-	if item.Expiration > 0 {
-		cacheBackend.client.Set(item.Key, data, item.Expiration)
-	} else {
-		cacheBackend.client.Set(item.Key, data, 0)
+	expiration := item.Expiration.String()
+
+	cacheBackend.client.HMSet(item.Key, map[string]interface{}{
+		"data":       data,
+		"expiration": expiration,
+	})
+
+	if item.Expiration >= 0 {
+		cacheBackend.client.Expire(item.Key, item.Expiration)
 	}
 
 	return nil
@@ -97,7 +104,7 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 	ApplyFilterOptions(cacheBackend, options...)
 
 	// Get all keys
-	keys, _ := cacheBackend.client.Keys("*").Result()
+	keys, _ := cacheBackend.client.HKeys("*").Result()
 
 	items := make([]*cache.CacheItem, 0, len(keys))
 
@@ -110,11 +117,6 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 			continue
 		}
 		items = append(items, item)
-	}
-
-	// Sort items
-	if cacheBackend.SortBy == "" {
-		return items, nil
 	}
 
 	sort.Slice(items, func(i, j int) bool {
@@ -153,6 +155,68 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 
 	return items, nil
 }
+
+// func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*cache.CacheItem, error) {
+// 	// Apply the filter options
+// 	ApplyFilterOptions(cacheBackend, options...)
+
+// 	// Get all keys
+// 	keys, _ := cacheBackend.client.Keys("*").Result()
+
+// 	items := make([]*cache.CacheItem, 0, len(keys))
+
+// 	for _, key := range keys {
+// 		item, ok := cacheBackend.Get(key)
+// 		if !ok {
+// 			continue
+// 		}
+// 		if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
+// 			continue
+// 		}
+// 		items = append(items, item)
+// 	}
+
+// 	// Sort items
+// 	if cacheBackend.SortBy == "" {
+// 		return items, nil
+// 	}
+
+// 	sort.Slice(items, func(i, j int) bool {
+// 		a := items[i].FieldByName(cacheBackend.SortBy)
+// 		b := items[j].FieldByName(cacheBackend.SortBy)
+// 		switch cacheBackend.SortBy {
+// 		case types.SortByKey.String():
+// 			if cacheBackend.SortAscending {
+// 				return a.Interface().(string) < b.Interface().(string)
+// 			}
+// 			return a.Interface().(string) > b.Interface().(string)
+// 		case types.SortByValue.String():
+// 			if cacheBackend.SortAscending {
+// 				return a.Interface().(string) < b.Interface().(string)
+// 			}
+// 			return a.Interface().(string) > b.Interface().(string)
+// 		case types.SortByLastAccess.String():
+// 			if cacheBackend.SortAscending {
+// 				return a.Interface().(time.Time).Before(b.Interface().(time.Time))
+// 			}
+// 			return a.Interface().(time.Time).After(b.Interface().(time.Time))
+// 		case types.SortByAccessCount.String():
+// 			if cacheBackend.SortAscending {
+// 				return a.Interface().(uint) < b.Interface().(uint)
+// 			}
+// 			return a.Interface().(uint) > b.Interface().(uint)
+// 		case types.SortByExpiration.String():
+// 			if cacheBackend.SortAscending {
+// 				return a.Interface().(time.Duration) < b.Interface().(time.Duration)
+// 			}
+// 			return a.Interface().(time.Duration) > b.Interface().(time.Duration)
+// 		default:
+// 			return false
+// 		}
+// 	})
+
+// 	return items, nil
+// }
 
 // Remove removes an item from the cache with the given key
 func (cacheBackend *RedisBackend) Remove(keys ...string) error {

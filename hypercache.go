@@ -60,7 +60,7 @@ func NewHyperCacheInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[bac
 	// Initialize the configuration
 	config := NewConfig[backend.InMemoryBackend]()
 	// Set the default options
-	config.HyperCacheOptions = []HyperCacheOption[backend.InMemoryBackend]{
+	config.HyperCacheOptions = []Option[backend.InMemoryBackend]{
 		WithEvictionInterval[backend.InMemoryBackend](10 * time.Minute),
 		WithEvictionAlgorithm[backend.InMemoryBackend]("lru"),
 		WithExpirationInterval[backend.InMemoryBackend](30 * time.Minute),
