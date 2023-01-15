@@ -23,7 +23,7 @@ func BenchmarkHyperCache_Set(b *testing.B) {
 func BenchmarkHyperCache_Set_Proactive_Eviction(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
 	config := hypercache.NewConfig[backend.InMemoryBackend]()
-	config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+	config.HyperCacheOptions = []hypercache.Option[backend.InMemoryBackend]{
 		hypercache.WithEvictionInterval[backend.InMemoryBackend](0),
 		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("cawolfu"),
 	}

@@ -6,14 +6,14 @@ import (
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
-	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
 
 func main() {
 	// Create a new HyperCache with a capacity of 100
 	config := hypercache.NewConfig[backend.InMemoryBackend]()
-	config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+	config.HyperCacheOptions = []hypercache.Option[backend.InMemoryBackend]{
 		hypercache.WithEvictionInterval[backend.InMemoryBackend](3 * time.Second),
 		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("lru"),
 		hypercache.WithExpirationInterval[backend.InMemoryBackend](3 * time.Second),
@@ -53,7 +53,7 @@ func main() {
 	list, err := hyperCache.List(
 		backend.WithSortBy[backend.InMemoryBackend](types.SortByValue),
 		backend.WithSortDescending[backend.InMemoryBackend](),
-		backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.CacheItem) bool {
+		backend.WithFilterFunc[backend.InMemoryBackend](func(item *models.Item) bool {
 			return item.Expiration > time.Second
 		}),
 	)

@@ -6,8 +6,8 @@ import (
 	"github.com/hyp3rd/hypercache/errors"
 )
 
-// EvictionAlgorithm is the interface that must be implemented by eviction algorithms.
-type EvictionAlgorithm interface {
+// Algorithm is the interface that must be implemented by eviction algorithms.
+type Algorithm interface {
 	// Evict returns the next item to be evicted from the cache.
 	Evict() (string, bool)
 	// Set adds a new item to the cache with the given key.
@@ -18,12 +18,12 @@ type EvictionAlgorithm interface {
 	Delete(key string)
 }
 
-var evictionAlgorithmRegistry = make(map[string]func(capacity int) (EvictionAlgorithm, error))
+var algorithmRegistry = make(map[string]func(capacity int) (Algorithm, error))
 
 // NewEvictionAlgorithm creates a new eviction algorithm with the given capacity.
 // If the capacity is negative, it returns an error.
 // The algorithmName parameter is used to select the eviction algorithm from the registry.
-func NewEvictionAlgorithm(algorithmName string, capacity int) (EvictionAlgorithm, error) {
+func NewEvictionAlgorithm(algorithmName string, capacity int) (Algorithm, error) {
 	// Check the parameters.
 	if algorithmName == "" {
 		return nil, fmt.Errorf("%s: %s", errors.ErrParamCannotBeEmpty, "algorithmName")
@@ -32,7 +32,7 @@ func NewEvictionAlgorithm(algorithmName string, capacity int) (EvictionAlgorithm
 		return nil, errors.ErrInvalidCapacity
 	}
 
-	createFunc, ok := evictionAlgorithmRegistry[algorithmName]
+	createFunc, ok := algorithmRegistry[algorithmName]
 	if !ok {
 		return nil, fmt.Errorf("%s: %s", errors.ErrAlgorithmNotFound, algorithmName)
 	}
@@ -41,25 +41,25 @@ func NewEvictionAlgorithm(algorithmName string, capacity int) (EvictionAlgorithm
 }
 
 // RegisterEvictionAlgorithm registers a new eviction algorithm with the given name.
-func RegisterEvictionAlgorithm(name string, createFunc func(capacity int) (EvictionAlgorithm, error)) {
-	evictionAlgorithmRegistry[name] = createFunc
+func RegisterEvictionAlgorithm(name string, createFunc func(capacity int) (Algorithm, error)) {
+	algorithmRegistry[name] = createFunc
 }
 
 // Register the default eviction algorithms.
 func init() {
-	RegisterEvictionAlgorithm("arc", func(capacity int) (EvictionAlgorithm, error) {
+	RegisterEvictionAlgorithm("arc", func(capacity int) (Algorithm, error) {
 		return NewARC(capacity)
 	})
-	RegisterEvictionAlgorithm("lru", func(capacity int) (EvictionAlgorithm, error) {
+	RegisterEvictionAlgorithm("lru", func(capacity int) (Algorithm, error) {
 		return NewLRU(capacity)
 	})
-	RegisterEvictionAlgorithm("clock", func(capacity int) (EvictionAlgorithm, error) {
+	RegisterEvictionAlgorithm("clock", func(capacity int) (Algorithm, error) {
 		return NewClockAlgorithm(capacity)
 	})
-	RegisterEvictionAlgorithm("lfu", func(capacity int) (EvictionAlgorithm, error) {
+	RegisterEvictionAlgorithm("lfu", func(capacity int) (Algorithm, error) {
 		return NewLFUAlgorithm(capacity)
 	})
-	RegisterEvictionAlgorithm("cawolfu", func(capacity int) (EvictionAlgorithm, error) {
+	RegisterEvictionAlgorithm("cawolfu", func(capacity int) (Algorithm, error) {
 		return NewCAWOLFU(capacity)
 	})
 }

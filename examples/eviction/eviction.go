@@ -23,7 +23,7 @@ func main() {
 func executeExample(evictionInterval time.Duration) {
 	// Create a new HyperCache with a capacity of 10
 	config := hypercache.NewConfig[backend.InMemoryBackend]()
-	config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemoryBackend]{
+	config.HyperCacheOptions = []hypercache.Option[backend.InMemoryBackend]{
 		hypercache.WithEvictionInterval[backend.InMemoryBackend](evictionInterval),
 		hypercache.WithEvictionAlgorithm[backend.InMemoryBackend]("cawolfu"),
 	}

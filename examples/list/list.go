@@ -6,7 +6,7 @@ import (
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
-	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
 
@@ -25,7 +25,7 @@ func main() {
 	// Add 100 items to the cache
 	for i := 0; i < 100; i++ {
 		key := fmt.Sprintf("key%d", i)
-		val := fmt.Sprintf("%d", i)
+		val := i //fmt.Sprintf("%d", i)
 
 		err = hyperCache.Set(key, val, time.Minute)
 
@@ -37,9 +37,9 @@ func main() {
 
 	// Retrieve the list of items from the cache
 	list, err := hyperCache.List(
-		backend.WithSortBy[backend.InMemoryBackend](types.SortByKey),
-		backend.WithSortDescending[backend.InMemoryBackend](),
-		backend.WithFilterFunc[backend.InMemoryBackend](func(item *cache.CacheItem) bool {
+		backend.WithSortBy[backend.InMemoryBackend](types.SortByValue),
+		backend.WithSortAscending[backend.InMemoryBackend](),
+		backend.WithFilterFunc[backend.InMemoryBackend](func(item *models.Item) bool {
 			return item.Value != "val98"
 		}),
 	)

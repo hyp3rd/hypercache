@@ -1,21 +1,21 @@
-package cache
+package models
 
-// CacheItem represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
+// Item represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 
 import (
-	"bytes"
-	"encoding/gob"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	// "https://github.com/kelindar/binary"
 	"github.com/hyp3rd/hypercache/errors"
+	"github.com/shamaton/msgpack/v2"
 )
 
-// CacheItem is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
-type CacheItem struct {
+// Item is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
+type Item struct {
 	Key         string        // key of the item
 	Value       any           // Value of the item
 	Expiration  time.Duration // Expiration duration of the item
@@ -23,16 +23,16 @@ type CacheItem struct {
 	AccessCount uint          // AccessCount of times the item has been accessed
 }
 
-// CacheItemPool is a pool of CacheItem values.
-var CacheItemPool = sync.Pool{
+// ItemPool is a pool of Item values.
+var ItemPool = sync.Pool{
 	New: func() any {
-		return &CacheItem{}
+		return &Item{}
 	},
 }
 
-// FieldByName returns the value of the field of the CacheItem struct with the given name.
+// FieldByName returns the value of the field of the Item struct with the given name.
 // If the field does not exist, an empty reflect.Value is returned.
-func (item *CacheItem) FieldByName(name string) reflect.Value {
+func (item *Item) FieldByName(name string) reflect.Value {
 	// Get the reflect.Value of the item pointer
 	v := reflect.ValueOf(item)
 
@@ -48,7 +48,7 @@ func (item *CacheItem) FieldByName(name string) reflect.Value {
 }
 
 // Valid returns an error if the item is invalid, nil otherwise.
-func (item *CacheItem) Valid() error {
+func (item *Item) Valid() error {
 	// Check for empty key
 	if item.Key == "" || strings.TrimSpace(item.Key) == "" {
 		return errors.ErrInvalidKey
@@ -68,31 +68,42 @@ func (item *CacheItem) Valid() error {
 }
 
 // Touch updates the last access time of the item and increments the access count.
-func (item *CacheItem) Touch() {
+func (item *Item) Touch() {
 	item.LastAccess = time.Now()
 	item.AccessCount++
 }
 
 // Expired returns true if the item has expired, false otherwise.
-func (item *CacheItem) Expired() bool {
+func (item *Item) Expired() bool {
 	// If the expiration duration is 0, the item never expires
 	return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
 }
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
-func (item *CacheItem) MarshalBinary() (data []byte, err error) {
-	buf := bytes.NewBuffer([]byte{})
-	enc := gob.NewEncoder(buf)
-	err = enc.Encode(item)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+// func (item *Item) MarshalBinary() (data []byte, err error) {
+// 	buf := bytes.NewBuffer([]byte{})
+// 	enc := gob.NewEncoder(buf)
+// 	err = enc.Encode(item)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return buf.Bytes(), nil
+// }
+
+// UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
+//
+//	func (item *Item) UnmarshalBinary(data []byte) error {
+//		buf := bytes.NewBuffer(data)
+//		dec := gob.NewDecoder(buf)
+//		return dec.Decode(item)
+//	}
+//
+// MarshalBinary implements the encoding.BinaryMarshaler interface.
+func (item *Item) MarshalBinary() (data []byte, err error) {
+	return msgpack.Marshal(item)
 }
 
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
-func (item *CacheItem) UnmarshalBinary(data []byte) error {
-	buf := bytes.NewBuffer(data)
-	dec := gob.NewDecoder(buf)
-	return dec.Decode(item)
+func (item *Item) UnmarshalBinary(data []byte) error {
+	return msgpack.Unmarshal(data, item)
 }
