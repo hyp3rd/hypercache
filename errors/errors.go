@@ -36,4 +36,7 @@ var (
 
 	// ErrParamCannotBeEmpty is returned when a parameter cannot be empty.
 	ErrParamCannotBeEmpty = errors.New("param cannot be empty")
+
+	// ErrSerializerNotFound is returned when a serializer is not found.
+	ErrSerializerNotFound = errors.New("serializer not found")
 )

@@ -12,11 +12,11 @@ import (
 // Must implement the hypercache.Service interface.
 type StatsCollectorMiddleware struct {
 	next           hypercache.Service
-	statsCollector stats.Collector
+	statsCollector stats.ICollector
 }
 
 // NewStatsCollectorMiddleware returns a new StatsCollectorMiddleware
-func NewStatsCollectorMiddleware(next hypercache.Service, statsCollector stats.Collector) hypercache.Service {
+func NewStatsCollectorMiddleware(next hypercache.Service, statsCollector stats.ICollector) hypercache.Service {
 	return &StatsCollectorMiddleware{next: next, statsCollector: statsCollector}
 }
 
