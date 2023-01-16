@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/go-redis/redis/v9"
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/libs/serializer"
 	"github.com/hyp3rd/hypercache/models"
@@ -40,7 +40,10 @@ func NewRedisBackend[T RedisBackend](redisOptions ...Option[RedisBackend]) (back
 		rb.keysSetName = "hypercache"
 	}
 
-	rb.Serializer = serializer.New()
+	rb.Serializer, err = serializer.New("msgpack")
+	if err != nil {
+		return nil, err
+	}
 
 	// return the new backend
 	return rb, nil
@@ -72,8 +75,10 @@ func (cacheBackend *RedisBackend) Size() int {
 
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
 func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
+	pipe := cacheBackend.rdb.TxPipeline()
 	// Check if the key is in the set of keys
-	isMember, err := cacheBackend.rdb.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
+	// isMember, err := cacheBackend.rdb.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
+	isMember, err := pipe.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
 	if err != nil {
 		return nil, false
 	}
@@ -83,8 +88,13 @@ func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
 
 	// Get the item from the cacheBackend
 	item = models.ItemPool.Get().(*models.Item)
-	data, err := cacheBackend.rdb.HGet(context.Background(), key, "data").Bytes()
+	// data, err := cacheBackend.rdb.HGet(context.Background(), key, "data").Bytes()
+	data, err := pipe.HGet(context.Background(), key, "data").Bytes()
+	pipe.Exec(context.Background())
 	if err != nil {
+		// Return the item to the pool
+		models.ItemPool.Put(item)
+
 		// Check if the item is not found
 		if err == redis.Nil {
 			return nil, false
@@ -92,7 +102,7 @@ func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
 		return nil, false
 	}
 	// Deserialize the item
-	err = cacheBackend.Serializer.Deserialize(data, item)
+	err = cacheBackend.Serializer.Unmarshal(data, item)
 	if err != nil {
 		return nil, false
 	}
@@ -101,21 +111,27 @@ func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
 
 // Set stores the Item in the cacheBackend.
 func (cacheBackend *RedisBackend) Set(item *models.Item) error {
+	pipe := cacheBackend.rdb.TxPipeline()
+
 	// Check if the item is valid
 	if err := item.Valid(); err != nil {
+		// Return the item to the pool
+		models.ItemPool.Put(item)
 		return err
 	}
 
 	// Serialize the item
-	data, err := cacheBackend.Serializer.Serialize(item)
+	data, err := cacheBackend.Serializer.Marshal(item)
 	if err != nil {
+		// Return the item to the pool
+		models.ItemPool.Put(item)
 		return err
 	}
 
 	expiration := item.Expiration.String()
 
 	// Store the item in the cacheBackend
-	err = cacheBackend.rdb.HSet(context.Background(), item.Key, map[string]interface{}{
+	err = pipe.HSet(context.Background(), item.Key, map[string]interface{}{
 		"data":       data,
 		"expiration": expiration,
 	}).Err()
@@ -123,14 +139,14 @@ func (cacheBackend *RedisBackend) Set(item *models.Item) error {
 	if err != nil {
 		return err
 	}
-
 	// Add the key to the set of keys associated with the cache prefix
-	cacheBackend.rdb.SAdd(context.Background(), cacheBackend.keysSetName, item.Key)
-
+	pipe.SAdd(context.Background(), cacheBackend.keysSetName, item.Key)
 	// Set the expiration if it is not zero
 	if item.Expiration > 0 {
-		cacheBackend.rdb.Expire(context.Background(), item.Key, item.Expiration)
+		pipe.Expire(context.Background(), item.Key, item.Expiration)
 	}
+
+	pipe.Exec(context.Background())
 
 	return nil
 }
@@ -140,8 +156,20 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
 
-	// Get the set of keys
+	// Get the set of keys held in the cacheBackend with the given `keysSetName`
 	keys, err := cacheBackend.rdb.SMembers(context.Background(), cacheBackend.keysSetName).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	// Execute the Redis commands in a pipeline transaction to improve performance and reduce the number of round trips
+	cmds, err := cacheBackend.rdb.Pipelined(context.Background(), func(pipe redis.Pipeliner) error {
+		// Get the items from the cacheBackend
+		for _, key := range keys {
+			pipe.HGet(context.Background(), key, "data")
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -149,101 +177,54 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 	// Create a slice to hold the items
 	items := make([]*models.Item, 0, len(keys))
 
-	// Iterate over the keys and retrieve the items
-	for _, key := range keys {
-		// Get the item from the cacheBackend
-		item, ok := cacheBackend.Get(key)
-		if ok {
-			// Check if the item matches the filter options
+	// Deserialize the items and add them to the slice of items to return
+	for _, cmd := range cmds {
+		data, _ := cmd.(*redis.StringCmd).Bytes() // Ignore the error because it is already checked in the pipeline transaction
+		item := models.ItemPool.Get().(*models.Item)
+		err := cacheBackend.Serializer.Unmarshal(data, item)
+		if err == nil {
 			if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
 				continue
 			}
 			items = append(items, item)
+		} else {
+			// Return the item to the pool
+			models.ItemPool.Put(item)
 		}
 	}
 
-	// Sort the items
+	// Check if the items should be sorted
 	if cacheBackend.SortBy == "" {
 		// No sorting
 		return items, nil
 	}
 
+	// Sort the items
 	var sorter sort.Interface
 	switch cacheBackend.SortBy {
-	case types.SortByKey.String():
+	case types.SortByKey.String(): // Sort by key
 		sorter = &itemSorterByKey{items: items}
-	case types.SortByValue.String():
+	case types.SortByValue.String(): // Sort by value: it can cause problems if the value is not a string
 		sorter = &itemSorterByValue{items: items}
-	case types.SortByLastAccess.String():
+	case types.SortByLastAccess.String(): // Sort by last access
 		sorter = &itemSorterByLastAccess{items: items}
-	case types.SortByAccessCount.String():
+	case types.SortByAccessCount.String(): // Sort by access count
 		sorter = &itemSorterByAccessCount{items: items}
-	case types.SortByExpiration.String():
+	case types.SortByExpiration.String(): // Sort by expiration
 		sorter = &itemSorterByExpiration{items: items}
 	default:
 		return nil, fmt.Errorf("unknown sortBy field: %s", cacheBackend.SortBy)
 	}
 
+	// Reverse the sort order if needed
 	if !cacheBackend.SortAscending {
 		sorter = sort.Reverse(sorter)
 	}
-
+	// Sort the items by the given field
 	sort.Sort(sorter)
 
 	return items, nil
 }
-
-// func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*models.Item, error) {
-// 	// Apply the filter options
-// 	// Apply the filter options
-// 	ApplyFilterOptions(cacheBackend, options...)
-
-// 	// Initialize the score range
-// 	var min, max string
-// 	if cacheBackend.SortAscending {
-// 		min = "-inf"
-// 		max = "+inf"
-// 	} else {
-// 		min = "+inf"
-// 		max = "-inf"
-// 	}
-
-// 	// Get the keys from the sorted set
-// 	var keys []string
-// 	var err error
-// 	zrangeby := &redis.ZRangeBy{
-// 		Min: min, Max: max,
-// 	}
-// 	if cacheBackend.SortBy == types.SortByLastAccess.String() {
-// 		keys, err = cacheBackend.rdb.ZRangeByScore(context.Background(), "last_access_sort", zrangeby).Result()
-// 	} else if cacheBackend.SortBy == types.SortByAccessCount.String() {
-// 		keys, err = cacheBackend.rdb.ZRangeByScore(context.Background(), "access_count_sort", zrangeby).Result()
-// 	} else {
-// 		return nil, fmt.Errorf("invalid sorting criteria: %s", cacheBackend.SortBy)
-// 	}
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	// Create a slice to hold the items
-// 	items := make([]*models.Item, 0, len(keys))
-
-// 	// Iterate over the keys and retrieve the items
-// 	for _, key := range keys {
-// 		// Get the item from the cacheBackend
-// 		item, ok := cacheBackend.Get(key)
-// 		if !ok {
-// 			continue
-// 		}
-// 		// Check if the item matches the filter options
-// 		if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
-// 			continue
-// 		}
-// 		items = append(items, item)
-// 	}
-
-// 	return items, nil
-// }
 
 // Remove removes an item from the cache with the given key
 func (cacheBackend *RedisBackend) Remove(keys ...string) error {

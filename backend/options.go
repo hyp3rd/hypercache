@@ -1,7 +1,8 @@
 package backend
 
 import (
-	"github.com/go-redis/redis/v8"
+	"github.com/go-redis/redis/v9"
+	"github.com/hyp3rd/hypercache/libs/serializer"
 	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
@@ -80,6 +81,16 @@ func WithRedisClient[T RedisBackend](client *redis.Client) Option[RedisBackend] 
 func WithKeysSetName[T RedisBackend](keysSetName string) Option[RedisBackend] {
 	return func(backend *RedisBackend) {
 		backend.keysSetName = keysSetName
+	}
+}
+
+// WithSerializer is an option that sets the serializer to use. The serializer is used to serialize and deserialize the items in the cache.
+//   - The default serializer is `serializer.MsgpackSerializer`.
+//   - The `serializer.JSONSerializer` can be used to serialize and deserialize the items in the cache as JSON.
+//   - The interface `serializer.ISerializer` can be implemented to use a custom serializer.
+func WithSerializer[T RedisBackend](serializer serializer.ISerializer) Option[RedisBackend] {
+	return func(backend *RedisBackend) {
+		backend.Serializer = serializer
 	}
 }
 

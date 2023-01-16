@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	redisStore, err := redis.NewStore(
+	redisStore, err := redis.New(
 		redis.WithAddr("localhost:6379"),
 		redis.WithPassword("k7oMs2G5bc4mRN45jPZjLBZxuMFrCLahvPn648Zwq1lT41gSYZqapBRnSF2L995FaYcZBz8c7xkKXku94HeReDgdwBu1N4CzgfQ94Z504hjfzrST1u0idVkbXe8ust"),
 		redis.WithDB(0),
@@ -40,17 +40,11 @@ func main() {
 		}
 	}
 
-	// value, ok := hyperCache.Get("key-100")
-
-	// if !ok {
-	// 	fmt.Println("key not found")
-	// }
-
 	allItems, err := hyperCache.List(
 		backend.WithSortBy[backend.RedisBackend](types.SortByKey),
 		backend.WithSortOrderAsc[backend.RedisBackend](true),
 		backend.WithFilterFunc[backend.RedisBackend](func(item *models.Item) bool {
-			return item.Value == "value-210"
+			return item.Value != "value-210"
 		}),
 	)
 
