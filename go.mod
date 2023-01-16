@@ -5,7 +5,6 @@ go 1.19
 require (
 	github.com/go-redis/redis/v9 v9.0.0-rc.2
 	github.com/google/go-cmp v0.5.9
-	github.com/kelindar/binary v1.0.17
 	github.com/longbridgeapp/assert v1.1.0
 	github.com/shamaton/msgpack/v2 v2.1.1
 	go.uber.org/zap v1.24.0
