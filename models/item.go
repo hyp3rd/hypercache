@@ -3,7 +3,6 @@ package models
 // Item represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 
 import (
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,7 +10,6 @@ import (
 
 	// "https://github.com/kelindar/binary"
 	"github.com/hyp3rd/hypercache/errors"
-	"github.com/shamaton/msgpack/v2"
 )
 
 // Item is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
@@ -32,25 +30,25 @@ var ItemPool = sync.Pool{
 
 // FieldByName returns the value of the field of the Item struct with the given name.
 // If the field does not exist, an empty reflect.Value is returned.
-func (item *Item) FieldByName(name string) reflect.Value {
-	// Get the reflect.Value of the item pointer
-	v := reflect.ValueOf(item)
+// func (item *Item) FieldByName(name string) reflect.Value {
+// 	// Get the reflect.Value of the item pointer
+// 	v := reflect.ValueOf(item)
 
-	// Get the reflect.Value of the item struct itself by calling Elem() on the pointer value
-	f := v.Elem().FieldByName(name)
+// 	// Get the reflect.Value of the item struct itself by calling Elem() on the pointer value
+// 	f := v.Elem().FieldByName(name)
 
-	// If the field does not exist, return an empty reflect.Value
-	if !f.IsValid() {
-		return reflect.Value{}
-	}
-	// Return the field value
-	return f
-}
+// 	// If the field does not exist, return an empty reflect.Value
+// 	if !f.IsValid() {
+// 		return reflect.Value{}
+// 	}
+// 	// Return the field value
+// 	return f
+// }
 
 // Valid returns an error if the item is invalid, nil otherwise.
 func (item *Item) Valid() error {
 	// Check for empty key
-	if item.Key == "" || strings.TrimSpace(item.Key) == "" {
+	if strings.TrimSpace(item.Key) == "" {
 		return errors.ErrInvalidKey
 	}
 
@@ -100,11 +98,11 @@ func (item *Item) Expired() bool {
 //
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
-func (item *Item) MarshalBinary() (data []byte, err error) {
-	return msgpack.Marshal(item)
-}
+// func (item *Item) MarshalBinary() (data []byte, err error) {
+// 	return msgpack.Marshal(item)
+// }
 
-// UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
-func (item *Item) UnmarshalBinary(data []byte) error {
-	return msgpack.Unmarshal(data, item)
-}
+// // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
+// func (item *Item) UnmarshalBinary(data []byte) error {
+// 	return msgpack.Unmarshal(data, item)
+// }
