@@ -132,11 +132,4 @@ func WithFilterFunc[T any](fn func(item *models.Item) bool) FilterOption[T] {
 			filterable.setFilterFunc(fn)
 		}
 	}
-
-	// return func(a *T) {
-	// 	switch filter := any(a).(type) {
-	// 	case *InMemory:
-	// 		filter.FilterFunc = fn
-	// 	}
-	// }
 }
