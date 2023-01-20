@@ -20,7 +20,7 @@ func main() {
 	}
 
 	config.InMemoryOptions = []backend.Option[backend.InMemory]{
-		backend.WithCapacity(100),
+		backend.WithCapacity[backend.InMemory](100),
 	}
 
 	// Create a new HyperCache with a capacity of 10

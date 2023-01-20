@@ -8,6 +8,7 @@ package hypercache
 // It can implement a service interface to interact with the cache with middleware support (default or custom).
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -70,7 +71,7 @@ func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMem
 
 	// Set the in-memory backend options
 	config.InMemoryOptions = []backend.Option[backend.InMemory]{
-		backend.WithCapacity(capacity),
+		backend.WithCapacity[backend.InMemory](capacity),
 	}
 	// Initialize the cache
 	hyperCache, err = New(config)
@@ -100,7 +101,7 @@ func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache
 	switch t {
 	case "backend.InMemory":
 		hyperCache.backend, err = backend.NewInMemory(config.InMemoryOptions...)
-	case "backend.RedisBackend":
+	case "backend.Redis":
 		hyperCache.backend, err = backend.NewRedisBackend(config.RedisOptions...)
 	default:
 		err = errors.ErrInvalidBackendType
@@ -219,10 +220,10 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 			}),
 		)
 
-	} else if cb, ok := hyperCache.backend.(*backend.RedisBackend); ok {
+	} else if cb, ok := hyperCache.backend.(*backend.Redis); ok {
 		items, err = cb.List(
-			backend.WithSortBy[backend.RedisBackend](types.SortByExpiration),
-			backend.WithFilterFunc[backend.RedisBackend](func(item *models.Item) bool {
+			backend.WithSortBy[backend.Redis](types.SortByExpiration),
+			backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
 				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
 			}),
 		)
@@ -280,10 +281,19 @@ func (hyperCache *HyperCache[T]) evictionLoop() {
 func (hyperCache *HyperCache[T]) evictItem() (string, bool) {
 	key, ok := hyperCache.evictionAlgorithm.Evict()
 	if !ok {
+		fmt.Println("failed evicting item: ", key)
+
 		return "", false
 	}
 
-	hyperCache.backend.Remove(key)
+	fmt.Println("evicting item: ", key)
+
+	err := hyperCache.backend.Remove(key)
+	if err != nil {
+		fmt.Println("failed evicting item: ", key, err)
+
+		return "", false
+	}
 	return key, true
 }
 
@@ -330,6 +340,7 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	return nil
 }
 
+// SetMultiple adds multiple items to the cache with the given key-value pairs. If an item with the same key already exists, it updates the value of the existing item.
 func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration time.Duration) error {
 	// Create a new cache item and set its properties
 	cacheItems := make([]*models.Item, 0, len(items))
@@ -370,6 +381,7 @@ func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration ti
 func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
 	item, ok := hyperCache.backend.Get(key)
 	if !ok {
+		fmt.Println("not found")
 		return nil, false
 	}
 
@@ -487,7 +499,7 @@ func (hyperCache *HyperCache[T]) List(filters ...any) ([]*models.Item, error) {
 
 	if hyperCache.cacheBackendChecker.IsRedis() {
 		// if the backend is a Redis, we set the listFunc to the ListRedis function
-		listInstance = listRedis(hyperCache.backend.(*backend.RedisBackend))
+		listInstance = listRedis(hyperCache.backend.(*backend.Redis))
 	}
 
 	// calling the corresponding implementation of the list function
@@ -512,12 +524,12 @@ func listInMemory(cacheBackend *backend.InMemory) listFunc {
 	}
 }
 
-func listRedis(cacheBackend *backend.RedisBackend) listFunc {
+func listRedis(cacheBackend *backend.Redis) listFunc {
 	return func(options ...any) ([]*models.Item, error) {
 		// here we are converting the filters of any type to the specific FilterOption type for the Redis
-		filterOptions := make([]backend.FilterOption[backend.RedisBackend], len(options))
+		filterOptions := make([]backend.FilterOption[backend.Redis], len(options))
 		for i, option := range options {
-			filterOptions[i] = option.(backend.FilterOption[backend.RedisBackend])
+			filterOptions[i] = option.(backend.FilterOption[backend.Redis])
 		}
 		return cacheBackend.List(filterOptions...)
 	}
@@ -542,7 +554,7 @@ func (hyperCache *HyperCache[T]) Clear() error {
 	if cb, ok := hyperCache.backend.(*backend.InMemory); ok {
 		items, err = cb.List()
 		cb.Clear()
-	} else if cb, ok := hyperCache.backend.(*backend.RedisBackend); ok {
+	} else if cb, ok := hyperCache.backend.(*backend.Redis); ok {
 		items, err = cb.List()
 		if err != nil {
 			return err
