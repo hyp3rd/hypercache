@@ -32,13 +32,13 @@ func (c *CacheBackendChecker[T]) IsInMemory() bool {
 	return ok
 }
 
-// IsRedisBackend returns true if the backend is a RedisBackend
+// IsRedisBackend returns true if the backend is a Redis
 func (c *CacheBackendChecker[T]) IsRedis() bool {
-	_, ok := c.Backend.(*backend.RedisBackend)
+	_, ok := c.Backend.(*backend.Redis)
 	return ok
 }
 
-// func (c *CacheBackendChecker[T]) IsRedisBackend() (backend.RedisBackend, bool) {
-//     obj, ok := c.backend.(*backend.RedisBackend)
+// func (c *CacheBackendChecker[T]) IsRedisBackend() (backend.Redis, bool) {
+//     obj, ok := c.backend.(*backend.Redis)
 //     return *obj, ok
 // }

@@ -10,8 +10,8 @@ import (
 type Config[T backend.IBackendConstrain] struct {
 	// InMemoryOptions is a slice of options that can be used to configure the `InMemory`.
 	InMemoryOptions []backend.Option[backend.InMemory]
-	// RedisOptions is a slice of options that can be used to configure the `RedisBackend`.
-	RedisOptions []backend.Option[backend.RedisBackend]
+	// RedisOptions is a slice of options that can be used to configure the `Redis`.
+	RedisOptions []backend.Option[backend.Redis]
 	// HyperCacheOptions is a slice of options that can be used to configure `HyperCache`.
 	HyperCacheOptions []Option[T]
 }
@@ -29,7 +29,7 @@ type Config[T backend.IBackendConstrain] struct {
 func NewConfig[T backend.IBackendConstrain]() *Config[T] {
 	return &Config[T]{
 		InMemoryOptions: []backend.Option[backend.InMemory]{},
-		RedisOptions:    []backend.Option[backend.RedisBackend]{},
+		RedisOptions:    []backend.Option[backend.Redis]{},
 		HyperCacheOptions: []Option[T]{
 			WithExpirationInterval[T](30 * time.Minute),
 			WithEvictionAlgorithm[T]("lfu"),

@@ -12,18 +12,19 @@ import (
 	"github.com/hyp3rd/hypercache/types"
 )
 
-// RedisBackend is a cache backend that stores the items in a redis implementation.
-type RedisBackend struct {
-	rdb         *redis.Client          // redis client to interact with the redis server
-	capacity    int                    // capacity of the cache, limits the number of items that can be stored in the cache
-	keysSetName string                 // keysSetName is the name of the set that holds the keys of the items in the cache
+// Redis is a cache backend that stores the items in a redis implementation.
+type Redis struct {
+	rdb         *redis.Client // redis client to interact with the redis server
+	capacity    int           // capacity of the cache, limits the number of items that can be stored in the cache
+	keysSetName string        // keysSetName is the name of the set that holds the keys of the items in the cache
+	// mutex       sync.RWMutex           // mutex to protect the cache from concurrent access
 	Serializer  serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
 	SortFilters                        // SortFilters holds the filters applied when listing the items in the cache
 }
 
 // NewRedisBackend creates a new redis cache with the given options.
-func NewRedisBackend[T RedisBackend](redisOptions ...Option[RedisBackend]) (backend IRedisBackend[T], err error) {
-	rb := &RedisBackend{}
+func NewRedisBackend[T Redis](redisOptions ...Option[Redis]) (backend IRedisBackend[T], err error) {
+	rb := &Redis{}
 	// Apply the backend options
 	ApplyOptions(rb, redisOptions...)
 
@@ -31,18 +32,23 @@ func NewRedisBackend[T RedisBackend](redisOptions ...Option[RedisBackend]) (back
 	if rb.rdb == nil {
 		return nil, errors.ErrNilClient
 	}
-	// Check if the capacity is valid
+	// Check if the `capacity` is valid
 	if rb.capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
 	}
 
+	// Check if the `keysSetName` is empty
 	if rb.keysSetName == "" {
 		rb.keysSetName = "hypercache"
 	}
 
-	rb.Serializer, err = serializer.New("msgpack")
-	if err != nil {
-		return nil, err
+	// Check if the serializer is nil
+	if rb.Serializer == nil {
+		// Set a the serializer to default to `msgpack`
+		rb.Serializer, err = serializer.New("msgpack")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// return the new backend
@@ -50,12 +56,12 @@ func NewRedisBackend[T RedisBackend](redisOptions ...Option[RedisBackend]) (back
 }
 
 // Capacity returns the maximum number of items that can be stored in the cache.
-func (cacheBackend *RedisBackend) Capacity() int {
+func (cacheBackend *Redis) Capacity() int {
 	return cacheBackend.capacity
 }
 
 // SetCapacity sets the capacity of the cache.
-func (cacheBackend *RedisBackend) SetCapacity(capacity int) {
+func (cacheBackend *Redis) SetCapacity(capacity int) {
 	if capacity < 0 {
 		return
 	}
@@ -63,22 +69,22 @@ func (cacheBackend *RedisBackend) SetCapacity(capacity int) {
 }
 
 // itemCount returns the number of items in the cache.
-func (cacheBackend *RedisBackend) itemCount() int {
+func (cacheBackend *Redis) itemCount() int {
 	count, _ := cacheBackend.rdb.DBSize(context.Background()).Result()
 	return int(count)
 }
 
 // Size returns the number of items in the cache.
-func (cacheBackend *RedisBackend) Size() int {
+func (cacheBackend *Redis) Size() int {
 	return cacheBackend.itemCount()
 }
 
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
-func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
-	pipe := cacheBackend.rdb.TxPipeline()
+func (cacheBackend *Redis) Get(key string) (item *models.Item, ok bool) {
+	// pipe := cacheBackend.rdb.Conn().Pipeline()
 	// Check if the key is in the set of keys
-	// isMember, err := cacheBackend.rdb.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
-	isMember, err := pipe.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
+	isMember, err := cacheBackend.rdb.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
+	// isMember, err := pipe.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
 	if err != nil {
 		return nil, false
 	}
@@ -88,13 +94,12 @@ func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
 
 	// Get the item from the cacheBackend
 	item = models.ItemPool.Get().(*models.Item)
-	// data, err := cacheBackend.rdb.HGet(context.Background(), key, "data").Bytes()
-	data, err := pipe.HGet(context.Background(), key, "data").Bytes()
-	pipe.Exec(context.Background())
+	// Return the item to the pool
+	defer models.ItemPool.Put(item)
+	data, err := cacheBackend.rdb.HGet(context.Background(), key, "data").Bytes()
+	// data, _ := pipe.HGet(context.Background(), key, "data").Bytes()
+	// _, err = pipe.Exec(context.Background())
 	if err != nil {
-		// Return the item to the pool
-		models.ItemPool.Put(item)
-
 		// Check if the item is not found
 		if err == redis.Nil {
 			return nil, false
@@ -110,13 +115,12 @@ func (cacheBackend *RedisBackend) Get(key string) (item *models.Item, ok bool) {
 }
 
 // Set stores the Item in the cacheBackend.
-func (cacheBackend *RedisBackend) Set(item *models.Item) error {
+func (cacheBackend *Redis) Set(item *models.Item) error {
 	pipe := cacheBackend.rdb.TxPipeline()
 
 	// Check if the item is valid
 	if err := item.Valid(); err != nil {
 		// Return the item to the pool
-		models.ItemPool.Put(item)
 		return err
 	}
 
@@ -124,7 +128,6 @@ func (cacheBackend *RedisBackend) Set(item *models.Item) error {
 	data, err := cacheBackend.Serializer.Marshal(item)
 	if err != nil {
 		// Return the item to the pool
-		models.ItemPool.Put(item)
 		return err
 	}
 
@@ -152,7 +155,7 @@ func (cacheBackend *RedisBackend) Set(item *models.Item) error {
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([]*models.Item, error) {
+func (cacheBackend *Redis) List(options ...FilterOption[Redis]) ([]*models.Item, error) {
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
 
@@ -181,15 +184,14 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 	for _, cmd := range cmds {
 		data, _ := cmd.(*redis.StringCmd).Bytes() // Ignore the error because it is already checked in the pipeline transaction
 		item := models.ItemPool.Get().(*models.Item)
+		// Return the item to the pool
+		defer models.ItemPool.Put(item)
 		err := cacheBackend.Serializer.Unmarshal(data, item)
 		if err == nil {
 			if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
 				continue
 			}
 			items = append(items, item)
-		} else {
-			// Return the item to the pool
-			models.ItemPool.Put(item)
 		}
 	}
 
@@ -227,13 +229,18 @@ func (cacheBackend *RedisBackend) List(options ...FilterOption[RedisBackend]) ([
 }
 
 // Remove removes an item from the cache with the given key
-func (cacheBackend *RedisBackend) Remove(keys ...string) error {
-	_, err := cacheBackend.rdb.Del(context.Background(), keys...).Result()
+func (cacheBackend *Redis) Remove(keys ...string) error {
+	pipe := cacheBackend.rdb.TxPipeline()
+
+	pipe.SRem(context.Background(), cacheBackend.keysSetName, keys).Result()
+	pipe.Del(context.Background(), keys...).Result()
+
+	_, err := pipe.Exec(context.Background())
 	return err
 }
 
 // Clear removes all items from the cache
-func (cacheBackend *RedisBackend) Clear() error {
+func (cacheBackend *Redis) Clear() error {
 	_, err := cacheBackend.rdb.FlushDB(context.Background()).Result()
 	return err
 }

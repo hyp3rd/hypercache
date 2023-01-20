@@ -20,8 +20,8 @@ func (inm *InMemory) setSortAscending(ascending bool) {
 	inm.SortAscending = ascending
 }
 
-// setSortAscending sets the `SortAscending` field of the `RedisBackend` backend.
-func (rb *RedisBackend) setSortAscending(ascending bool) {
+// setSortAscending sets the `SortAscending` field of the `Redis` backend.
+func (rb *Redis) setSortAscending(ascending bool) {
 	rb.SortAscending = ascending
 }
 
@@ -30,8 +30,8 @@ func (inm *InMemory) setSortBy(sortBy string) {
 	inm.SortBy = sortBy
 }
 
-// setSortBy sets the `SortBy` field of the `RedisBackend` backend.
-func (rb *RedisBackend) setSortBy(sortBy string) {
+// setSortBy sets the `SortBy` field of the `Redis` backend.
+func (rb *Redis) setSortBy(sortBy string) {
 	rb.SortBy = sortBy
 }
 
@@ -48,9 +48,25 @@ func (inm *InMemory) setFilterFunc(filterFunc FilterFunc) {
 	inm.FilterFunc = filterFunc
 }
 
-// setFilterFunc sets the `FilterFunc` field of the `RedisBackend` backend.
-func (rb *RedisBackend) setFilterFunc(filterFunc FilterFunc) {
+// setFilterFunc sets the `FilterFunc` field of the `Redis` backend.
+func (rb *Redis) setFilterFunc(filterFunc FilterFunc) {
 	rb.FilterFunc = filterFunc
+}
+
+// iConfigurableBackend is an interface that defines the methods that a backend should implement to be configurable.
+type iConfigurableBackend interface {
+	// setCapacity sets the capacity of the cache.
+	setCapacity(capacity int)
+}
+
+// setCapacity sets the `Capacity` field of the `InMemory` backend.
+func (inm *InMemory) setCapacity(capacity int) {
+	inm.capacity = capacity
+}
+
+// setCapacity sets the `Capacity` field of the `Redis` backend.
+func (rb *Redis) setCapacity(capacity int) {
+	rb.capacity = capacity
 }
 
 // Option is a function type that can be used to configure the `HyperCache` struct.
@@ -64,22 +80,24 @@ func ApplyOptions[T IBackendConstrain](backend *T, options ...Option[T]) {
 }
 
 // WithCapacity is an option that sets the capacity of the cache.
-func WithCapacity[T InMemory](capacity int) Option[InMemory] {
-	return func(backend *InMemory) {
-		backend.capacity = capacity
+func WithCapacity[T IBackendConstrain](capacity int) Option[T] {
+	return func(a *T) {
+		if configurable, ok := any(a).(iConfigurableBackend); ok {
+			configurable.setCapacity(capacity)
+		}
 	}
 }
 
 // WithRedisClient is an option that sets the redis client to use.
-func WithRedisClient[T RedisBackend](client *redis.Client) Option[RedisBackend] {
-	return func(backend *RedisBackend) {
+func WithRedisClient[T Redis](client *redis.Client) Option[Redis] {
+	return func(backend *Redis) {
 		backend.rdb = client
 	}
 }
 
 // WithKeysSetName is an option that sets the name of the set that holds the keys of the items in the cache
-func WithKeysSetName[T RedisBackend](keysSetName string) Option[RedisBackend] {
-	return func(backend *RedisBackend) {
+func WithKeysSetName[T Redis](keysSetName string) Option[Redis] {
+	return func(backend *Redis) {
 		backend.keysSetName = keysSetName
 	}
 }
@@ -88,8 +106,8 @@ func WithKeysSetName[T RedisBackend](keysSetName string) Option[RedisBackend] {
 //   - The default serializer is `serializer.MsgpackSerializer`.
 //   - The `serializer.JSONSerializer` can be used to serialize and deserialize the items in the cache as JSON.
 //   - The interface `serializer.ISerializer` can be implemented to use a custom serializer.
-func WithSerializer[T RedisBackend](serializer serializer.ISerializer) Option[RedisBackend] {
-	return func(backend *RedisBackend) {
+func WithSerializer[T Redis](serializer serializer.ISerializer) Option[Redis] {
+	return func(backend *Redis) {
 		backend.Serializer = serializer
 	}
 }
@@ -132,11 +150,4 @@ func WithFilterFunc[T any](fn func(item *models.Item) bool) FilterOption[T] {
 			filterable.setFilterFunc(fn)
 		}
 	}
-
-	// return func(a *T) {
-	// 	switch filter := any(a).(type) {
-	// 	case *InMemory:
-	// 		filter.FilterFunc = fn
-	// 	}
-	// }
 }

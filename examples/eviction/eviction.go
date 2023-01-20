@@ -29,7 +29,7 @@ func executeExample(evictionInterval time.Duration) {
 	}
 
 	config.InMemoryOptions = []backend.Option[backend.InMemory]{
-		backend.WithCapacity(10),
+		backend.WithCapacity[backend.InMemory](10),
 	}
 
 	// Create a new HyperCache with a capacity of 10

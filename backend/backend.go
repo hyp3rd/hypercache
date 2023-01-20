@@ -7,7 +7,7 @@ import (
 
 // IBackendConstrain is the interface that defines the constrain type that must be implemented by cache backends.
 type IBackendConstrain interface {
-	InMemory | RedisBackend
+	InMemory | Redis
 }
 
 // IInMemory is the interface that must be implemented by in-memory cache backends.
@@ -25,7 +25,7 @@ type IRedisBackend[T IBackendConstrain] interface {
 	// IBackend[T] is the interface that must be implemented by cache backends.
 	IBackend[T]
 	// List the items in the cache that meet the specified criteria.
-	List(options ...FilterOption[RedisBackend]) ([]*models.Item, error)
+	List(options ...FilterOption[Redis]) ([]*models.Item, error)
 	// Clear removes all items from the cache.
 	Clear() error
 }
@@ -58,9 +58,9 @@ func NewBackend[T IBackendConstrain](backendType string, opts ...any) (IBackend[
 		}
 		return NewInMemory(Options...)
 	case "redis":
-		Options := make([]Option[RedisBackend], len(opts))
+		Options := make([]Option[Redis], len(opts))
 		for i, option := range opts {
-			Options[i] = option.(Option[RedisBackend])
+			Options[i] = option.(Option[Redis])
 		}
 		return NewRedisBackend(Options...)
 	default:

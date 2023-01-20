@@ -8,8 +8,8 @@ import (
 )
 
 func BenchmarkHyperCache_List(b *testing.B) {
-	// Create a new HyperCache with a capacity of 1000
-	cache, _ := hypercache.NewInMemoryWithDefaults(1000)
+	// Create a new HyperCache with a capacity of 100000
+	cache, _ := hypercache.NewInMemoryWithDefaults(100000)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
