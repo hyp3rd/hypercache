@@ -45,21 +45,33 @@ func RegisterEvictionAlgorithm(name string, createFunc func(capacity int) (IAlgo
 	algorithmRegistry[name] = createFunc
 }
 
+// RegisterEvictionAlgorithms registers a set of eviction algorithms.
+func RegisterEvictionAlgorithms(algorithms map[string]func(capacity int) (IAlgorithm, error)) {
+	for name, createFunc := range algorithms {
+		algorithmRegistry[name] = createFunc
+	}
+}
+
 // Register the default eviction algorithms.
 func init() {
-	RegisterEvictionAlgorithm("arc", func(capacity int) (IAlgorithm, error) {
-		return NewARC(capacity)
-	})
-	RegisterEvictionAlgorithm("lru", func(capacity int) (IAlgorithm, error) {
-		return NewLRU(capacity)
-	})
-	RegisterEvictionAlgorithm("clock", func(capacity int) (IAlgorithm, error) {
-		return NewClockAlgorithm(capacity)
-	})
-	RegisterEvictionAlgorithm("lfu", func(capacity int) (IAlgorithm, error) {
-		return NewLFUAlgorithm(capacity)
-	})
-	RegisterEvictionAlgorithm("cawolfu", func(capacity int) (IAlgorithm, error) {
-		return NewCAWOLFU(capacity)
-	})
+	// Define the default eviction algorithms.
+	algorithms := map[string]func(capacity int) (IAlgorithm, error){
+		"arc": func(capacity int) (IAlgorithm, error) {
+			return NewARC(capacity)
+		},
+		"lru": func(capacity int) (IAlgorithm, error) {
+			return NewLRU(capacity)
+		},
+		"clock": func(capacity int) (IAlgorithm, error) {
+			return NewClockAlgorithm(capacity)
+		},
+		"lfu": func(capacity int) (IAlgorithm, error) {
+			return NewLFUAlgorithm(capacity)
+		},
+		"cawolfu": func(capacity int) (IAlgorithm, error) {
+			return NewCAWOLFU(capacity)
+		},
+	}
+	// Register the default eviction algorithms.
+	RegisterEvictionAlgorithms(algorithms)
 }

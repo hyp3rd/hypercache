@@ -22,9 +22,14 @@ func main() {
 		panic(err)
 	}
 
-	conf := &hypercache.Config[backend.RedisBackend]{
-		RedisOptions: []backend.Option[backend.RedisBackend]{
+	conf := &hypercache.Config[backend.Redis]{
+		RedisOptions: []backend.Option[backend.Redis]{
 			backend.WithRedisClient(redisStore.Client),
+			backend.WithCapacity[backend.Redis](20),
+		},
+		HyperCacheOptions: []hypercache.Option[backend.Redis]{
+			hypercache.WithEvictionInterval[backend.Redis](time.Second * 5),
+			hypercache.WithEvictionAlgorithm[backend.Redis]("lru"),
 		},
 	}
 
@@ -33,24 +38,27 @@ func main() {
 		panic(err)
 	}
 
-	for i := 0; i < 400; i++ {
+	for i := 0; i < 50; i++ {
 		err = hyperCache.Set(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i), time.Hour)
 		if err != nil {
 			panic(err)
 		}
 	}
 
+	fmt.Println("size", hyperCache.Size())
+	fmt.Println("capacity", hyperCache.Capacity())
+
 	allItems, err := hyperCache.List(
-		backend.WithSortBy[backend.RedisBackend](types.SortByKey),
-		backend.WithSortOrderAsc[backend.RedisBackend](true),
-		backend.WithFilterFunc[backend.RedisBackend](func(item *models.Item) bool {
-			return item.Value != "value-210"
+		backend.WithSortBy[backend.Redis](types.SortByKey),
+		backend.WithSortOrderAsc[backend.Redis](true),
+		backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
+			return item.Value != "value-16"
 		}),
 	)
 
 	// Check for errors
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 
 	// Print the list of items
@@ -58,5 +66,30 @@ func main() {
 		fmt.Println(item.Key, item.Value)
 	}
 
-	// fmt.Println(value)
+	fmt.Println("size", hyperCache.Size())
+	fmt.Println("capacity", hyperCache.Capacity())
+
+	time.Sleep(time.Second * 10)
+
+	allItems, err = hyperCache.List(
+		backend.WithSortBy[backend.Redis](types.SortByKey),
+		backend.WithSortOrderAsc[backend.Redis](true),
+		backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
+			return item.Value != "value-16"
+		}),
+	)
+	// Check for errors
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	// Print the list of items
+	for _, item := range allItems {
+		fmt.Println(item.Key, item.Value)
+	}
+
+	value, ok := hyperCache.Get("key-9")
+	if ok {
+		fmt.Println(value)
+	}
 }

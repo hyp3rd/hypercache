@@ -52,7 +52,7 @@ func TestHyperCache_WithExpirationInterval(t *testing.T) {
 			WithExpirationInterval[backend.InMemory](1 * time.Hour),
 		},
 		InMemoryOptions: []backend.Option[backend.InMemory]{
-			backend.WithCapacity(10),
+			backend.WithCapacity[backend.InMemory](10),
 		},
 	}
 	// Test with custom expiration interval
@@ -73,7 +73,7 @@ func TestHyperCache_WithEvictionInterval(t *testing.T) {
 			WithEvictionInterval[backend.InMemory](1 * time.Hour),
 		},
 		InMemoryOptions: []backend.Option[backend.InMemory]{
-			backend.WithCapacity(10),
+			backend.WithCapacity[backend.InMemory](10),
 		},
 	}
 	// Test with custom eviction interval
@@ -95,7 +95,7 @@ func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
 			WithMaxEvictionCount[backend.InMemory](5),
 		},
 		InMemoryOptions: []backend.Option[backend.InMemory]{
-			backend.WithCapacity(10),
+			backend.WithCapacity[backend.InMemory](10),
 		},
 	}
 	cache, err = New(config)

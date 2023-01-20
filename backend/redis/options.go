@@ -7,7 +7,7 @@ import (
 	"github.com/go-redis/redis/v9"
 )
 
-// Option is a function type that can be used to configure the `RedisBackend`.
+// Option is a function type that can be used to configure the `Redis`.
 type Option func(*redis.Options)
 
 // ApplyOptions applies the given options to the given backend.

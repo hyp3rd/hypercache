@@ -60,7 +60,7 @@ func TestGetMultiple(t *testing.T) {
 					hypercache.WithExpirationInterval[backend.InMemory](time.Millisecond),
 				},
 				InMemoryOptions: []backend.Option[backend.InMemory]{
-					backend.WithCapacity(10),
+					backend.WithCapacity[backend.InMemory](10),
 				},
 			}
 			cache, err := hypercache.New(config)

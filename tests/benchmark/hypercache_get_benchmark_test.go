@@ -32,7 +32,7 @@ func BenchmarkHyperCache_Get_ProactiveEviction(b *testing.B) {
 	}
 
 	config.InMemoryOptions = []backend.Option[backend.InMemory]{
-		backend.WithCapacity(1000),
+		backend.WithCapacity[backend.InMemory](1000),
 	}
 
 	// Create a new HyperCache with a capacity of 10

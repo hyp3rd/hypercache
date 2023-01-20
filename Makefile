@@ -8,7 +8,7 @@ bench:
 
 # run runs the example specified in the example variable with the optional arguments specified in the ARGS variable.
 run:
-	go run examples/$(example)/$(example).go $(ARGS)
+	go run examples/$(example)/*.go $(ARGS)
 
 # vet runs the Go vet static analysis tool on all packages in the project.
 vet:
