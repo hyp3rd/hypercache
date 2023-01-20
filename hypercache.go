@@ -139,7 +139,6 @@ func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache
 	// Initialize the stats collector
 	if hyperCache.statsCollectorName == "" {
 		// Use the default stats collector if none is specified
-		// hyperCache.statsCollector, err = NewCollector("default")
 		hyperCache.StatsCollector = stats.NewHistogramStatsCollector()
 	} else {
 		// Use the specified stats collector
@@ -524,6 +523,9 @@ func listInMemory(cacheBackend *backend.InMemory) listFunc {
 	}
 }
 
+// listRedis is a function that takes in a Redis, and returns a ListFunc
+// it takes any type as filters, and converts them to the specific FilterOption type for the Redis,
+// and calls the Redis's List function with these filters.
 func listRedis(cacheBackend *backend.Redis) listFunc {
 	return func(options ...any) ([]*models.Item, error) {
 		// here we are converting the filters of any type to the specific FilterOption type for the Redis
