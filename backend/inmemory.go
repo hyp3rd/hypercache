@@ -75,59 +75,6 @@ func (cacheBackend *InMemory) Set(item *models.Item) error {
 	return nil
 }
 
-// List the items in the cache that meet the specified criteria.
-// func (cacheBackend *InMemory) List(options ...FilterOption[InMemory]) ([]*models.Item, error) {
-// 	// Apply the filter options
-// 	ApplyFilterOptions(cacheBackend, options...)
-
-// 	items := make([]*models.Item, 0)
-// 	for item := range cacheBackend.items.IterBuffered() {
-// 		if cacheBackend.FilterFunc == nil || cacheBackend.FilterFunc(item.Val) {
-// 			items = append(items, item.Val)
-// 		}
-// 	}
-
-// 	if cacheBackend.SortBy == "" {
-// 		return items, nil
-// 	}
-
-// 	sort.Slice(items, func(i, j int) bool {
-// 		a := items[i].FieldByName(cacheBackend.SortBy)
-// 		b := items[j].FieldByName(cacheBackend.SortBy)
-// 		switch cacheBackend.SortBy {
-// 		case types.SortByKey.String():
-// 			if cacheBackend.SortAscending {
-// 				return a.Interface().(string) < b.Interface().(string)
-// 			}
-// 			return a.Interface().(string) > b.Interface().(string)
-// 		case types.SortByValue.String():
-// 			if cacheBackend.SortAscending {
-// 				return a.Interface().(string) < b.Interface().(string)
-// 			}
-// 			return a.Interface().(string) > b.Interface().(string)
-// 		case types.SortByLastAccess.String():
-// 			if cacheBackend.SortAscending {
-// 				return a.Interface().(time.Time).Before(b.Interface().(time.Time))
-// 			}
-// 			return a.Interface().(time.Time).After(b.Interface().(time.Time))
-// 		case types.SortByAccessCount.String():
-// 			if cacheBackend.SortAscending {
-// 				return a.Interface().(uint) < b.Interface().(uint)
-// 			}
-// 			return a.Interface().(uint) > b.Interface().(uint)
-// 		case types.SortByExpiration.String():
-// 			if cacheBackend.SortAscending {
-// 				return a.Interface().(time.Duration) < b.Interface().(time.Duration)
-// 			}
-// 			return a.Interface().(time.Duration) > b.Interface().(time.Duration)
-// 		default:
-// 			return false
-// 		}
-// 	})
-
-// 	return items, nil
-// }
-
 // List returns a list of all items in the cache filtered and ordered by the given options
 func (cacheBackend *InMemory) List(options ...FilterOption[InMemory]) ([]*models.Item, error) {
 	// Apply the filter options
@@ -148,8 +95,6 @@ func (cacheBackend *InMemory) List(options ...FilterOption[InMemory]) ([]*models
 	switch cacheBackend.SortBy {
 	case types.SortByKey.String():
 		sorter = &itemSorterByKey{items: items}
-	case types.SortByValue.String():
-		sorter = &itemSorterByValue{items: items}
 	case types.SortByLastAccess.String():
 		sorter = &itemSorterByLastAccess{items: items}
 	case types.SortByAccessCount.String():

@@ -8,7 +8,6 @@ package hypercache
 // It can implement a service interface to interact with the cache with middleware support (default or custom).
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -259,6 +258,7 @@ func (hyperCache *HyperCache[T]) evictionLoop() {
 		if hyperCache.maxEvictionCount == uint(evictedCount) {
 			break
 		}
+
 		key, ok := hyperCache.evictionAlgorithm.Evict()
 
 		if !ok {
@@ -280,17 +280,12 @@ func (hyperCache *HyperCache[T]) evictionLoop() {
 func (hyperCache *HyperCache[T]) evictItem() (string, bool) {
 	key, ok := hyperCache.evictionAlgorithm.Evict()
 	if !ok {
-		fmt.Println("failed evicting item: ", key)
-
+		// no more items to evict
 		return "", false
 	}
 
-	fmt.Println("evicting item: ", key)
-
 	err := hyperCache.backend.Remove(key)
 	if err != nil {
-		fmt.Println("failed evicting item: ", key, err)
-
 		return "", false
 	}
 	return key, true
@@ -380,7 +375,6 @@ func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration ti
 func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
 	item, ok := hyperCache.backend.Get(key)
 	if !ok {
-		fmt.Println("not found")
 		return nil, false
 	}
 

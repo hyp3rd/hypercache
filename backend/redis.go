@@ -206,8 +206,6 @@ func (cacheBackend *Redis) List(options ...FilterOption[Redis]) ([]*models.Item,
 	switch cacheBackend.SortBy {
 	case types.SortByKey.String(): // Sort by key
 		sorter = &itemSorterByKey{items: items}
-	case types.SortByValue.String(): // Sort by value: it can cause problems if the value is not a string
-		sorter = &itemSorterByValue{items: items}
 	case types.SortByLastAccess.String(): // Sort by last access
 		sorter = &itemSorterByLastAccess{items: items}
 	case types.SortByAccessCount.String(): // Sort by access count

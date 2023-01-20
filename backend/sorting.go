@@ -1,8 +1,6 @@
 package backend
 
 import (
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/hyp3rd/hypercache/models"
 )
 
@@ -25,55 +23,6 @@ type itemSorterByKey struct {
 func (s *itemSorterByKey) Len() int           { return len(s.items) }
 func (s *itemSorterByKey) Swap(i, j int)      { s.items[i], s.items[j] = s.items[j], s.items[i] }
 func (s *itemSorterByKey) Less(i, j int) bool { return s.items[i].Key < s.items[j].Key }
-
-type itemSorterByValue struct {
-	items []*models.Item
-}
-
-// func (s *itemSorterByValue) Len() int      { return len(s.items) }
-// func (s *itemSorterByValue) Swap(i, j int) { s.items[i], s.items[j] = s.items[j], s.items[i] }
-// func (s *itemSorterByValue) Less(i, j int) bool {
-// 	return s.cmp.Equal(s.items[i].Value, s.items[j].Value)
-// }
-
-func (s *itemSorterByValue) Len() int      { return len(s.items) }
-func (s *itemSorterByValue) Swap(i, j int) { s.items[i], s.items[j] = s.items[j], s.items[i] }
-
-// func (s *itemSorterByValue) Less(i, j int) bool { return cmp.Equal(s.items[i].Value, s.items[j].Value) }
-func (s *itemSorterByValue) Less(i, j int) bool {
-	return cmp.Equal(s.items[i].Value, s.items[j].Value,
-		cmpopts.IgnoreUnexported(),
-		cmpopts.EquateEmpty(),
-		cmpopts.SortSlices(func(x, y interface{}) bool {
-			return x.(string) < y.(string)
-		},
-		),
-		cmpopts.SortMaps(func(x, y interface{}) bool {
-			return x.(string) < y.(string)
-		},
-		),
-		cmpopts.SortSlices(func(x, y interface{}) bool {
-			return x.(int) < y.(int)
-		},
-		),
-		cmpopts.SortSlices(func(x, y interface{}) bool {
-			return x.(string) < y.(string)
-		},
-		),
-		cmpopts.SortMaps(func(x, y interface{}) bool {
-			return x.(int) < y.(int)
-		},
-		),
-		cmpopts.SortSlices(func(x, y interface{}) bool {
-			return x.(float64) < y.(float64)
-		},
-		),
-		cmpopts.SortMaps(func(x, y interface{}) bool {
-			return x.(float64) < y.(float64)
-		},
-		),
-	)
-}
 
 type itemSorterByExpiration struct {
 	items []*models.Item
