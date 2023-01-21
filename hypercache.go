@@ -312,12 +312,19 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	item.Value = value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
+	// Set the size of the item
+	err := item.SetSize()
+
+	if err != nil {
+		models.ItemPool.Put(item)
+		return err
+	}
 
 	hyperCache.mutex.Lock()
 	defer hyperCache.mutex.Unlock()
 
 	// Insert the item into the cache
-	err := hyperCache.backend.Set(item)
+	err = hyperCache.backend.Set(item)
 	if err != nil {
 		models.ItemPool.Put(item)
 		return err
@@ -344,6 +351,11 @@ func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration ti
 		item.Value = value
 		item.Expiration = expiration
 		item.LastAccess = time.Now()
+		// Set the size of the item
+		err := item.SetSize()
+		if err != nil {
+			return err
+		}
 		cacheItems = append(cacheItems, item)
 	}
 
@@ -440,6 +452,11 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 	item.Value = value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
+	// Set the size of the item
+	err := item.SetSize()
+	if err != nil {
+		return nil, err
+	}
 
 	// Check for invalid key, value, or duration
 	if err := item.Valid(); err != nil {
@@ -449,7 +466,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 
 	hyperCache.mutex.Lock()
 	defer hyperCache.mutex.Unlock()
-	err := hyperCache.backend.Set(item)
+	err = hyperCache.backend.Set(item)
 	if err != nil {
 		models.ItemPool.Put(item)
 		return nil, err
