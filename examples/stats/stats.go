@@ -51,7 +51,7 @@ func main() {
 
 	// Retrieve the list of items from the cache
 	list, err := hyperCache.List(
-		backend.WithSortBy[backend.InMemory](types.SortByValue),
+		backend.WithSortBy[backend.InMemory](types.SortByKey),
 		backend.WithSortOrderAsc[backend.InMemory](true),
 		backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
 			return item.Expiration > time.Second
