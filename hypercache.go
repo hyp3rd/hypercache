@@ -57,7 +57,8 @@ type HyperCache[T backend.IBackendConstrain] struct {
 //   - The eviction interval is set to 10 minutes.
 //   - The eviction algorithm is set to LRU.
 //   - The expiration interval is set to 30 minutes.
-//   - The capacity of the in-memory backend is set to 1000 items.
+//   - The capacity of the in-memory backend is set to 0 items (no limitations) unless specified.
+//   - The maximum cache size in bytes is set to 0 (no limitations).
 func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMemory], err error) {
 	// Initialize the configuration
 	config := NewConfig[backend.InMemory]()
@@ -239,7 +240,7 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 		hyperCache.StatsCollector.Incr("item_expired_count", 1)
 	}
 
-	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Size()))
+	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count()))
 	hyperCache.StatsCollector.Gauge("expired_item_count", expiredCount)
 }
 
@@ -251,7 +252,7 @@ func (hyperCache *HyperCache[T]) evictionLoop() {
 	var evictedCount int64
 
 	for {
-		if hyperCache.backend.Size() <= hyperCache.backend.Capacity() {
+		if hyperCache.backend.Count() <= hyperCache.backend.Capacity() {
 			break
 		}
 
@@ -271,7 +272,7 @@ func (hyperCache *HyperCache[T]) evictionLoop() {
 		hyperCache.StatsCollector.Incr("item_evicted_count", 1)
 	}
 
-	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Size()))
+	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count()))
 	hyperCache.StatsCollector.Gauge("evicted_item_count", evictedCount)
 }
 
@@ -297,7 +298,7 @@ func (hyperCache *HyperCache[T]) SetCapacity(capacity int) {
 	// set capacity of the backend
 	hyperCache.backend.SetCapacity(capacity)
 	// if the cache size is greater than the new capacity, evict items
-	if hyperCache.backend.Size() > hyperCache.Capacity() {
+	if hyperCache.backend.Count() > hyperCache.Capacity() {
 		hyperCache.evictionLoop()
 	}
 }
@@ -312,19 +313,12 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	item.Value = value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
-	// Set the size of the item
-	err := item.SetSize()
-
-	if err != nil {
-		models.ItemPool.Put(item)
-		return err
-	}
 
 	hyperCache.mutex.Lock()
 	defer hyperCache.mutex.Unlock()
 
 	// Insert the item into the cache
-	err = hyperCache.backend.Set(item)
+	err := hyperCache.backend.Set(item)
 	if err != nil {
 		models.ItemPool.Put(item)
 		return err
@@ -334,7 +328,7 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	hyperCache.evictionAlgorithm.Set(key, item.Value)
 
 	// If the cache is at capacity, evict an item when the eviction interval is zero
-	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Size() > hyperCache.backend.Capacity() {
+	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Count() > hyperCache.backend.Capacity() {
 		hyperCache.evictItem()
 	}
 
@@ -351,11 +345,6 @@ func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration ti
 		item.Value = value
 		item.Expiration = expiration
 		item.LastAccess = time.Now()
-		// Set the size of the item
-		err := item.SetSize()
-		if err != nil {
-			return err
-		}
 		cacheItems = append(cacheItems, item)
 	}
 
@@ -376,7 +365,7 @@ func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration ti
 	}
 
 	// If the cache is at capacity, evict an item when the eviction interval is zero
-	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Size() > hyperCache.backend.Capacity() {
+	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Count() > hyperCache.backend.Capacity() {
 		hyperCache.evictionLoop()
 	}
 
@@ -452,21 +441,10 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 	item.Value = value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
-	// Set the size of the item
-	err := item.SetSize()
-	if err != nil {
-		return nil, err
-	}
-
-	// Check for invalid key, value, or duration
-	if err := item.Valid(); err != nil {
-		models.ItemPool.Put(item)
-		return nil, err
-	}
 
 	hyperCache.mutex.Lock()
 	defer hyperCache.mutex.Unlock()
-	err = hyperCache.backend.Set(item)
+	err := hyperCache.backend.Set(item)
 	if err != nil {
 		models.ItemPool.Put(item)
 		return nil, err
@@ -609,7 +587,7 @@ func (hyperCache *HyperCache[T]) Capacity() int {
 
 // Size returns the number of items in the cache.
 func (hyperCache *HyperCache[T]) Size() int {
-	return hyperCache.backend.Size()
+	return hyperCache.backend.Count()
 }
 
 // TriggerEviction sends a signal to the eviction loop to start.

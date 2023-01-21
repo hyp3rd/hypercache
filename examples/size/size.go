@@ -5,10 +5,24 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/backend"
 )
 
 func main() {
-	hypercache, err := hypercache.NewInMemoryWithDefaults(10)
+	config := hypercache.NewConfig[backend.InMemory]()
+
+	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
+		hypercache.WithEvictionInterval[backend.InMemory](0),
+		hypercache.WithEvictionAlgorithm[backend.InMemory]("cawolfu"),
+	}
+
+	config.InMemoryOptions = []backend.Option[backend.InMemory]{
+		backend.WithCapacity[backend.InMemory](100000),
+		backend.WithMaxCacheSize[backend.InMemory](7326),
+	}
+
+	// Create a new HyperCache with a capacity of 10
+	cache, err := hypercache.New(config)
 
 	if err != nil {
 		panic(err)
@@ -522,19 +536,67 @@ func main() {
 			IsGuest:    bool(false),
 			IsBanned:   bool(false),
 		},
+		{
+			Name:       "John2",
+			Age:        32,
+			LastAccess: time.Now(),
+			Pass:       "12345678",
+			Email:      "jhon1@example.com",
+			Phone:      "1234567891012",
+			IsAdmin:    bool(true),
+			IsGuest:    bool(false),
+			IsBanned:   bool(false),
+		},
+		{
+			Name:       "John2John2John2John2John2John2John2John2John2John2John2",
+			Age:        32,
+			LastAccess: time.Now(),
+			Pass:       "12345678",
+			Email:      "jhon1@example.com",
+			Phone:      "1234567891012",
+			IsAdmin:    bool(true),
+			IsGuest:    bool(false),
+			IsBanned:   bool(false),
+		},
+		{
+			Name:       "John2",
+			Age:        32,
+			LastAccess: time.Now(),
+			Pass:       "12345678",
+			Email:      "jhon1@example.com",
+			Phone:      "1234567891012",
+			IsAdmin:    bool(true),
+			IsGuest:    bool(false),
+			IsBanned:   bool(false),
+		},
+		{
+			Name:       "John2",
+			Age:        32,
+			LastAccess: time.Now(),
+			Pass:       "12345678",
+			Email:      "jhon1@example.com",
+			Phone:      "1234567891012",
+			IsAdmin:    bool(true),
+			IsGuest:    bool(false),
+			IsBanned:   bool(false),
+		},
 	}
 
-	hypercache.Set("key", users, 0)
-
-	key, ok := hypercache.GetWithInfo("key")
-
-	if !ok {
-		panic("key not found")
+	for i := 0; i < 3; i++ {
+		err = cache.Set(fmt.Sprintf("key-%d", i), users, 0)
+		if err != nil {
+			fmt.Println(err, "set", i)
+		}
 	}
 
-	fmt.Println("value", key.Value)
-	fmt.Println("size", key.Size)
+	key, ok := cache.GetWithInfo("key-1")
 
+	if ok {
+		fmt.Println("value", key.Value)
+		fmt.Println("size", key.Size)
+	} else {
+		fmt.Println("key not found")
+	}
 }
 
 // `	fmt.Println("size", kate.Size)`

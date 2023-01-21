@@ -13,26 +13,26 @@ import (
 
 // InMemory is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
 type InMemory struct {
-	items        datastructure.ConcurrentMap[string, *models.Item] // map to store the items in the cache
-	capacity     int                                               // capacity of the cache, limits the number of items that can be stored in the cache
-	maxCacheSize int                                               // maxCacheSize instructs the cache not allocate more memory than this limit, value in MB, 0 means no limit
-	mutex        sync.RWMutex                                      // mutex to protect the cache from concurrent access
-	SortFilters                                                    // filters applied when listing the items in the cache
+	items            datastructure.ConcurrentMap[string, *models.Item] // map to store the items in the cache
+	capacity         int                                               // capacity of the cache, limits the number of items that can be stored in the cache
+	maxCacheSize     int                                               // maxCacheSize instructs the cache not allocate more memory than this limit, value in MB, 0 means no limit
+	memoryAllocation int                                               // memoryAllocation is the current memory allocation of the cache, value in bytes
+	mutex            sync.RWMutex                                      // mutex to protect the cache from concurrent access
+	SortFilters                                                        // filters applied when listing the items in the cache
 }
 
 // NewInMemory creates a new in-memory cache with the given options.
 func NewInMemory[T InMemory](opts ...Option[InMemory]) (backend IInMemory[T], err error) {
-
 	InMemory := &InMemory{
 		items: datastructure.New[*models.Item](),
 	}
-
+	// Apply the backend options
 	ApplyOptions(InMemory, opts...)
-
+	// Check if the `capacity` is valid
 	if InMemory.capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
 	}
-
+	// Check if the `maxCacheSize` is valid
 	if InMemory.maxCacheSize < 0 {
 		return nil, errors.ErrInvalidMaxCacheSize
 	}
@@ -45,13 +45,27 @@ func (cacheBackend *InMemory) SetCapacity(capacity int) {
 	if capacity < 0 {
 		return
 	}
-
 	cacheBackend.capacity = capacity
 }
 
-// itemCount returns the number of items in the cache.
-func (cacheBackend *InMemory) itemCount() int {
+// Capacity returns the capacity of the cacheBackend.
+func (cacheBackend *InMemory) Capacity() int {
+	return cacheBackend.capacity
+}
+
+// Count returns the number of items in the cache.
+func (cacheBackend *InMemory) Count() int {
 	return cacheBackend.items.Count()
+}
+
+// Size returns the number of items in the cacheBackend.
+func (cacheBackend *InMemory) Size() int {
+	return cacheBackend.memoryAllocation
+}
+
+// MaxCacheSize returns the maximum size in bytes of the cacheBackend.
+func (cacheBackend *InMemory) MaxCacheSize() int {
+	return cacheBackend.maxCacheSize
 }
 
 // Get retrieves the item with the given key from the cacheBackend. If the item is not found, it returns nil.
@@ -60,7 +74,6 @@ func (cacheBackend *InMemory) Get(key string) (item *models.Item, ok bool) {
 	if !ok {
 		return nil, false
 	}
-
 	// return the item
 	return item, true
 }
@@ -75,11 +88,15 @@ func (cacheBackend *InMemory) Set(item *models.Item) error {
 
 	cacheBackend.mutex.Lock()
 	defer cacheBackend.mutex.Unlock()
+	// Set the size of the item
+	err := item.SetSize()
+	if err != nil {
+		return err
+	}
 
 	// check if adding this item will exceed the maxCacheSize
-	currentSize := cacheBackend.maxCacheSize
-	newSize := currentSize + item.Size
-	if cacheBackend.maxCacheSize > 0 && newSize > cacheBackend.maxCacheSize {
+	cacheBackend.memoryAllocation = cacheBackend.memoryAllocation + item.Size
+	if cacheBackend.maxCacheSize > 0 && cacheBackend.memoryAllocation > cacheBackend.maxCacheSize {
 		return errors.ErrCacheFull
 	}
 
@@ -139,22 +156,4 @@ func (cacheBackend *InMemory) Clear() {
 	for item := range cacheBackend.items.IterBuffered() {
 		cacheBackend.items.Remove(item.Key)
 	}
-}
-
-// Capacity returns the capacity of the cacheBackend.
-func (cacheBackend *InMemory) Capacity() int {
-	return cacheBackend.capacity
-}
-
-// Size returns the number of items in the cacheBackend.
-func (cacheBackend *InMemory) Size() int {
-	return cacheBackend.itemCount()
-}
-
-func (cacheBackend *InMemory) SetMaxCacheSize(maxCacheSize int) {
-	cacheBackend.maxCacheSize = maxCacheSize
-}
-
-func (cacheBackend *InMemory) MaxCacheSize() int {
-	return cacheBackend.maxCacheSize
 }

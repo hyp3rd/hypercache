@@ -6,7 +6,6 @@ require (
 	github.com/go-redis/redis/v9 v9.0.0-rc.2
 	github.com/longbridgeapp/assert v1.1.0
 	github.com/shamaton/msgpack/v2 v2.1.1
-	github.com/ugorji/go/codec v1.2.8
 )
 
 require (
