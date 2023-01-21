@@ -57,6 +57,16 @@ func (mw LoggingMiddleware) GetOrSet(key string, value any, expiration time.Dura
 	return mw.next.GetOrSet(key, value, expiration)
 }
 
+// GetWithInfo logs the time it takes to execute the next middleware.
+func (mw LoggingMiddleware) GetWithInfo(key string) (item *models.Item, ok bool) {
+	defer func(begin time.Time) {
+		mw.logger.Printf("method GetWithInfo took: %s", time.Since(begin))
+	}(time.Now())
+
+	mw.logger.Printf("GetWithInfo method invoked with key: %s", key)
+	return mw.next.GetWithInfo(key)
+}
+
 // GetMultiple logs the time it takes to execute the next middleware.
 func (mw LoggingMiddleware) GetMultiple(keys ...string) (result map[string]any, failed map[string]error) {
 	defer func(begin time.Time) {

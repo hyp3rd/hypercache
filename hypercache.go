@@ -392,6 +392,27 @@ func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
 	return item.Value, true
 }
 
+func (hyperCache *HyperCache[T]) GetWithInfo(key string) (*models.Item, bool) {
+	item, ok := hyperCache.backend.Get(key)
+	// Check if the item has expired if it exists, if so, trigger the expiration loop
+	if !ok {
+		return nil, false
+	}
+
+	// Check if the item has expired, if so, trigger the expiration loop
+	if item.Expired() {
+		go func() {
+			models.ItemPool.Put(item)
+			hyperCache.expirationTriggerCh <- true
+		}()
+		return nil, false
+	}
+
+	// Update the last access time and access count
+	item.Touch()
+	return item, true
+}
+
 // GetOrSet retrieves the item with the given key. If the item is not found, it adds the item to the cache with the given value and expiration duration.
 // If the capacity of the cache is reached, leverage the eviction algorithm.
 func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time.Duration) (any, error) {

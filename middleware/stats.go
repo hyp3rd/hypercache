@@ -50,6 +50,16 @@ func (mw StatsCollectorMiddleware) GetOrSet(key string, value any, expiration ti
 	return mw.next.GetOrSet(key, value, expiration)
 }
 
+// GetWithInfo collects stats for the GetWithInfo method.
+func (mw StatsCollectorMiddleware) GetWithInfo(key string) (*models.Item, bool) {
+	start := time.Now()
+	defer func() {
+		mw.statsCollector.Timing("hypercache_get_with_info_duration", time.Since(start).Nanoseconds())
+		mw.statsCollector.Incr("hypercache_get_with_info_count", 1)
+	}()
+	return mw.next.GetWithInfo(key)
+}
+
 // GetMultiple collects stats for the GetMultiple method.
 func (mw StatsCollectorMiddleware) GetMultiple(keys ...string) (result map[string]any, failed map[string]error) {
 	start := time.Now()
