@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
+	"hash/fnv"
 	"sync"
 )
 
 // ShardCount is the number of shards.
-var ShardCount = 32
+const (
+	ShardCount          = 32
+	ShardCount32 uint32 = uint32(ShardCount)
+)
 
 // Stringer is the interface implemented by any value that has a String method,
 type Stringer interface {
@@ -19,8 +24,8 @@ type Stringer interface {
 // ConcurrentMap is a "thread" safe map of type string:Anything.
 // To avoid lock bottlenecks this map is dived to several (ShardCount) map shards.
 type ConcurrentMap[K comparable, V interface{}] struct {
-	shards   []*ConcurrentMapShared[K, V]
-	sharding func(key K) uint32
+	shards []*ConcurrentMapShared[K, V]
+	hasher hash.Hash32
 }
 
 // ConcurrentMapShared is a "thread" safe string to anything map.
@@ -29,10 +34,10 @@ type ConcurrentMapShared[K comparable, V interface{}] struct {
 	sync.RWMutex // Read Write mutex, guards access to internal map.
 }
 
-func create[K comparable, V interface{}](sharding func(key K) uint32) ConcurrentMap[K, V] {
+func create[K comparable, V interface{}]() ConcurrentMap[K, V] {
 	m := ConcurrentMap[K, V]{
-		sharding: sharding,
-		shards:   make([]*ConcurrentMapShared[K, V], ShardCount),
+		hasher: fnv.New32(),
+		shards: make([]*ConcurrentMapShared[K, V], ShardCount),
 	}
 	for i := 0; i < ShardCount; i++ {
 		m.shards[i] = &ConcurrentMapShared[K, V]{items: make(map[K]V)}
@@ -42,22 +47,18 @@ func create[K comparable, V interface{}](sharding func(key K) uint32) Concurrent
 
 // New creates a new concurrent map.
 func New[V interface{}]() ConcurrentMap[string, V] {
-	return create[string, V](fnv32)
+	return create[string, V]()
 }
 
 // NewStringer creates a new concurrent map.
 func NewStringer[K Stringer, V interface{}]() ConcurrentMap[K, V] {
-	return create[K, V](strfnv32[K])
-}
-
-// NewWithCustomShardingFunction creates a new concurrent map.
-func NewWithCustomShardingFunction[K comparable, V interface{}](sharding func(key K) uint32) ConcurrentMap[K, V] {
-	return create[K, V](sharding)
+	return create[K, V]()
 }
 
 // GetShard returns shard under given key
 func (m ConcurrentMap[K, V]) GetShard(key K) *ConcurrentMapShared[K, V] {
-	return m.shards[uint(m.sharding(key))%uint(ShardCount)]
+	hash := m.hasher.Sum32()
+	return m.shards[hash%ShardCount32]
 }
 
 // MSet Sets the given value under the specified key.
@@ -338,22 +339,22 @@ func (m ConcurrentMap[K, V]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(tmp)
 }
 
-// Returns a hash for a key.
-func strfnv32[K fmt.Stringer](key K) uint32 {
-	return fnv32(key.String())
-}
+// // Returns a hash for a key.
+// func strfnv32[K fmt.Stringer](key K) uint32 {
+// 	return fnv32(key.String())
+// }
 
-// Returns a hash for a string.
-func fnv32(key string) uint32 {
-	hash := uint32(2166136261)
-	const prime32 = uint32(16777619)
-	keyLength := len(key)
-	for i := 0; i < keyLength; i++ {
-		hash *= prime32
-		hash ^= uint32(key[i])
-	}
-	return hash
-}
+// // Returns a hash for a string.
+// func fnv32(key string) uint32 {
+// 	hash := uint32(2166136261)
+// 	const prime32 = uint32(16777619)
+// 	keyLength := len(key)
+// 	for i := 0; i < keyLength; i++ {
+// 		hash *= prime32
+// 		hash ^= uint32(key[i])
+// 	}
+// 	return hash
+// }
 
 // UnmarshalJSON reverse process of Marshal.
 func (m *ConcurrentMap[K, V]) UnmarshalJSON(b []byte) (err error) {
