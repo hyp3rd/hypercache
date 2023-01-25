@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/go-redis/redis/v9"
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/libs/serializer"
 	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
+	"github.com/redis/go-redis/v9"
 )
 
 // Redis is a cache backend that stores the items in a redis implementation.
@@ -36,7 +36,6 @@ func NewRedisBackend[T Redis](redisOptions ...Option[Redis]) (backend IRedisBack
 	if rb.capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
 	}
-
 	// Check if the `keysSetName` is empty
 	if rb.keysSetName == "" {
 		rb.keysSetName = "hypercache"
@@ -55,11 +54,6 @@ func NewRedisBackend[T Redis](redisOptions ...Option[Redis]) (backend IRedisBack
 	return rb, nil
 }
 
-// Capacity returns the maximum number of items that can be stored in the cache.
-func (cacheBackend *Redis) Capacity() int {
-	return cacheBackend.capacity
-}
-
 // SetCapacity sets the capacity of the cache.
 func (cacheBackend *Redis) SetCapacity(capacity int) {
 	if capacity < 0 {
@@ -68,23 +62,21 @@ func (cacheBackend *Redis) SetCapacity(capacity int) {
 	cacheBackend.capacity = capacity
 }
 
-// itemCount returns the number of items in the cache.
-func (cacheBackend *Redis) itemCount() int {
+// Capacity returns the maximum number of items that can be stored in the cache.
+func (cacheBackend *Redis) Capacity() int {
+	return cacheBackend.capacity
+}
+
+// Size returns the number of items in the cache.
+func (cacheBackend *Redis) Count() int {
 	count, _ := cacheBackend.rdb.DBSize(context.Background()).Result()
 	return int(count)
 }
 
-// Size returns the number of items in the cache.
-func (cacheBackend *Redis) Size() int {
-	return cacheBackend.itemCount()
-}
-
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
 func (cacheBackend *Redis) Get(key string) (item *models.Item, ok bool) {
-	// pipe := cacheBackend.rdb.Conn().Pipeline()
 	// Check if the key is in the set of keys
 	isMember, err := cacheBackend.rdb.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
-	// isMember, err := pipe.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
 	if err != nil {
 		return nil, false
 	}
@@ -96,9 +88,8 @@ func (cacheBackend *Redis) Get(key string) (item *models.Item, ok bool) {
 	item = models.ItemPool.Get().(*models.Item)
 	// Return the item to the pool
 	defer models.ItemPool.Put(item)
+
 	data, err := cacheBackend.rdb.HGet(context.Background(), key, "data").Bytes()
-	// data, _ := pipe.HGet(context.Background(), key, "data").Bytes()
-	// _, err = pipe.Exec(context.Background())
 	if err != nil {
 		// Check if the item is not found
 		if err == redis.Nil {

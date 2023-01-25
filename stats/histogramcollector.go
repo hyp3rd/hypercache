@@ -23,7 +23,6 @@ func NewHistogramStatsCollector() *HistogramStatsCollector {
 
 // Incr increments the count of a statistic by the given value.
 func (c *HistogramStatsCollector) Incr(stat types.Stat, value int64) {
-	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stats[stat.String()] = append(c.stats[stat.String()], value)
@@ -31,7 +30,6 @@ func (c *HistogramStatsCollector) Incr(stat types.Stat, value int64) {
 
 // Decr decrements the count of a statistic by the given value.
 func (c *HistogramStatsCollector) Decr(stat types.Stat, value int64) {
-	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stats[stat.String()] = append(c.stats[stat.String()], -value)
@@ -39,7 +37,7 @@ func (c *HistogramStatsCollector) Decr(stat types.Stat, value int64) {
 
 // Timing records the time it took for an event to occur.
 func (c *HistogramStatsCollector) Timing(stat types.Stat, value int64) {
-	// Lock the cache's mutex to ensure thread-safety
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stats[stat.String()] = append(c.stats[stat.String()], value)
@@ -47,7 +45,6 @@ func (c *HistogramStatsCollector) Timing(stat types.Stat, value int64) {
 
 // Gauge records the current value of a statistic.
 func (c *HistogramStatsCollector) Gauge(stat types.Stat, value int64) {
-	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stats[stat.String()] = append(c.stats[stat.String()], value)
@@ -55,7 +52,6 @@ func (c *HistogramStatsCollector) Gauge(stat types.Stat, value int64) {
 
 // Histogram records the statistical distribution of a set of values.
 func (c *HistogramStatsCollector) Histogram(stat types.Stat, value int64) {
-	// Lock the cache's mutex to ensure thread-safety
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stats[stat.String()] = append(c.stats[stat.String()], value)

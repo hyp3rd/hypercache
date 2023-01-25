@@ -9,6 +9,7 @@ package hypercache
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hyp3rd/hypercache/backend"
@@ -45,6 +46,8 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	expirationInterval    time.Duration                // `expirationInterval` interval at which the expiration loop should run
 	evictionInterval      time.Duration                // interval at which the eviction loop should run
 	maxEvictionCount      uint                         // `evictionInterval` maximum number of items that can be evicted in a single eviction loop iteration
+	maxCacheSize          int64                        // maxCacheSize instructs the cache not allocate more memory than this limit, value in MB, 0 means no limit
+	memoryAllocation      atomic.Int64                 // memoryAllocation is the current memory allocation of the cache, value in bytes
 	mutex                 sync.RWMutex                 // `mutex` holds a RWMutex (Read-Write Mutex) that is used to protect the eviction algorithm from concurrent access
 	once                  sync.Once                    // `once` holds a Once struct that is used to ensure that the expiration and eviction loops are only started once
 	statsCollectorName    string                       // `statsCollectorName` holds the name of the stats collector that the cache should use when collecting cache statistics
@@ -57,7 +60,8 @@ type HyperCache[T backend.IBackendConstrain] struct {
 //   - The eviction interval is set to 10 minutes.
 //   - The eviction algorithm is set to LRU.
 //   - The expiration interval is set to 30 minutes.
-//   - The capacity of the in-memory backend is set to 1000 items.
+//   - The capacity of the in-memory backend is set to 0 items (no limitations) unless specified.
+//   - The maximum cache size in bytes is set to 0 (no limitations).
 func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMemory], err error) {
 	// Initialize the configuration
 	config := NewConfig[backend.InMemory]()
@@ -234,12 +238,12 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 	// iterate all expired items and remove them
 	for _, item := range items {
 		expiredCount++
-		hyperCache.backend.Remove(item.Key)
+		hyperCache.Remove(item.Key)
 		models.ItemPool.Put(item)
 		hyperCache.StatsCollector.Incr("item_expired_count", 1)
 	}
 
-	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Size()))
+	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count()))
 	hyperCache.StatsCollector.Gauge("expired_item_count", expiredCount)
 }
 
@@ -251,7 +255,7 @@ func (hyperCache *HyperCache[T]) evictionLoop() {
 	var evictedCount int64
 
 	for {
-		if hyperCache.backend.Size() <= hyperCache.backend.Capacity() {
+		if hyperCache.backend.Count() <= hyperCache.backend.Capacity() {
 			break
 		}
 
@@ -266,12 +270,13 @@ func (hyperCache *HyperCache[T]) evictionLoop() {
 			break
 		}
 
-		hyperCache.backend.Remove(key)
+		// remove the item from the cache
+		hyperCache.Remove(key)
 		evictedCount++
 		hyperCache.StatsCollector.Incr("item_evicted_count", 1)
 	}
 
-	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Size()))
+	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count()))
 	hyperCache.StatsCollector.Gauge("evicted_item_count", evictedCount)
 }
 
@@ -284,22 +289,8 @@ func (hyperCache *HyperCache[T]) evictItem() (string, bool) {
 		return "", false
 	}
 
-	err := hyperCache.backend.Remove(key)
-	if err != nil {
-		return "", false
-	}
+	hyperCache.Remove(key)
 	return key, true
-}
-
-// SetCapacity sets the capacity of the cache. If the new capacity is smaller than the current number of items in the cache,
-// it evicts the excess items from the cache.
-func (hyperCache *HyperCache[T]) SetCapacity(capacity int) {
-	// set capacity of the backend
-	hyperCache.backend.SetCapacity(capacity)
-	// if the cache size is greater than the new capacity, evict items
-	if hyperCache.backend.Size() > hyperCache.Capacity() {
-		hyperCache.evictionLoop()
-	}
 }
 
 // Set adds an item to the cache with the given key and value. If an item with the same key already exists, it updates the value of the existing item.
@@ -316,8 +307,20 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	hyperCache.mutex.Lock()
 	defer hyperCache.mutex.Unlock()
 
+	// Set the size of the item
+	err := item.SetSize()
+	if err != nil {
+		return err
+	}
+
+	// check if adding this item will exceed the maxCacheSize
+	hyperCache.memoryAllocation.Add(item.Size)
+	if hyperCache.maxCacheSize > 0 && hyperCache.memoryAllocation.Load() > hyperCache.maxCacheSize {
+		return errors.ErrCacheFull
+	}
+
 	// Insert the item into the cache
-	err := hyperCache.backend.Set(item)
+	err = hyperCache.backend.Set(item)
 	if err != nil {
 		models.ItemPool.Put(item)
 		return err
@@ -327,45 +330,8 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	hyperCache.evictionAlgorithm.Set(key, item.Value)
 
 	// If the cache is at capacity, evict an item when the eviction interval is zero
-	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Size() > hyperCache.backend.Capacity() {
+	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Count() > hyperCache.backend.Capacity() {
 		hyperCache.evictItem()
-	}
-
-	return nil
-}
-
-// SetMultiple adds multiple items to the cache with the given key-value pairs. If an item with the same key already exists, it updates the value of the existing item.
-func (hyperCache *HyperCache[T]) SetMultiple(items map[string]any, expiration time.Duration) error {
-	// Create a new cache item and set its properties
-	cacheItems := make([]*models.Item, 0, len(items))
-	for key, value := range items {
-		item := models.ItemPool.Get().(*models.Item)
-		item.Key = key
-		item.Value = value
-		item.Expiration = expiration
-		item.LastAccess = time.Now()
-		cacheItems = append(cacheItems, item)
-	}
-
-	hyperCache.mutex.Lock()
-	defer hyperCache.mutex.Unlock()
-
-	// Insert the items into the cache
-	for _, item := range cacheItems {
-		err := hyperCache.backend.Set(item)
-		if err != nil {
-			for _, item := range cacheItems {
-				models.ItemPool.Put(item)
-			}
-			return err
-		}
-		// Set the item in the eviction algorithm
-		hyperCache.evictionAlgorithm.Set(item.Key, item.Value)
-	}
-
-	// If the cache is at capacity, evict an item when the eviction interval is zero
-	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Size() > hyperCache.backend.Capacity() {
-		hyperCache.evictionLoop()
 	}
 
 	return nil
@@ -441,15 +407,23 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
 
-	// Check for invalid key, value, or duration
-	if err := item.Valid(); err != nil {
-		models.ItemPool.Put(item)
+	hyperCache.mutex.Lock()
+	defer hyperCache.mutex.Unlock()
+
+	// Set the size of the item
+	err := item.SetSize()
+	if err != nil {
 		return nil, err
 	}
 
-	hyperCache.mutex.Lock()
-	defer hyperCache.mutex.Unlock()
-	err := hyperCache.backend.Set(item)
+	// check if adding this item will exceed the maxCacheSize
+	hyperCache.memoryAllocation.Add(item.Size)
+	if hyperCache.maxCacheSize > 0 && hyperCache.memoryAllocation.Load() > hyperCache.maxCacheSize {
+		return nil, errors.ErrCacheFull
+	}
+
+	// Insert the item into the cache
+	err = hyperCache.backend.Set(item)
 	if err != nil {
 		models.ItemPool.Put(item)
 		return nil, err
@@ -459,7 +433,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 		// Set the item in the eviction algorithm
 		hyperCache.evictionAlgorithm.Set(key, item.Value)
 		// If the cache is at capacity, evict an item when the eviction interval is zero
-		if hyperCache.evictionInterval == 0 && hyperCache.Capacity() > 0 && hyperCache.Size() > hyperCache.Capacity() {
+		if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Count() > hyperCache.backend.Capacity() {
 			models.ItemPool.Put(item)
 			hyperCache.evictItem()
 		}
@@ -554,10 +528,17 @@ func listRedis(cacheBackend *backend.Redis) listFunc {
 
 // Remove removes items with the given key from the cache. If an item is not found, it does nothing.
 func (hyperCache *HyperCache[T]) Remove(keys ...string) {
-	hyperCache.backend.Remove(keys...)
+	// Remove the item from the eviction algorithm
+	// and update the memory allocation
 	for _, key := range keys {
-		hyperCache.evictionAlgorithm.Delete(key)
+		item, ok := hyperCache.backend.Get(key)
+		if ok {
+			// remove the item from the cacheBackend and update the memory allocation
+			hyperCache.memoryAllocation.Add(-item.Size)
+			hyperCache.evictionAlgorithm.Delete(key)
+		}
 	}
+	hyperCache.backend.Remove(keys...)
 }
 
 // Clear removes all items from the cache.
@@ -582,6 +563,9 @@ func (hyperCache *HyperCache[T]) Clear() error {
 	for _, item := range items {
 		hyperCache.evictionAlgorithm.Delete(item.Key)
 	}
+
+	// reset the memory allocation
+	hyperCache.memoryAllocation.Store(0)
 	return err
 }
 
@@ -590,9 +574,30 @@ func (hyperCache *HyperCache[T]) Capacity() int {
 	return hyperCache.backend.Capacity()
 }
 
-// Size returns the number of items in the cache.
-func (hyperCache *HyperCache[T]) Size() int {
-	return hyperCache.backend.Size()
+// SetCapacity sets the capacity of the cache. If the new capacity is smaller than the current number of items in the cache,
+// it evicts the excess items from the cache.
+func (hyperCache *HyperCache[T]) SetCapacity(capacity int) {
+	// set capacity of the backend
+	hyperCache.backend.SetCapacity(capacity)
+	// if the cache size is greater than the new capacity, evict items
+	if hyperCache.backend.Count() > hyperCache.Capacity() {
+		hyperCache.evictionLoop()
+	}
+}
+
+// Allocation returns the size allocation in bytes of the current cache.
+func (hyperCache *HyperCache[T]) Allocation() int64 {
+	return hyperCache.memoryAllocation.Load()
+}
+
+// MaxCacheSize returns the maximum size in bytes of the cache.
+func (hyperCache *HyperCache[T]) MaxCacheSize() int64 {
+	return hyperCache.maxCacheSize
+}
+
+// Count returns the number of items in the cache.
+func (hyperCache *HyperCache[T]) Count() int {
+	return hyperCache.backend.Count()
 }
 
 // TriggerEviction sends a signal to the eviction loop to start.

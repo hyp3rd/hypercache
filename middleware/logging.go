@@ -107,14 +107,19 @@ func (mw LoggingMiddleware) Clear() error {
 	return mw.next.Clear()
 }
 
-// Capacity logs the time it takes to execute the next middleware.
+// Capacity takes to execute the next middleware.
 func (mw LoggingMiddleware) Capacity() int {
 	return mw.next.Capacity()
 }
 
-// Size logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) Size() int {
-	return mw.next.Size()
+// Allocation returns the size allocation in bytes cache
+func (mw LoggingMiddleware) Allocation() int64 {
+	return mw.next.Allocation()
+}
+
+// Count takes to execute the next middleware.
+func (mw LoggingMiddleware) Count() int {
+	return mw.next.Count()
 }
 
 // TriggerEviction logs the time it takes to execute the next middleware.

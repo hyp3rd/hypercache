@@ -41,8 +41,8 @@ type IBackend[T IBackendConstrain] interface {
 	Capacity() int
 	// SetCapacity sets the maximum number of items that can be stored in the cache.
 	SetCapacity(capacity int)
-	// Size returns the number of items currently stored in the cache.
-	Size() int
+	// Count returns the number of items currently stored in the cache.
+	Count() int
 	// Remove deletes the item with the given key from the cache.
 	Remove(keys ...string) error
 }

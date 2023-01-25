@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-redis/redis/v9"
+	"github.com/redis/go-redis/v9"
 )
 
 // Store is a redis store instance with redis client

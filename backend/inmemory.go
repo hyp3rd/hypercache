@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/hyp3rd/hypercache/datastructure"
+	datastructure "github.com/hyp3rd/hypercache/datastructure/v3"
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
@@ -13,21 +13,21 @@ import (
 
 // InMemory is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
 type InMemory struct {
-	items       datastructure.ConcurrentMap[string, *models.Item] // map to store the items in the cache
-	capacity    int                                               // capacity of the cache, limits the number of items that can be stored in the cache
-	mutex       sync.RWMutex                                      // mutex to protect the cache from concurrent access
-	SortFilters                                                   // filters applied when listing the items in the cache
+	// items            datastructure.ConcurrentMap[string, *models.Item] // map to store the items in the cache
+	items       datastructure.ConcurrentMap // map to store the items in the cache
+	capacity    int                         // capacity of the cache, limits the number of items that can be stored in the cache
+	mutex       sync.RWMutex                // mutex to protect the cache from concurrent access
+	SortFilters                             // filters applied when listing the items in the cache
 }
 
 // NewInMemory creates a new in-memory cache with the given options.
 func NewInMemory[T InMemory](opts ...Option[InMemory]) (backend IInMemory[T], err error) {
-
 	InMemory := &InMemory{
-		items: datastructure.New[*models.Item](),
+		items: datastructure.New(),
 	}
-
+	// Apply the backend options
 	ApplyOptions(InMemory, opts...)
-
+	// Check if the `capacity` is valid
 	if InMemory.capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
 	}
@@ -40,12 +40,16 @@ func (cacheBackend *InMemory) SetCapacity(capacity int) {
 	if capacity < 0 {
 		return
 	}
-
 	cacheBackend.capacity = capacity
 }
 
-// itemCount returns the number of items in the cache.
-func (cacheBackend *InMemory) itemCount() int {
+// Capacity returns the capacity of the cacheBackend.
+func (cacheBackend *InMemory) Capacity() int {
+	return cacheBackend.capacity
+}
+
+// Count returns the number of items in the cache.
+func (cacheBackend *InMemory) Count() int {
 	return cacheBackend.items.Count()
 }
 
@@ -55,7 +59,6 @@ func (cacheBackend *InMemory) Get(key string) (item *models.Item, ok bool) {
 	if !ok {
 		return nil, false
 	}
-
 	// return the item
 	return item, true
 }
@@ -80,12 +83,19 @@ func (cacheBackend *InMemory) List(options ...FilterOption[InMemory]) ([]*models
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
 
-	items := make([]*models.Item, 0)
+	items := make([]*models.Item, 0, cacheBackend.items.Count())
+	wg := sync.WaitGroup{}
+	wg.Add(cacheBackend.items.Count())
 	for item := range cacheBackend.items.IterBuffered() {
-		if cacheBackend.FilterFunc == nil || cacheBackend.FilterFunc(item.Val) {
-			items = append(items, item.Val)
-		}
+		// go func(item datastructure.Tuple[string, *models.Item]) {
+		go func(item datastructure.Tuple) {
+			defer wg.Done()
+			if cacheBackend.FilterFunc == nil || cacheBackend.FilterFunc(&item.Val) {
+				items = append(items, &item.Val)
+			}
+		}(item)
 	}
+	wg.Wait()
 
 	if cacheBackend.SortBy == "" {
 		return items, nil
@@ -116,6 +126,9 @@ func (cacheBackend *InMemory) List(options ...FilterOption[InMemory]) ([]*models
 // Remove removes items with the given key from the cacheBackend. If an item is not found, it does nothing.
 func (cacheBackend *InMemory) Remove(keys ...string) (err error) {
 	//TODO: determine if handling the error or not
+	// var ok bool
+	// item := models.ItemPool.Get().(*models.Item)
+	// defer models.ItemPool.Put(item)
 	for _, key := range keys {
 		cacheBackend.items.Remove(key)
 	}
@@ -124,17 +137,6 @@ func (cacheBackend *InMemory) Remove(keys ...string) (err error) {
 
 // Clear removes all items from the cacheBackend.
 func (cacheBackend *InMemory) Clear() {
-	for item := range cacheBackend.items.IterBuffered() {
-		cacheBackend.items.Remove(item.Key)
-	}
-}
-
-// Capacity returns the capacity of the cacheBackend.
-func (cacheBackend *InMemory) Capacity() int {
-	return cacheBackend.capacity
-}
-
-// Size returns the number of items in the cacheBackend.
-func (cacheBackend *InMemory) Size() int {
-	return cacheBackend.itemCount()
+	// clear the cacheBackend
+	cacheBackend.items.Clear()
 }

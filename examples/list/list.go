@@ -23,7 +23,7 @@ func main() {
 	defer hyperCache.Stop()
 
 	// Add 100 items to the cache
-	for i := 0; i < 400; i++ {
+	for i := 0; i < 500; i++ {
 		key := fmt.Sprintf("key%d", i)
 		val := fmt.Sprintf("val%d", i)
 
@@ -40,7 +40,7 @@ func main() {
 		backend.WithSortBy[backend.InMemory](types.SortByKey),
 		backend.WithSortOrderAsc[backend.InMemory](true),
 		backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
-			return item.Value == "val98"
+			return item.Value != "val98"
 		}),
 	)
 
