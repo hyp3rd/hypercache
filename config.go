@@ -48,6 +48,19 @@ func ApplyHyperCacheOptions[T backend.IBackendConstrain](cache *HyperCache[T], o
 	}
 }
 
+// WithMaxCacheSize is an option that sets the maximum size of the cache.
+// The maximum size of the cache is the maximum number of items that can be stored in the cache.
+// If the maximum size of the cache is reached, the least recently used item will be evicted from the cache.
+func WithMaxCacheSize[T backend.IBackendConstrain](maxCacheSize int64) Option[T] {
+	return func(cache *HyperCache[T]) {
+		// If the max cache size is less than 0, set it to 0.
+		if maxCacheSize < 0 {
+			maxCacheSize = 0
+		}
+		cache.maxCacheSize = maxCacheSize
+	}
+}
+
 // WithEvictionAlgorithm is an option that sets the eviction algorithm name field of the `HyperCache` struct.
 // The eviction algorithm name determines which eviction algorithm will be used to evict items from the cache.
 // The eviction algorithm name must be one of the following:

@@ -39,4 +39,13 @@ var (
 
 	// ErrSerializerNotFound is returned when a serializer is not found.
 	ErrSerializerNotFound = errors.New("serializer not found")
+
+	// ErrInvalidSize is returned when an invalid size is passed to the cache.
+	ErrInvalidSize = errors.New("invalid size")
+
+	// ErrInvalidMaxCacheSize is returned when an invalid max cache size is passed to the cache.
+	ErrInvalidMaxCacheSize = errors.New("invalid max cache size")
+
+	// ErrCacheFull is returned when the cache is full.
+	ErrCacheFull = errors.New("cache is full")
 )

@@ -29,7 +29,7 @@ func main() {
 		},
 		HyperCacheOptions: []hypercache.Option[backend.Redis]{
 			hypercache.WithEvictionInterval[backend.Redis](time.Second * 5),
-			hypercache.WithEvictionAlgorithm[backend.Redis]("lru"),
+			hypercache.WithEvictionAlgorithm[backend.Redis]("clock"),
 		},
 	}
 
@@ -45,7 +45,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("size", hyperCache.Size())
+	fmt.Println("count", hyperCache.Count())
 	fmt.Println("capacity", hyperCache.Capacity())
 
 	allItems, err := hyperCache.List(
@@ -66,10 +66,10 @@ func main() {
 		fmt.Println(item.Key, item.Value)
 	}
 
-	fmt.Println("size", hyperCache.Size())
+	fmt.Println("count", hyperCache.Count())
 	fmt.Println("capacity", hyperCache.Capacity())
 
-	time.Sleep(time.Second * 10)
+	time.Sleep(time.Second * 5)
 
 	allItems, err = hyperCache.List(
 		backend.WithSortBy[backend.Redis](types.SortByKey),
@@ -88,7 +88,9 @@ func main() {
 		fmt.Println(item.Key, item.Value)
 	}
 
-	value, ok := hyperCache.Get("key-9")
+	fmt.Println("count", hyperCache.Count())
+
+	value, ok := hyperCache.Get("key-49")
 	if ok {
 		fmt.Println(value)
 	}

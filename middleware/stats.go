@@ -50,6 +50,16 @@ func (mw StatsCollectorMiddleware) GetOrSet(key string, value any, expiration ti
 	return mw.next.GetOrSet(key, value, expiration)
 }
 
+// GetWithInfo collects stats for the GetWithInfo method.
+func (mw StatsCollectorMiddleware) GetWithInfo(key string) (*models.Item, bool) {
+	start := time.Now()
+	defer func() {
+		mw.statsCollector.Timing("hypercache_get_with_info_duration", time.Since(start).Nanoseconds())
+		mw.statsCollector.Incr("hypercache_get_with_info_count", 1)
+	}()
+	return mw.next.GetWithInfo(key)
+}
+
 // GetMultiple collects stats for the GetMultiple method.
 func (mw StatsCollectorMiddleware) GetMultiple(keys ...string) (result map[string]any, failed map[string]error) {
 	start := time.Now()
@@ -105,9 +115,14 @@ func (mw StatsCollectorMiddleware) TriggerEviction() {
 	mw.next.TriggerEviction()
 }
 
-// Size returns the size of the cache
-func (mw StatsCollectorMiddleware) Size() int {
-	return mw.next.Size()
+// Allocation returns the size allocation in bytes cache
+func (mw StatsCollectorMiddleware) Allocation() int64 {
+	return mw.next.Allocation()
+}
+
+// Countze returns the count of the items in the cache
+func (mw StatsCollectorMiddleware) Count() int {
+	return mw.next.Count()
 }
 
 // Stop collects the stats for Stop methods and stops the cache and all its goroutines (if any)

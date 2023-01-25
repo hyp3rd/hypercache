@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-HyperCache is a **thread-safe** **high-performance** cache implementation in Go that supports multiple backends with the expiration and eviction of items supporting custom algorithms alongside the defaults. It can be used as a standalone cache or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept cache methods and decorate em with middleware (default or custom).
+HyperCache is a **thread-safe** **high-performance** cache implementation in `Go` that supports multiple backends with optional size limit, expiration and eviction of items supporting custom algorithms alongside the defaults. It can be used as a standalone cache or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept and decorate the cache methods with middleware (default or custom).
 It is optimized for performance and flexibility allowing to specify the expiration and eviction intervals, provide and register new eviction algorithms, stats collectors, middleware(s).
 It ships with a default [historigram stats collector](./stats/statscollector.go) and several eviction algorithms, but you can develop and register your own as long as it implements the [Eviction Algorithm interface](./eviction/eviction.go).:
 
@@ -50,12 +50,13 @@ goos: darwin
 goarch: amd64
 pkg: github.com/hyp3rd/hypercache/tests/benchmark
 cpu: Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz
-BenchmarkHyperCache_Get-16                          38833602           123.9 ns/op         0 B/op          0 allocs/op
-BenchmarkHyperCache_Get_ProactiveEviction-16        38079158           124.4 ns/op         0 B/op          0 allocs/op
-BenchmarkHyperCache_Set-16                           4361000          1217 ns/op         203 B/op          3 allocs/op
-BenchmarkHyperCache_Set_Proactive_Eviction-16        4343996          1128 ns/op          92 B/op          3 allocs/op
+BenchmarkHyperCache_Get-16                          39429110           115.7 ns/op         0 B/op          0 allocs/op
+BenchmarkHyperCache_Get_ProactiveEviction-16        42094736           118.0 ns/op         0 B/op          0 allocs/op
+BenchmarkHyperCache_List-16                         10898176           437.0 ns/op        85 B/op          1 allocs/op
+BenchmarkHyperCache_Set-16                           3034786          1546 ns/op         252 B/op          4 allocs/op
+BenchmarkHyperCache_Set_Proactive_Eviction-16        2725557          1833 ns/op         162 B/op          3 allocs/op
 PASS
-ok      github.com/hyp3rd/hypercache/tests/benchmark    23.723s
+ok      github.com/hyp3rd/hypercache/tests/benchmark    30.031s
 ```
 
 ### Examples

@@ -48,7 +48,7 @@ func TestHyperCache_Set(t *testing.T) {
 			value:         nil,
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   errors.ErrNilValue,
+			expectedErr:   errors.ErrInvalidSize,
 		},
 		{
 			name:          "overwrite existing key",

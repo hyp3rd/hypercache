@@ -16,6 +16,8 @@ type Service interface {
 	Set(key string, value any, expiration time.Duration) error
 	// GetOrSet retrieves a value from the cache using the key, if the key does not exist, it will set the value using the key and expiration duration
 	GetOrSet(key string, value any, expiration time.Duration) (any, error)
+	// GetWithInfo fetches from the cache using the key, and returns the `models.Item` and a boolean indicating if the key exists
+	GetWithInfo(key string) (*models.Item, bool)
 	// GetMultiple retrieves a list of values from the cache using the keys
 	GetMultiple(keys ...string) (result map[string]any, failed map[string]error)
 	// List returns a list of all items in the cache
@@ -26,8 +28,10 @@ type Service interface {
 	Clear() error
 	// Capacity returns the capacity of the cache
 	Capacity() int
-	// Size returns the number of items in the cache
-	Size() int
+	// Allocation returns the allocation in bytes of the current cache
+	Allocation() int64
+	// Count returns the number of items in the cache
+	Count() int
 	// TriggerEviction triggers the eviction of the cache
 	TriggerEviction()
 	// Stop stops the cache

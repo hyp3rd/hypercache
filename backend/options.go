@@ -1,10 +1,10 @@
 package backend
 
 import (
-	"github.com/go-redis/redis/v9"
 	"github.com/hyp3rd/hypercache/libs/serializer"
 	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
+	"github.com/redis/go-redis/v9"
 )
 
 // ISortableBackend is an interface that defines the methods that a backend should implement to be sortable.

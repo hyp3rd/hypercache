@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/middleware"
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -27,17 +27,13 @@ func main() {
 	}
 
 	// Example of using zap logger from uber
-	logger, _ := zap.NewProduction()
-
-	sugar := logger.Sugar()
-	defer sugar.Sync()
-	defer logger.Sync()
+	logger := log.Default()
 
 	// apply middleware in the same order as you want to execute them
 	svc = hypercache.ApplyMiddleware(svc,
 		// middleware.YourMiddleware,
 		func(next hypercache.Service) hypercache.Service {
-			return middleware.NewLoggingMiddleware(next, sugar)
+			return middleware.NewLoggingMiddleware(next, logger)
 		},
 		func(next hypercache.Service) hypercache.Service {
 			return middleware.NewStatsCollectorMiddleware(next, statsCollector)

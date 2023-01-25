@@ -16,15 +16,22 @@ func main() {
 	// Stop the cache when the program exits
 	defer cache.Stop()
 
-	fmt.Println("adding 10000 items to cache")
+	fmt.Println("adding 100000 items to cache")
 	for i := 0; i < 100000; i++ {
-		cache.Set(fmt.Sprintf("key%d", i), "value", 0)
+		cache.Set(fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i), 0)
+	}
+
+	item, ok := cache.Get("key100")
+	if ok {
+		fmt.Println("key100", item)
 	}
 
 	fmt.Println("capacity", cache.Capacity())
-	fmt.Println("size", cache.Size())
+	fmt.Println("count", cache.Count())
+	fmt.Println("allocation", cache.Allocation())
 	fmt.Println("clearing cache")
 	cache.Clear()
 	fmt.Println("capacity", cache.Capacity())
-	fmt.Println("size", cache.Size())
+	fmt.Println("count", cache.Count())
+	fmt.Println("allocation", cache.Allocation())
 }
