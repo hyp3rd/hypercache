@@ -48,7 +48,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 			value:         nil,
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   errors.ErrNilValue,
+			expectedErr:   errors.ErrInvalidSize,
 		},
 		{
 			name:          "get or set with key that has expired",

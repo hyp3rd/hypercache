@@ -45,7 +45,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("size", hyperCache.Size())
+	fmt.Println("count", hyperCache.Count())
 	fmt.Println("capacity", hyperCache.Capacity())
 
 	allItems, err := hyperCache.List(
@@ -66,7 +66,7 @@ func main() {
 		fmt.Println(item.Key, item.Value)
 	}
 
-	fmt.Println("size", hyperCache.Size())
+	fmt.Println("count", hyperCache.Count())
 	fmt.Println("capacity", hyperCache.Capacity())
 
 	time.Sleep(time.Second * 10)

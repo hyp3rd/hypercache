@@ -115,9 +115,14 @@ func (mw StatsCollectorMiddleware) TriggerEviction() {
 	mw.next.TriggerEviction()
 }
 
-// Size returns the size of the cache
-func (mw StatsCollectorMiddleware) Size() int {
-	return mw.next.Size()
+// Allocation returns the size allocation in bytes cache
+func (mw StatsCollectorMiddleware) Allocation() int64 {
+	return mw.next.Allocation()
+}
+
+// Countze returns the count of the items in the cache
+func (mw StatsCollectorMiddleware) Count() int {
+	return mw.next.Count()
 }
 
 // Stop collects the stats for Stop methods and stops the cache and all its goroutines (if any)

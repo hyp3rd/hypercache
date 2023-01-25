@@ -14,11 +14,11 @@ func main() {
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](0),
 		hypercache.WithEvictionAlgorithm[backend.InMemory]("cawolfu"),
+		hypercache.WithMaxCacheSize[backend.InMemory](37326),
 	}
 
 	config.InMemoryOptions = []backend.Option[backend.InMemory]{
 		backend.WithCapacity[backend.InMemory](100000),
-		backend.WithMaxCacheSize[backend.InMemory](7326),
 	}
 
 	// Create a new HyperCache with a capacity of 10
@@ -597,6 +597,8 @@ func main() {
 	} else {
 		fmt.Println("key not found")
 	}
+	fmt.Println(cache.Count())
+	fmt.Println(cache.Allocation())
 }
 
 // `	fmt.Println("size", kate.Size)`

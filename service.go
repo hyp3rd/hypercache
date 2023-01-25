@@ -28,8 +28,10 @@ type Service interface {
 	Clear() error
 	// Capacity returns the capacity of the cache
 	Capacity() int
-	// Size returns the number of items in the cache
-	Size() int
+	// Allocation returns the allocation in bytes of the current cache
+	Allocation() int64
+	// Count returns the number of items in the cache
+	Count() int
 	// TriggerEviction triggers the eviction of the cache
 	TriggerEviction()
 	// Stop stops the cache

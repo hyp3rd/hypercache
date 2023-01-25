@@ -57,8 +57,6 @@ func (rb *Redis) setFilterFunc(filterFunc FilterFunc) {
 type iConfigurableBackend interface {
 	// setCapacity sets the capacity of the cache.
 	setCapacity(capacity int)
-	// setMaxCacheSize sets the maximum size of the cache.
-	setMaxCacheSize(maxCacheSize int)
 }
 
 // setCapacity sets the `Capacity` field of the `InMemory` backend.
@@ -71,15 +69,6 @@ func (rb *Redis) setCapacity(capacity int) {
 	rb.capacity = capacity
 }
 
-// setMaxCacheSize sets the `maxCacheSize` field of the `InMemory` backend.
-func (inm *InMemory) setMaxCacheSize(maxCacheSize int) {
-	inm.maxCacheSize = maxCacheSize
-}
-
-func (rb *Redis) setMaxCacheSize(maxCacheSize int) {
-	rb.maxCacheSize = maxCacheSize
-}
-
 // Option is a function type that can be used to configure the `HyperCache` struct.
 type Option[T IBackendConstrain] func(*T)
 
@@ -87,17 +76,6 @@ type Option[T IBackendConstrain] func(*T)
 func ApplyOptions[T IBackendConstrain](backend *T, options ...Option[T]) {
 	for _, option := range options {
 		option(backend)
-	}
-}
-
-// WithMaxCacheSize is an option that sets the maximum size of the cache.
-// The maximum size of the cache is the maximum number of items that can be stored in the cache.
-// If the maximum size of the cache is reached, the least recently used item will be evicted from the cache.
-func WithMaxCacheSize[T IBackendConstrain](maxCacheSize int) Option[T] {
-	return func(a *T) {
-		if configurable, ok := any(a).(iConfigurableBackend); ok {
-			configurable.setMaxCacheSize(maxCacheSize)
-		}
 	}
 }
 

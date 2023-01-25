@@ -14,11 +14,9 @@ import (
 
 // Redis is a cache backend that stores the items in a redis implementation.
 type Redis struct {
-	rdb              *redis.Client // redis client to interact with the redis server
-	capacity         int           // capacity of the cache, limits the number of items that can be stored in the cache
-	keysSetName      string        // keysSetName is the name of the set that holds the keys of the items in the cache
-	maxCacheSize     int           // maxCacheSize is the maximum number of items that can be stored in the cache
-	memoryAllocation int           // memoryAllocation is the current memory allocation of the cache, value in bytes
+	rdb         *redis.Client // redis client to interact with the redis server
+	capacity    int           // capacity of the cache, limits the number of items that can be stored in the cache
+	keysSetName string        // keysSetName is the name of the set that holds the keys of the items in the cache
 	// mutex       sync.RWMutex           // mutex to protect the cache from concurrent access
 	Serializer  serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
 	SortFilters                        // SortFilters holds the filters applied when listing the items in the cache
@@ -37,10 +35,6 @@ func NewRedisBackend[T Redis](redisOptions ...Option[Redis]) (backend IRedisBack
 	// Check if the `capacity` is valid
 	if rb.capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
-	}
-	// Check if the `maxCacheSize` is valid
-	if rb.maxCacheSize < 0 {
-		return nil, errors.ErrInvalidMaxCacheSize
 	}
 	// Check if the `keysSetName` is empty
 	if rb.keysSetName == "" {
@@ -77,16 +71,6 @@ func (cacheBackend *Redis) Capacity() int {
 func (cacheBackend *Redis) Count() int {
 	count, _ := cacheBackend.rdb.DBSize(context.Background()).Result()
 	return int(count)
-}
-
-// Size returns the number of items in the cacheBackend.
-func (cacheBackend *Redis) Size() int {
-	return cacheBackend.memoryAllocation
-}
-
-// MaxCacheSize returns the maximum size in bytes of the cacheBackend.
-func (cacheBackend *Redis) MaxCacheSize() int {
-	return cacheBackend.maxCacheSize
 }
 
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
@@ -139,12 +123,6 @@ func (cacheBackend *Redis) Set(item *models.Item) error {
 	err := item.SetSize()
 	if err != nil {
 		return err
-	}
-
-	// check if adding this item will exceed the maxCacheSize
-	cacheBackend.memoryAllocation = cacheBackend.memoryAllocation + item.Size
-	if cacheBackend.maxCacheSize > 0 && cacheBackend.memoryAllocation > cacheBackend.maxCacheSize {
-		return errors.ErrCacheFull
 	}
 
 	// Serialize the item
