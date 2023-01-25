@@ -15,15 +15,6 @@ const (
 	ShardCount32 uint32 = uint32(ShardCount)
 )
 
-var (
-	// hasherSyncPool is a pool of hashers.
-	hasherSyncPool = sync.Pool{
-		New: func() interface{} {
-			return fnv.New32a()
-		},
-	}
-)
-
 // ConcurrentMap is a "thread" safe map of type string:*models.Item.
 // To avoid lock bottlenecks this map is dived to several (ShardCount) map shards.
 type ConcurrentMap struct {
@@ -39,11 +30,12 @@ type ConcurrentMapShard struct {
 
 // New creates a new concurrent map.
 func New() ConcurrentMap {
-	h := hasherSyncPool.Get().(hash.Hash32)
-	defer hasherSyncPool.Put(h)
+	// h := hasherSyncPool.Get().(hash.Hash32)
+	// defer hasherSyncPool.Put(h)
 	return ConcurrentMap{
 		shards: create(),
-		hasher: h,
+		// hasher: h,
+		hasher: fnv.New32a(),
 	}
 }
 
