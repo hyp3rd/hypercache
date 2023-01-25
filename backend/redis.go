@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/go-redis/redis/v9"
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/libs/serializer"
 	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
+	"github.com/redis/go-redis/v9"
 )
 
 // Redis is a cache backend that stores the items in a redis implementation.
@@ -75,10 +75,8 @@ func (cacheBackend *Redis) Count() int {
 
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
 func (cacheBackend *Redis) Get(key string) (item *models.Item, ok bool) {
-	// pipe := cacheBackend.rdb.Conn().Pipeline()
 	// Check if the key is in the set of keys
 	isMember, err := cacheBackend.rdb.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
-	// isMember, err := pipe.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
 	if err != nil {
 		return nil, false
 	}
@@ -92,8 +90,6 @@ func (cacheBackend *Redis) Get(key string) (item *models.Item, ok bool) {
 	defer models.ItemPool.Put(item)
 
 	data, err := cacheBackend.rdb.HGet(context.Background(), key, "data").Bytes()
-	// data, _ := pipe.HGet(context.Background(), key, "data").Bytes()
-	// _, err = pipe.Exec(context.Background())
 	if err != nil {
 		// Check if the item is not found
 		if err == redis.Nil {
@@ -116,12 +112,6 @@ func (cacheBackend *Redis) Set(item *models.Item) error {
 	// Check if the item is valid
 	if err := item.Valid(); err != nil {
 		// Return the item to the pool
-		return err
-	}
-
-	// Set the size of the item
-	err := item.SetSize()
-	if err != nil {
 		return err
 	}
 
