@@ -22,7 +22,7 @@ type ConcurrentMap struct {
 	hasher hash.Hash32
 }
 
-// ConcurrentMapShared is a "thread" safe string to `*models.Item`.
+// ConcurrentMapShard is a "thread" safe string to `*models.Item`.
 type ConcurrentMapShard struct {
 	items map[string]*models.Item
 	sync.RWMutex

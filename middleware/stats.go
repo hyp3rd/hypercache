@@ -120,7 +120,7 @@ func (mw StatsCollectorMiddleware) Allocation() int64 {
 	return mw.next.Allocation()
 }
 
-// Countze returns the count of the items in the cache
+// Count returns the count of the items in the cache
 func (mw StatsCollectorMiddleware) Count() int {
 	return mw.next.Count()
 }
