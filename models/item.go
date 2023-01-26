@@ -30,6 +30,7 @@ var (
 	// 	},
 	// }
 
+	// buf is a buffer used to calculate the size of the item.
 	buf []byte
 
 	// encoderPool is a pool of encoders used to calculate the size of the item.
@@ -50,8 +51,8 @@ type Item struct {
 	AccessCount uint          // AccessCount of times the item has been accessed
 }
 
-// Size returns the size of the Item in bytes
-// func (i *Item) SetSize() error {
+// SetSize stores the size of the Item in bytes
+// func (item *Item) SetSize() error {
 // 	// Get an encoder from the pool
 // 	enc := encoderPool.Get().(*gob.Encoder)
 // 	// Reset the buffer and put the encoder back in the pool
@@ -59,34 +60,35 @@ type Item struct {
 // 	defer encoderPool.Put(enc)
 
 // 	// Encode the item
-// 	if err := enc.Encode(i.Value); err != nil {
+// 	if err := enc.Encode(item.Value); err != nil {
 // 		return errors.ErrInvalidSize
 // 	}
 // 	// Set the size of the item
-// 	i.Size = int64(buf.Len())
+// 	item.Size = int64(buf.Len())
 // 	return nil
 // }
 
-func (i *Item) SetSize() error {
+// SetSize stores the size of the Item in bytes
+func (item *Item) SetSize() error {
 	enc := encoderPool.Get().(*codec.Encoder)
 	defer encoderPool.Put(enc)
-	if err := enc.Encode(i.Value); err != nil {
+	if err := enc.Encode(item.Value); err != nil {
 		return errors.ErrInvalidSize
 	}
 
-	i.Size = int64(len(buf))
+	item.Size = int64(len(buf))
 	buf = buf[:0]
 	return nil
 }
 
 // SizeMB returns the size of the Item in megabytes
-func (i *Item) SizeMB() float64 {
-	return float64(i.Size) / (1024 * 1024)
+func (item *Item) SizeMB() float64 {
+	return float64(item.Size) / (1024 * 1024)
 }
 
 // SizeKB returns the size of the Item in kilobytes
-func (i *Item) SizeKB() float64 {
-	return float64(i.Size) / 1024
+func (item *Item) SizeKB() float64 {
+	return float64(item.Size) / 1024
 }
 
 // Touch updates the last access time of the item and increments the access count.
