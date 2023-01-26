@@ -45,6 +45,7 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	evictionAlgorithm     eviction.IAlgorithm          // `evictionAlgorithm` eviction algorithm to use when evicting items
 	expirationInterval    time.Duration                // `expirationInterval` interval at which the expiration loop should run
 	evictionInterval      time.Duration                // interval at which the eviction loop should run
+	shouldEvict           atomic.Bool                  // `shouldEvict` indicates whether the cache should evict items or not
 	maxEvictionCount      uint                         // `evictionInterval` maximum number of items that can be evicted in a single eviction loop iteration
 	maxCacheSize          int64                        // maxCacheSize instructs the cache not allocate more memory than this limit, value in MB, 0 means no limit
 	memoryAllocation      atomic.Int64                 // memoryAllocation is the current memory allocation of the cache, value in bytes
@@ -122,6 +123,9 @@ func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache
 	// Apply options
 	ApplyHyperCacheOptions(hyperCache, config.HyperCacheOptions...)
 
+	// evaluate if the cache should evict items proactively
+	hyperCache.shouldEvict.Store(hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0)
+
 	// Set the max eviction count to the capacity if it is not set or is zero
 	if hyperCache.maxEvictionCount == 0 {
 		hyperCache.maxEvictionCount = uint(hyperCache.backend.Capacity())
@@ -153,7 +157,7 @@ func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache
 
 	// If the capacity is less than zero, we return
 	if hyperCache.backend.Capacity() < 0 {
-		return
+		return nil, errors.ErrInvalidCapacity
 	}
 
 	// Initialize the expiration trigger channel with the buffer size set to half the capacity
@@ -264,7 +268,6 @@ func (hyperCache *HyperCache[T]) evictionLoop() {
 		}
 
 		key, ok := hyperCache.evictionAlgorithm.Evict()
-
 		if !ok {
 			// no more items to evict
 			break
@@ -316,6 +319,7 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	// check if adding this item will exceed the maxCacheSize
 	hyperCache.memoryAllocation.Add(item.Size)
 	if hyperCache.maxCacheSize > 0 && hyperCache.memoryAllocation.Load() > hyperCache.maxCacheSize {
+		hyperCache.memoryAllocation.Add(-item.Size)
 		return errors.ErrCacheFull
 	}
 
@@ -330,14 +334,14 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	hyperCache.evictionAlgorithm.Set(key, item.Value)
 
 	// If the cache is at capacity, evict an item when the eviction interval is zero
-	if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Count() > hyperCache.backend.Capacity() {
+	if hyperCache.shouldEvict.Load() && hyperCache.backend.Count() > hyperCache.backend.Capacity() {
 		hyperCache.evictItem()
 	}
 
 	return nil
 }
 
-// Get retrieves the item with the given key from the cache.
+// Get retrieves the item with the given key from the cache returning the value and a boolean indicating if the item was found.
 func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
 	item, ok := hyperCache.backend.Get(key)
 	if !ok {
@@ -358,6 +362,7 @@ func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
 	return item.Value, true
 }
 
+// GetWithInfo retrieves the item with the given key from the cache returning the `Item` object and a boolean indicating if the item was found.
 func (hyperCache *HyperCache[T]) GetWithInfo(key string) (*models.Item, bool) {
 	item, ok := hyperCache.backend.Get(key)
 	// Check if the item has expired if it exists, if so, trigger the expiration loop
@@ -419,6 +424,8 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 	// check if adding this item will exceed the maxCacheSize
 	hyperCache.memoryAllocation.Add(item.Size)
 	if hyperCache.maxCacheSize > 0 && hyperCache.memoryAllocation.Load() > hyperCache.maxCacheSize {
+		hyperCache.memoryAllocation.Add(-item.Size)
+		models.ItemPool.Put(item)
 		return nil, errors.ErrCacheFull
 	}
 
@@ -433,7 +440,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 		// Set the item in the eviction algorithm
 		hyperCache.evictionAlgorithm.Set(key, item.Value)
 		// If the cache is at capacity, evict an item when the eviction interval is zero
-		if hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0 && hyperCache.backend.Count() > hyperCache.backend.Capacity() {
+		if hyperCache.shouldEvict.Load() && hyperCache.backend.Count() > hyperCache.backend.Capacity() {
 			models.ItemPool.Put(item)
 			hyperCache.evictItem()
 		}
@@ -579,6 +586,8 @@ func (hyperCache *HyperCache[T]) Capacity() int {
 func (hyperCache *HyperCache[T]) SetCapacity(capacity int) {
 	// set capacity of the backend
 	hyperCache.backend.SetCapacity(capacity)
+	// evaluate again if the cache should evict items proactively
+	hyperCache.shouldEvict.Swap(hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0)
 	// if the cache size is greater than the new capacity, evict items
 	if hyperCache.backend.Count() > hyperCache.Capacity() {
 		hyperCache.evictionLoop()

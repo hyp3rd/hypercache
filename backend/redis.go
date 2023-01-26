@@ -67,7 +67,7 @@ func (cacheBackend *Redis) Capacity() int {
 	return cacheBackend.capacity
 }
 
-// Size returns the number of items in the cache.
+// Count returns the number of items in the cache.
 func (cacheBackend *Redis) Count() int {
 	count, _ := cacheBackend.rdb.DBSize(context.Background()).Result()
 	return int(count)
