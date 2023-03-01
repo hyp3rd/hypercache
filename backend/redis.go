@@ -14,10 +14,9 @@ import (
 
 // Redis is a cache backend that stores the items in a redis implementation.
 type Redis struct {
-	rdb         *redis.Client // redis client to interact with the redis server
-	capacity    int           // capacity of the cache, limits the number of items that can be stored in the cache
-	keysSetName string        // keysSetName is the name of the set that holds the keys of the items in the cache
-	// mutex       sync.RWMutex           // mutex to protect the cache from concurrent access
+	rdb         *redis.Client          // redis client to interact with the redis server
+	capacity    int                    // capacity of the cache, limits the number of items that can be stored in the cache
+	keysSetName string                 // keysSetName is the name of the set that holds the keys of the items in the cache
 	Serializer  serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
 	SortFilters                        // SortFilters holds the filters applied when listing the items in the cache
 }
