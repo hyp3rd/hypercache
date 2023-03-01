@@ -4,8 +4,8 @@
 
 ## Synopsis
 
-HyperCache is a **thread-safe** **high-performance** cache implementation in `Go` that supports multiple backends with optional size limit, expiration and eviction of items supporting custom algorithms alongside the defaults. It can be used as a standalone cache or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept and decorate the cache methods with middleware (default or custom).
-It is optimized for performance and flexibility allowing to specify the expiration and eviction intervals, provide and register new eviction algorithms, stats collectors, middleware(s).
+HyperCache is a **thread-safe** **high-performance** cache implementation in `Go` that supports multiple backends with an optional size limit, expiration, and eviction of items supporting custom algorithms alongside the defaults. It can be used as a standalone cache or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept and decorate the cache methods with middleware (default or custom).
+It is optimized for performance and flexibility, allowing to specify the expiration and eviction intervals, and providing and registering new eviction algorithms, stats collectors, and middleware(s).
 It ships with a default [historigram stats collector](./stats/statscollector.go) and several eviction algorithms, but you can develop and register your own as long as it implements the [Eviction Algorithm interface](./eviction/eviction.go).:
 
 - [Recently Used (LRU) eviction algorithm](./eviction/lru.go)
@@ -67,7 +67,7 @@ To run the examples, use the following command:
 make run example=eviction  # or any other example
 ```
 
-For a full list of examples, refer to the [examples](./examples/README.md) directory.
+For a complete list of examples, refer to the [examples](./examples/README.md) directory.
 
 ## API
 
@@ -87,7 +87,7 @@ if err != nil {
 }
 ```
 
-For a fine grained control over the cache configuration, use the `New` function, for instance:
+For a fine-grained control over the cache configuration, use the `New` function, for instance:
 
 ```golang
 config := hypercache.NewConfig[backend.InMemory]()
@@ -108,7 +108,7 @@ if err != nil {
 }
 ```
 
-**For the full set of configuration options, refer to the [config.go](./config.go) file.**
+**For the full configuration options, refer to the [config.go](./config.go) file.**
 
 ### Set
 
@@ -153,7 +153,7 @@ The `Remove` function takes a variadic number of keys as arguments and returns a
 
 ## Service interface for microservices implementation
 
-The `Service` interface allows intercepting cache methods and decorate them with custom or default middleware(s).
+The `Service` interface allows intercepting cache methods and decorating them with custom or default middleware(s).
 
 ```golang
 var svc hypercache.Service
@@ -205,7 +205,7 @@ fmt.Println(key)
 
 ## Usage
 
-Here is an example of using the HyperCache package. For a more comprehensive overview, see the [examples](./examples/README.md) directory.
+Here is an example of using the HyperCache package. See the [examples](./examples/README.md) directory for a more comprehensive overview.
 
 ```golang
 package main
