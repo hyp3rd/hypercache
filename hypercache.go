@@ -97,7 +97,7 @@ func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMem
 //   - The eviction algorithm is set to CAWOLFU.
 //   - The expiration interval is set to 30 minutes.
 //   - The stats collector is set to the HistogramStatsCollector stats collector.
-func New[T backend.IBackendConstrain](hcm *HyperCacheManager, config *Config[T]) (hyperCache *HyperCache[T], err error) {
+func New[T backend.IBackendConstrain](hcm *BackendManager, config *Config[T]) (hyperCache *HyperCache[T], err error) {
 	// Get the backend constructor from the registry
 	constructor, exists := hcm.backendRegistry[config.BackendType]
 	if !exists {

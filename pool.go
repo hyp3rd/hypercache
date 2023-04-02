@@ -54,7 +54,7 @@ func (pool *WorkerPool) Enqueue(job JobFunc) {
 	pool.jobs <- job
 }
 
-// Wait blocks until all jobs in the pool have been executed.
+// Shutdown shuts down the worker pool. It waits for all jobs to finish.
 func (pool *WorkerPool) Shutdown() {
 	close(pool.quit)
 	pool.wg.Wait()
