@@ -38,6 +38,7 @@ func main() {
 		panic(err)
 	}
 
+	fmt.Println("setting 50 items to the cache")
 	for i := 0; i < 50; i++ {
 		err = hyperCache.Set(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i), time.Hour)
 		if err != nil {
@@ -48,6 +49,7 @@ func main() {
 	fmt.Println("count", hyperCache.Count())
 	fmt.Println("capacity", hyperCache.Capacity())
 
+	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
 	allItems, err := hyperCache.List(
 		backend.WithSortBy[backend.Redis](types.SortByKey),
 		backend.WithSortOrderAsc[backend.Redis](true),
@@ -61,6 +63,7 @@ func main() {
 		fmt.Println(err)
 	}
 
+	fmt.Println("printing all items")
 	// Print the list of items
 	for _, item := range allItems {
 		fmt.Println(item.Key, item.Value)
@@ -69,8 +72,10 @@ func main() {
 	fmt.Println("count", hyperCache.Count())
 	fmt.Println("capacity", hyperCache.Capacity())
 
+	fmt.Println("sleep for 5 seconds to trigger eviction")
 	time.Sleep(time.Second * 5)
 
+	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
 	allItems, err = hyperCache.List(
 		backend.WithSortBy[backend.Redis](types.SortByKey),
 		backend.WithSortOrderAsc[backend.Redis](true),
@@ -83,6 +88,7 @@ func main() {
 		fmt.Println(err)
 	}
 
+	fmt.Println("printing all items")
 	// Print the list of items
 	for _, item := range allItems {
 		fmt.Println(item.Key, item.Value)

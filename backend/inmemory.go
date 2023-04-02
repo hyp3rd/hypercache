@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	datastructure "github.com/hyp3rd/hypercache/datastructure/v3"
+	datastructure "github.com/hyp3rd/hypercache/datastructure/v4"
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
