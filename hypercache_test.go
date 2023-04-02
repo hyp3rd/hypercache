@@ -57,7 +57,8 @@ func TestHyperCache_WithExpirationInterval(t *testing.T) {
 		},
 	}
 	// Test with custom expiration interval
-	cache, err = New(config)
+	hcm := GetDefaultManager()
+	cache, err = New(hcm, config)
 	assert.Nil(t, err)
 	assert.Equal(t, 1*time.Hour, cache.expirationInterval)
 }
@@ -78,8 +79,9 @@ func TestHyperCache_WithEvictionInterval(t *testing.T) {
 			backend.WithCapacity[backend.InMemory](10),
 		},
 	}
+	hcm := GetDefaultManager()
 	// Test with custom eviction interval
-	cache, err = New(config)
+	cache, err = New(hcm, config)
 	assert.Nil(t, err)
 	assert.Equal(t, 1*time.Hour, cache.evictionInterval)
 }
@@ -101,7 +103,8 @@ func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
 			backend.WithCapacity[backend.InMemory](10),
 		},
 	}
-	cache, err = New(config)
+	hcm := GetDefaultManager()
+	cache, err = New(hcm, config)
 	assert.Nil(t, err)
 	assert.Equal(t, uint(5), cache.maxEvictionCount)
 }

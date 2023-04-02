@@ -3,6 +3,7 @@ package eviction
 // Least Frequently Used (LFU) eviction algorithm implementation
 
 import (
+	"container/heap"
 	"sync"
 
 	"github.com/hyp3rd/hypercache/errors"
@@ -10,36 +11,61 @@ import (
 
 // LFUAlgorithm is an eviction algorithm that uses the Least Frequently Used (LFU) policy to select items for eviction.
 type LFUAlgorithm struct {
-	items  map[string]*Node // map to store the items in the cache
-	list   *LinkedList      // linked list to store the items in the cache, with the most frequently used items at the front
-	mutex  sync.RWMutex     // mutex to protect the linked list
-	length int              // number of items in the cache
-	cap    int              // capacity of the cache
+	items  map[string]*Node
+	freqs  *FrequencyHeap
+	mutex  sync.RWMutex
+	length int
+	cap    int
 }
 
-// Node is a struct that represents a node in the linked list. It has a key, value, and access count field.
+// Node is a node in the LFUAlgorithm.
 type Node struct {
-	key   string // key of the item
-	value any    // value of the item
-	count int    // number of times the item has been accessed
-	prev  *Node  // previous node in the linked list
-	next  *Node  // next node in the linked list
+	key   string
+	value any
+	count int
+	index int
 }
 
-// LFUNodePool is a pool of Node values.
-var LFUNodePool = sync.Pool{
-	New: func() interface{} {
-		return &Node{}
-	},
+// FrequencyHeap is a heap of Nodes.
+type FrequencyHeap []*Node
+
+// Len returns the length of the heap.
+func (fh FrequencyHeap) Len() int { return len(fh) }
+
+// Less returns true if the node at index i has a lower frequency than the node at index j.
+func (fh FrequencyHeap) Less(i, j int) bool {
+	if fh[i].count == fh[j].count {
+		return fh[i].index < fh[j].index
+	}
+	return fh[i].count < fh[j].count
 }
 
-// LinkedList is a struct that represents a linked list. It has a head and tail field.
-type LinkedList struct {
-	head *Node // head of the linked list
-	tail *Node // tail of the linked list
+// Swap swaps the nodes at index i and j.
+func (fh FrequencyHeap) Swap(i, j int) {
+	fh[i], fh[j] = fh[j], fh[i]
+	fh[i].index = i
+	fh[j].index = j
 }
 
-// NewLFUAlgorithm returns a new LFUAlgorithm with the given capacity.
+// Push adds a node to the heap.
+func (fh *FrequencyHeap) Push(x interface{}) {
+	n := len(*fh)
+	node := x.(*Node)
+	node.index = n
+	*fh = append(*fh, node)
+}
+
+// Pop removes the last node from the heap.
+func (fh *FrequencyHeap) Pop() interface{} {
+	old := *fh
+	n := len(old)
+	node := old[n-1]
+	node.index = -1
+	*fh = old[0 : n-1]
+	return node
+}
+
+// NewLFUAlgorithm creates a new LFUAlgorithm with the given capacity.
 func NewLFUAlgorithm(capacity int) (*LFUAlgorithm, error) {
 	if capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
@@ -47,118 +73,80 @@ func NewLFUAlgorithm(capacity int) (*LFUAlgorithm, error) {
 
 	return &LFUAlgorithm{
 		items:  make(map[string]*Node, capacity),
-		list:   &LinkedList{},
+		freqs:  &FrequencyHeap{},
 		length: 0,
 		cap:    capacity,
 	}, nil
 }
 
-// Evict returns the next item to be evicted from the cache.
-func (l *LFUAlgorithm) Evict() (string, bool) {
-	l.mutex.RLock()
-	defer l.mutex.RUnlock()
-	// if the cache is empty, return an error
+// internalEvict evicts an item from the cache based on the LFU algorithm.
+func (l *LFUAlgorithm) internalEvict() (string, bool) {
 	if l.length == 0 {
 		return "", false
 	}
 
-	// remove the least frequently used item from the cache
-	node := l.list.tail
-	l.remove(node)
+	node := heap.Pop(l.freqs).(*Node)
 	delete(l.items, node.key)
 	l.length--
 
 	return node.key, true
 }
 
-// Set adds a new item to the cache with the given key.
-func (l *LFUAlgorithm) Set(key string, value any) {
+// Evict evicts an item from the cache based on the LFU algorithm.
+func (l *LFUAlgorithm) Evict() (string, bool) {
 	l.mutex.Lock()
-	// if the cache is full, evict an item
-	if l.length == l.cap {
-		l.mutex.Unlock() // unlock before evicting to avoid deadlock
-		_, _ = l.Evict() // evict an item
-		l.mutex.Lock()   // lock again
-	}
-
-	// add the new item to the cache
-	node := LFUNodePool.Get().(*Node)
-	node.count = 1
-	node.value = value
-
-	l.items[key] = node
-	l.addToFront(node)
-	l.length++
-	l.mutex.Unlock()
+	defer l.mutex.Unlock()
+	return l.internalEvict()
 }
 
-// Get returns the value for the given key from the cache. If the key is not in the cache, it returns false.
+// Set sets a key-value pair in the cache.
+func (l *LFUAlgorithm) Set(key string, value any) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if l.length == l.cap {
+		_, _ = l.internalEvict()
+	}
+
+	node := &Node{
+		key:   key,
+		value: value,
+		count: 1,
+	}
+	l.items[key] = node
+	heap.Push(l.freqs, node)
+	l.length++
+}
+
+// Get gets a value from the cache.
 func (l *LFUAlgorithm) Get(key string) (any, bool) {
-	l.mutex.RLock()
-	defer l.mutex.RUnlock()
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
 	node, ok := l.items[key]
 	if !ok {
 		return nil, false
 	}
+
 	node.count++
-	l.moveToFront(node)
+	heap.Fix(l.freqs, node.index)
 	return node.value, true
 }
 
-// remove removes the given node from the linked list.
-func (l *LFUAlgorithm) remove(node *Node) {
-	if node == l.list.head && node == l.list.tail {
-		l.list.head = nil
-		l.list.tail = nil
-	} else if node == l.list.head {
-		l.list.head = node.next
-		node.next.prev = nil
-	} else if node == l.list.tail {
-		l.list.tail = node.prev
-		node.prev.next = nil
-	} else {
-		node.prev.next = node.next
-		node.next.prev = node.prev
-	}
-	delete(l.items, node.key)
-	l.length--
-	LFUNodePool.Put(node)
-}
-
-// addToFront adds the given node to the front of the linked list.
-func (l *LFUAlgorithm) addToFront(node *Node) {
-	node.next = l.list.head
-	node.prev = nil
-	if l.list.head != nil {
-		l.list.head.prev = node
-	}
-	l.list.head = node
-	if l.list.tail == nil {
-		l.list.tail = node
-	}
-	l.items[node.key] = node
-	l.length++
-}
-
-// moveToFront moves the given node to the front of the linked list.
-func (l *LFUAlgorithm) moveToFront(node *Node) {
-	if node == l.list.head {
-		return
-	}
-	l.remove(node)
-	l.addToFront(node)
-}
-
-// Delete removes the given key from the cache.
+// Delete deletes a key-value pair from the cache.
 func (l *LFUAlgorithm) Delete(key string) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
+
 	node, ok := l.items[key]
 	if !ok {
 		return
 	}
-	l.remove(node)
+
+	heap.Remove(l.freqs, node.index)
+	for i := node.index; i < len(*l.freqs); i++ {
+		(*l.freqs)[i].index--
+	}
 	delete(l.items, key)
 	l.length--
-	LFUNodePool.Put(node)
 }

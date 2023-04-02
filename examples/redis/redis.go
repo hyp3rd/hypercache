@@ -31,11 +31,10 @@ func main() {
 		},
 		HyperCacheOptions: []hypercache.Option[backend.Redis]{
 			hypercache.WithEvictionInterval[backend.Redis](time.Second * 5),
-			hypercache.WithEvictionAlgorithm[backend.Redis]("clock"),
 		},
 	}
 
-	hyperCache, err := hypercache.New(conf)
+	hyperCache, err := hypercache.New(hypercache.GetDefaultManager(), conf)
 	if err != nil {
 		panic(err)
 	}

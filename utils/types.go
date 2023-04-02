@@ -37,8 +37,3 @@ func (c *CacheBackendChecker[T]) IsRedis() bool {
 	_, ok := c.Backend.(*backend.Redis)
 	return ok
 }
-
-// func (c *CacheBackendChecker[T]) IsRedisBackend() (backend.Redis, bool) {
-//     obj, ok := c.backend.(*backend.Redis)
-//     return *obj, ok
-// }

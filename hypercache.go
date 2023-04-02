@@ -80,8 +80,11 @@ func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMem
 	config.InMemoryOptions = []backend.Option[backend.InMemory]{
 		backend.WithCapacity[backend.InMemory](capacity),
 	}
+
+	hcm := GetDefaultManager()
+
 	// Initialize the cache
-	hyperCache, err = New(config)
+	hyperCache, err = New(hcm, config)
 	if err != nil {
 		return nil, err
 	}
@@ -94,23 +97,23 @@ func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMem
 //   - The eviction algorithm is set to CAWOLFU.
 //   - The expiration interval is set to 30 minutes.
 //   - The stats collector is set to the HistogramStatsCollector stats collector.
-func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache[T], err error) {
+func New[T backend.IBackendConstrain](hcm *HyperCacheManager, config *Config[T]) (hyperCache *HyperCache[T], err error) {
 	// Get the backend constructor from the registry
-	constructor, exists := backendRegistry[config.BackendType]
-	// Check if the backend type is registered
+	constructor, exists := hcm.backendRegistry[config.BackendType]
 	if !exists {
 		return nil, fmt.Errorf("unknown backend type: %s", config.BackendType)
 	}
-	// Check if the backend constructor is valid
-	typedConstructor, ok := constructor.(BackendConstructor[T])
+
+	// Create the backend
+	backendInstance, err := constructor.Create(config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the backend implements the IBackend interface
+	backend, ok := backendInstance.(backend.IBackend[T])
 	if !ok {
 		return nil, errors.ErrInvalidBackendType
-	}
-	// Initialize the backend
-	backend, err := typedConstructor(config)
-	if err != nil {
-		// Return the error
-		return nil, err
 	}
 
 	// Initialize the cache
@@ -141,7 +144,7 @@ func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache
 	// Initialize the eviction algorithm
 	if hyperCache.evictionAlgorithmName == "" {
 		// Use the default eviction algorithm if none is specified
-		hyperCache.evictionAlgorithm, err = eviction.NewCAWOLFU(int(hyperCache.maxEvictionCount))
+		hyperCache.evictionAlgorithm, err = eviction.NewLRUAlgorithm(int(hyperCache.maxEvictionCount))
 	} else {
 		// Use the specified eviction algorithm
 		hyperCache.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hyperCache.evictionAlgorithmName, int(hyperCache.maxEvictionCount))

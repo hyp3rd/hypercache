@@ -16,45 +16,45 @@ import (
 	"github.com/hyp3rd/hypercache/errors"
 )
 
-// LRUCacheItem represents an item in the LRU cache
-type LRUCacheItem struct {
+// lruCacheItem represents an item in the LRU cache
+type lruCacheItem struct {
 	Key   string
 	Value any
-	prev  *LRUCacheItem
-	next  *LRUCacheItem
+	prev  *lruCacheItem
+	next  *lruCacheItem
 }
 
 // LRUCacheItemmPool is a pool of LRUCacheItemm values.
 var LRUCacheItemmPool = sync.Pool{
 	New: func() interface{} {
-		return &LRUCacheItem{}
+		return &lruCacheItem{}
 	},
 }
 
 // LRU represents a LRU cache
 type LRU struct {
-	capacity int                      // The maximum number of items in the cache
-	items    map[string]*LRUCacheItem // The items in the cache
-	head     *LRUCacheItem            // The head of the linked list
-	tail     *LRUCacheItem            // The tail of the linked list
-	mutex    sync.RWMutex             // The mutex used to protect the cache
+	capacity     int                      // The maximum number of items in the cache
+	items        map[string]*lruCacheItem // The items in the cache
+	head         *lruCacheItem            // The head of the linked list
+	tail         *lruCacheItem            // The tail of the linked list
+	sync.RWMutex                          // The mutex used to protect the cache
 }
 
-// NewLRU creates a new LRU cache with the given capacity
-func NewLRU(capacity int) (*LRU, error) {
+// NewLRUAlgorithm creates a new LRU cache with the given capacity
+func NewLRUAlgorithm(capacity int) (*LRU, error) {
 	if capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
 	}
 	return &LRU{
 		capacity: capacity,
-		items:    make(map[string]*LRUCacheItem, capacity),
+		items:    make(map[string]*lruCacheItem, capacity),
 	}, nil
 }
 
 // Get retrieves the value for the given key from the cache. If the key is not
 func (lru *LRU) Get(key string) (any, bool) {
-	lru.mutex.RLock()
-	defer lru.mutex.RUnlock()
+	lru.RLock()
+	defer lru.RUnlock()
 	item, ok := lru.items[key]
 	if !ok {
 		return nil, false
@@ -66,8 +66,8 @@ func (lru *LRU) Get(key string) (any, bool) {
 // Set sets the value for the given key in the cache. If the key is not already	in the cache, it is added.
 // If the cache is full, the least recently used item is evicted.
 func (lru *LRU) Set(key string, value any) {
-	lru.mutex.Lock()
-	defer lru.mutex.Unlock()
+	lru.Lock()
+	defer lru.Unlock()
 	item, ok := lru.items[key]
 	if ok {
 		item.Value = value
@@ -80,7 +80,7 @@ func (lru *LRU) Set(key string, value any) {
 	}
 
 	// get a new item from the pool
-	item = LRUCacheItemmPool.Get().(*LRUCacheItem)
+	item = LRUCacheItemmPool.Get().(*lruCacheItem)
 
 	item.Key = key
 	item.Value = value
@@ -91,8 +91,8 @@ func (lru *LRU) Set(key string, value any) {
 
 // Evict removes the least recently used item from the cache and returns its key.
 func (lru *LRU) Evict() (string, bool) {
-	lru.mutex.Lock()
-	defer lru.mutex.Unlock()
+	lru.Lock()
+	defer lru.Unlock()
 	if lru.tail == nil {
 		return "", false
 	}
@@ -105,8 +105,8 @@ func (lru *LRU) Evict() (string, bool) {
 
 // Delete removes the given key from the cache.
 func (lru *LRU) Delete(key string) {
-	lru.mutex.Lock()
-	defer lru.mutex.Unlock()
+	lru.Lock()
+	defer lru.Unlock()
 	item, ok := lru.items[key]
 	if !ok {
 		return
@@ -115,8 +115,15 @@ func (lru *LRU) Delete(key string) {
 	delete(lru.items, key)
 }
 
+// Len returns the number of items in the cache.
+func (lru *LRU) Len() int {
+	lru.RLock()
+	defer lru.RUnlock()
+	return len(lru.items)
+}
+
 // moveToFront moves the given item to the front of the list.
-func (lru *LRU) moveToFront(item *LRUCacheItem) {
+func (lru *LRU) moveToFront(item *lruCacheItem) {
 	if item == lru.head {
 		return
 	}
@@ -125,7 +132,7 @@ func (lru *LRU) moveToFront(item *LRUCacheItem) {
 }
 
 // removeFromList removes the given item from the list.
-func (lru *LRU) removeFromList(item *LRUCacheItem) {
+func (lru *LRU) removeFromList(item *lruCacheItem) {
 	if item == lru.head {
 		lru.head = item.next
 	} else {
@@ -141,7 +148,7 @@ func (lru *LRU) removeFromList(item *LRUCacheItem) {
 }
 
 // addToFront adds the given item to the front of the list.
-func (lru *LRU) addToFront(item *LRUCacheItem) {
+func (lru *LRU) addToFront(item *lruCacheItem) {
 	if lru.head == nil {
 		lru.head = item
 		lru.tail = item

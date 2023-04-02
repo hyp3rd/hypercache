@@ -8,7 +8,6 @@ package eviction
 
 import (
 	"sync"
-	"time"
 
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/models"
@@ -16,9 +15,12 @@ import (
 
 // ClockAlgorithm is an in-memory cache with the Clock algorithm.
 type ClockAlgorithm struct {
-	items    map[string]*models.Item
-	mutex    sync.RWMutex
-	capacity int
+	items      []*models.Item
+	keys       map[string]int
+	mutex      sync.RWMutex
+	evictMutex sync.Mutex
+	capacity   int
+	hand       int
 }
 
 // NewClockAlgorithm creates a new in-memory cache with the given capacity and the Clock algorithm.
@@ -28,66 +30,82 @@ func NewClockAlgorithm(capacity int) (*ClockAlgorithm, error) {
 	}
 
 	return &ClockAlgorithm{
-		items:    make(map[string]*models.Item, capacity),
+		items:    make([]*models.Item, capacity),
+		keys:     make(map[string]int, capacity),
 		capacity: capacity,
+		hand:     0,
 	}, nil
 }
 
-// Evict evicts the least recently used item from the cache.
+// Evict evicts an item from the cache based on the Clock algorithm.
 func (c *ClockAlgorithm) Evict() (string, bool) {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
+	c.evictMutex.Lock()
+	defer c.evictMutex.Unlock()
 
-	var oldestKey string
-	oldestTime := time.Now()
-	for key, item := range c.items {
-		if item.LastAccess.Before(oldestTime) {
-			oldestTime = item.LastAccess
-			oldestKey = key
+	for i := 0; i < c.capacity; i++ {
+		item := c.items[c.hand]
+		if item == nil {
+			c.hand = (c.hand + 1) % c.capacity
+			continue
 		}
+		if item.AccessCount > 0 {
+			item.AccessCount--
+		} else {
+			delete(c.keys, item.Key)
+			models.ItemPool.Put(item)
+			c.items[c.hand] = nil
+			return item.Key, true
+		}
+		c.hand = (c.hand + 1) % c.capacity
 	}
-	if oldestKey == "" {
-		return "", false
-	}
-	c.Delete(oldestKey)
-	return oldestKey, true
+	return "", false
 }
 
 // Set sets the item with the given key and value in the cache.
 func (c *ClockAlgorithm) Set(key string, value any) {
-	// c.mutex.RLock()
-	// defer c.mutex.RUnlock()
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	evictedKey, ok := c.Evict()
+	if ok {
+		c.Delete(evictedKey)
+	}
 
 	item := models.ItemPool.Get().(*models.Item)
+	item.Key = key
 	item.Value = value
-	item.LastAccess = time.Now()
-	item.AccessCount = 0
-	c.items[key] = item
+	item.AccessCount = 1
+
+	c.keys[key] = c.hand
+	c.items[c.hand] = item
+	c.hand = (c.hand + 1) % c.capacity
 }
 
 // Get retrieves the item with the given key from the cache.
 func (c *ClockAlgorithm) Get(key string) (any, bool) {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
-	item, ok := c.items[key]
+	index, ok := c.keys[key]
 	if !ok {
 		return nil, false
 	}
-	item.LastAccess = time.Now()
+	item := c.items[index]
 	item.AccessCount++
 	return item.Value, true
 }
 
 // Delete deletes the item with the given key from the cache.
 func (c *ClockAlgorithm) Delete(key string) {
-	// c.mutex.RLock()
-	// defer c.mutex.RUnlock()
+	c.evictMutex.Lock()
+	defer c.evictMutex.Unlock()
 
-	item, ok := c.items[key]
+	index, ok := c.keys[key]
 	if !ok {
 		return
 	}
-	delete(c.items, key)
+	item := c.items[index]
+	delete(c.keys, key)
+	c.items[index] = nil
 	models.ItemPool.Put(item)
 }
