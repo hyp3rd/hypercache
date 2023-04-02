@@ -25,9 +25,9 @@ type ARC struct {
 	mutex    sync.RWMutex            // mutex is a read-write mutex that protects the cache
 }
 
-// NewARC creates a new in-memory cache with the given capacity and the Adaptive Replacement Cache (ARC) algorithm.
+// NewARCAlgorithm creates a new in-memory cache with the given capacity and the Adaptive Replacement Cache (ARC) algorithm.
 // If the capacity is negative, it returns an error.
-func NewARC(capacity int) (*ARC, error) {
+func NewARCAlgorithm(capacity int) (*ARC, error) {
 	if capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
 	}
@@ -46,26 +46,29 @@ func NewARC(capacity int) (*ARC, error) {
 // If the key is not found in the cache, it returns nil.
 func (arc *ARC) Get(key string) (any, bool) {
 	arc.mutex.RLock()
-	defer arc.mutex.RUnlock()
 
 	// Check t1
 	item, ok := arc.t1[key]
 	if ok {
+		arc.mutex.RUnlock()
 		arc.promote(key)
 		return item.Value, true
 	}
 	// Check t2
 	item, ok = arc.t2[key]
 	if ok {
+		arc.mutex.RUnlock()
 		arc.demote(key)
 		return item.Value, true
 	}
-	// arc.mutex.RUnlock()
+	arc.mutex.RUnlock()
 	return nil, false
 }
 
 // Promote moves the item with the given key from t2 to t1.
 func (arc *ARC) promote(key string) {
+	arc.mutex.Lock()
+	defer arc.mutex.Unlock()
 	item, ok := arc.t2[key]
 	if !ok {
 		return
@@ -80,6 +83,8 @@ func (arc *ARC) promote(key string) {
 
 // Demote moves the item with the given key from t1 to t2.
 func (arc *ARC) demote(key string) {
+	arc.mutex.Lock()
+	defer arc.mutex.Unlock()
 	item, ok := arc.t1[key]
 	if !ok {
 		return

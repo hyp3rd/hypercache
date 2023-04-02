@@ -57,10 +57,10 @@ func init() {
 	// Define the default eviction algorithms.
 	algorithms := map[string]func(capacity int) (IAlgorithm, error){
 		"arc": func(capacity int) (IAlgorithm, error) {
-			return NewARC(capacity)
+			return NewARCAlgorithm(capacity)
 		},
 		"lru": func(capacity int) (IAlgorithm, error) {
-			return NewLRU(capacity)
+			return NewLRUAlgorithm(capacity)
 		},
 		"clock": func(capacity int) (IAlgorithm, error) {
 			return NewClockAlgorithm(capacity)

@@ -31,7 +31,6 @@ func main() {
 		},
 		HyperCacheOptions: []hypercache.Option[backend.Redis]{
 			hypercache.WithEvictionInterval[backend.Redis](time.Second * 5),
-			hypercache.WithEvictionAlgorithm[backend.Redis]("clock"),
 		},
 	}
 

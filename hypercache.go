@@ -141,7 +141,7 @@ func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache
 	// Initialize the eviction algorithm
 	if hyperCache.evictionAlgorithmName == "" {
 		// Use the default eviction algorithm if none is specified
-		hyperCache.evictionAlgorithm, err = eviction.NewCAWOLFU(int(hyperCache.maxEvictionCount))
+		hyperCache.evictionAlgorithm, err = eviction.NewLRUAlgorithm(int(hyperCache.maxEvictionCount))
 	} else {
 		// Use the specified eviction algorithm
 		hyperCache.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hyperCache.evictionAlgorithmName, int(hyperCache.maxEvictionCount))
