@@ -21,8 +21,8 @@ type Redis struct {
 	SortFilters                        // SortFilters holds the filters applied when listing the items in the cache
 }
 
-// NewRedisBackend creates a new redis cache with the given options.
-func NewRedisBackend[T Redis](redisOptions ...Option[Redis]) (backend IRedisBackend[T], err error) {
+// NewRedis creates a new redis cache with the given options.
+func NewRedis(redisOptions ...Option[Redis]) (backend IRedisBackend[Redis], err error) {
 	rb := &Redis{}
 	// Apply the backend options
 	ApplyOptions(rb, redisOptions...)

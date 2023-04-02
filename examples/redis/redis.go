@@ -24,6 +24,7 @@ func main() {
 	}
 
 	conf := &hypercache.Config[backend.Redis]{
+		BackendType: "redis",
 		RedisOptions: []backend.Option[backend.Redis]{
 			backend.WithRedisClient(redisStore.Client),
 			backend.WithCapacity[backend.Redis](20),

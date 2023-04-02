@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 
-	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/models"
 )
 
@@ -47,25 +46,4 @@ type IBackend[T IBackendConstrain] interface {
 	Count() int
 	// Remove deletes the item with the given key from the cache.
 	Remove(keys ...string) error
-}
-
-// NewBackend creates a new cache backend.
-// Deprecated: Use specific backend constructors instead, e.g. NewInMemory or NewRedisBackend.
-func NewBackend[T IBackendConstrain](backendType string, opts ...any) (IBackend[T], error) {
-	switch backendType {
-	case "memory":
-		Options := make([]Option[InMemory], len(opts))
-		for i, option := range opts {
-			Options[i] = option.(Option[InMemory])
-		}
-		return NewInMemory(Options...)
-	case "redis":
-		Options := make([]Option[Redis], len(opts))
-		for i, option := range opts {
-			Options[i] = option.(Option[Redis])
-		}
-		return NewRedisBackend(Options...)
-	default:
-		return nil, errors.ErrInvalidBackendType
-	}
 }

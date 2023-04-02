@@ -48,4 +48,7 @@ var (
 
 	// ErrCacheFull is returned when the cache is full.
 	ErrCacheFull = errors.New("cache is full")
+
+	// ErrBackendNotFound is returned when a backend is not found.
+	ErrBackendNotFound = errors.New("backend not found")
 )

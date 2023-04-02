@@ -21,7 +21,7 @@ type InMemory struct {
 }
 
 // NewInMemory creates a new in-memory cache with the given options.
-func NewInMemory[T InMemory](opts ...Option[InMemory]) (backend IInMemory[T], err error) {
+func NewInMemory(opts ...Option[InMemory]) (backend IInMemory[InMemory], err error) {
 	InMemory := &InMemory{
 		items: datastructure.New(),
 	}

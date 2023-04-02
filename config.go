@@ -1,6 +1,7 @@
 package hypercache
 
 import (
+	"strings"
 	"time"
 
 	"github.com/hyp3rd/hypercache/backend"
@@ -8,6 +9,8 @@ import (
 
 // Config is a struct that wraps all the configuration options to setup `HyperCache` and its backend.
 type Config[T backend.IBackendConstrain] struct {
+	// BackendType is the type of the backend to use.
+	BackendType string
 	// InMemoryOptions is a slice of options that can be used to configure the `InMemory`.
 	InMemoryOptions []backend.Option[backend.InMemory]
 	// RedisOptions is a slice of options that can be used to configure the `Redis`.
@@ -26,8 +29,13 @@ type Config[T backend.IBackendConstrain] struct {
 //
 // Each of the above options can be overridden by passing a different option to the `NewConfig` function.
 // It can be used to configure `HyperCache` and its backend and customize the behavior of the cache.
-func NewConfig[T backend.IBackendConstrain]() *Config[T] {
+func NewConfig[T backend.IBackendConstrain](backendType string) *Config[T] {
+	if strings.TrimSpace(backendType) == "" {
+		panic("empty backend type")
+	}
+
 	return &Config[T]{
+		BackendType:     backendType,
 		InMemoryOptions: []backend.Option[backend.InMemory]{},
 		RedisOptions:    []backend.Option[backend.Redis]{},
 		HyperCacheOptions: []Option[T]{
