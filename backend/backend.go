@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"context"
+
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/models"
 )
@@ -25,7 +27,7 @@ type IRedisBackend[T IBackendConstrain] interface {
 	// IBackend[T] is the interface that must be implemented by cache backends.
 	IBackend[T]
 	// List the items in the cache that meet the specified criteria.
-	List(options ...FilterOption[Redis]) ([]*models.Item, error)
+	List(ctx context.Context, options ...FilterOption[Redis]) ([]*models.Item, error)
 	// Clear removes all items from the cache.
 	Clear() error
 }

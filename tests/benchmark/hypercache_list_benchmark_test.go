@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ func BenchmarkHyperCache_List(b *testing.B) {
 		cache.Set("key", "value", time.Hour)
 	}
 
-	list, _ := cache.List()
+	list, _ := cache.List(context.TODO())
 
 	for _, ci := range list {
 		_ = ci

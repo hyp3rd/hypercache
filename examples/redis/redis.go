@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -50,7 +51,7 @@ func main() {
 	fmt.Println("capacity", hyperCache.Capacity())
 
 	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
-	allItems, err := hyperCache.List(
+	allItems, err := hyperCache.List(context.TODO(),
 		backend.WithSortBy[backend.Redis](types.SortByKey),
 		backend.WithSortOrderAsc[backend.Redis](true),
 		backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
@@ -76,7 +77,7 @@ func main() {
 	time.Sleep(time.Second * 5)
 
 	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
-	allItems, err = hyperCache.List(
+	allItems, err = hyperCache.List(context.TODO(),
 		backend.WithSortBy[backend.Redis](types.SortByKey),
 		backend.WithSortOrderAsc[backend.Redis](true),
 		backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {

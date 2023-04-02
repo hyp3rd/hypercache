@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -36,7 +37,7 @@ func main() {
 	}
 
 	// Retrieve the list of items from the cache
-	list, err := hyperCache.List(
+	list, err := hyperCache.List(context.TODO(),
 		backend.WithSortBy[backend.InMemory](types.SortByKey),
 		backend.WithSortOrderAsc[backend.InMemory](true),
 		backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {

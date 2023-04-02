@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -60,7 +61,7 @@ func executeExample(evictionInterval time.Duration) {
 	log.Println("capacity after adding 15 items", cache.Capacity())
 
 	log.Println("listing all items in the cache")
-	list, err := cache.List(backend.WithSortBy[backend.InMemory](types.SortByKey))
+	list, err := cache.List(context.TODO(), backend.WithSortBy[backend.InMemory](types.SortByKey))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -75,7 +76,7 @@ func executeExample(evictionInterval time.Duration) {
 		fmt.Println("sleeping to allow the evition loop to complete", evictionInterval+2*time.Second)
 		time.Sleep(evictionInterval + 2*time.Second)
 		log.Println("listing all items in the cache the eviction is triggered")
-		list, err = cache.List(backend.WithSortBy[backend.InMemory](types.SortByKey))
+		list, err = cache.List(context.TODO(), backend.WithSortBy[backend.InMemory](types.SortByKey))
 		if err != nil {
 			fmt.Println(err)
 			return

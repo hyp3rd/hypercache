@@ -1,6 +1,7 @@
 package hypercache
 
 import (
+	"context"
 	"time"
 
 	"github.com/hyp3rd/hypercache/models"
@@ -21,7 +22,7 @@ type Service interface {
 	// GetMultiple retrieves a list of values from the cache using the keys
 	GetMultiple(keys ...string) (result map[string]any, failed map[string]error)
 	// List returns a list of all items in the cache
-	List(filters ...any) ([]*models.Item, error)
+	List(ctx context.Context, filters ...any) ([]*models.Item, error)
 	// Remove removes a value from the cache using the key
 	Remove(keys ...string)
 	// Clear removes all values from the cache
