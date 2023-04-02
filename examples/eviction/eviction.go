@@ -33,7 +33,7 @@ func executeExample(evictionInterval time.Duration) {
 	}
 
 	// Create a new HyperCache with a capacity of 10
-	cache, err := hypercache.New(config)
+	cache, err := hypercache.New(hypercache.GetDefaultManager(), config)
 	if err != nil {
 		fmt.Println(err)
 		return

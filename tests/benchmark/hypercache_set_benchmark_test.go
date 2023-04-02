@@ -33,7 +33,7 @@ func BenchmarkHyperCache_Set_Proactive_Eviction(b *testing.B) {
 	}
 
 	// Create a new HyperCache with a capacity of 10
-	cache, _ := hypercache.New(config)
+	cache, _ := hypercache.New(hypercache.GetDefaultManager(), config)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

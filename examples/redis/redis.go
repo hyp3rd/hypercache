@@ -34,7 +34,7 @@ func main() {
 		},
 	}
 
-	hyperCache, err := hypercache.New(conf)
+	hyperCache, err := hypercache.New(hypercache.GetDefaultManager(), conf)
 	if err != nil {
 		panic(err)
 	}

@@ -25,7 +25,7 @@ func main() {
 	}
 
 	// Create a new HyperCache with a capacity of 10
-	hyperCache, err := hypercache.New(config)
+	hyperCache, err := hypercache.New(hypercache.GetDefaultManager(), config)
 	if err != nil {
 		fmt.Println(err)
 		return

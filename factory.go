@@ -5,36 +5,61 @@ import (
 	"github.com/hyp3rd/hypercache/errors"
 )
 
-// BackendConstructor is a function that returns a new backend instance
-type BackendConstructor[T backend.IBackendConstrain] func(config *Config[T]) (backend.IBackend[T], error)
+// IBackendConstructor is an interface for backend constructors
+type IBackendConstructor interface {
+	Create(config interface{}) (interface{}, error)
+}
+
+// InMemoryBackendConstructor is a backend constructor for InMemory
+type InMemoryBackendConstructor struct{}
+
+// Create creates a new InMemory backend
+func (ibc InMemoryBackendConstructor) Create(config interface{}) (interface{}, error) {
+	inMemoryConfig, ok := config.(*Config[backend.InMemory])
+	if !ok {
+		return nil, errors.ErrInvalidBackendType
+	}
+	return backend.NewInMemory(inMemoryConfig.InMemoryOptions...)
+}
+
+// RedisBackendConstructor is a backend constructor for Redis
+type RedisBackendConstructor struct{}
+
+// Create creates a new Redis backend
+func (rbc RedisBackendConstructor) Create(config interface{}) (interface{}, error) {
+	redisConfig, ok := config.(*Config[backend.Redis])
+	if !ok {
+		return nil, errors.ErrInvalidBackendType
+	}
+	return backend.NewRedis(redisConfig.RedisOptions...)
+}
+
+// HyperCacheManager is a factory for creating HyperCache backend instances
+type HyperCacheManager struct {
+	backendRegistry map[string]IBackendConstructor
+}
+
+// NewHyperCacheManager creates a new HyperCacheManager
+func NewHyperCacheManager() *HyperCacheManager {
+	return &HyperCacheManager{
+		backendRegistry: make(map[string]IBackendConstructor),
+	}
+}
 
 // RegisterBackend registers a new backend constructor
-var backendRegistry = make(map[string]interface{})
-
-// RegisterBackend registers a new backend constructor with the given name.
-func RegisterBackend[T backend.IBackendConstrain](name string, constructor BackendConstructor[T]) {
-	backendRegistry[name] = constructor
+func (hcm *HyperCacheManager) RegisterBackend(name string, constructor IBackendConstructor) {
+	hcm.backendRegistry[name] = constructor
 }
 
-// GetBackend returns a new backend instance with the given name.
-func GetBackend[T backend.IBackendConstrain](name string, config *Config[T]) (backend.IBackend[T], error) {
-	if constructor, ok := backendRegistry[name]; ok {
-		return constructor.(BackendConstructor[T])(config)
-	}
-	return nil, errors.ErrBackendNotFound
+var defaultManager *HyperCacheManager
+
+// GetDefaultManager returns the default HyperCacheManager
+func GetDefaultManager() *HyperCacheManager {
+	return defaultManager
 }
 
-// Wrapper functions for the constructors
-func newInMemoryWrapper(config *Config[backend.InMemory]) (backend.IBackend[backend.InMemory], error) {
-	return backend.NewInMemory(config.InMemoryOptions...)
-}
-
-func newRedisWrapper(config *Config[backend.Redis]) (backend.IBackend[backend.Redis], error) {
-	return backend.NewRedis(config.RedisOptions...)
-}
-
-// Register the default backends.
 func init() {
-	RegisterBackend("in-memory", newInMemoryWrapper)
-	RegisterBackend("redis", newRedisWrapper)
+	defaultManager = NewHyperCacheManager()
+	defaultManager.RegisterBackend("in-memory", InMemoryBackendConstructor{})
+	defaultManager.RegisterBackend("redis", RedisBackendConstructor{})
 }
