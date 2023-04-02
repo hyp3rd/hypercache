@@ -8,6 +8,9 @@ package hypercache
 // It can implement a service interface to interact with the cache with middleware support (default or custom).
 
 import (
+	"context"
+	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,9 +39,9 @@ import (
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
 type HyperCache[T backend.IBackendConstrain] struct {
 	backend               backend.IBackend[T]          // `backend`` holds the backend that the cache uses to store the items. It must implement the IBackend interface.
-	backendType           *T                           // `backendType`` holds a pointer to the backend type.
 	cacheBackendChecker   utils.CacheBackendChecker[T] // `cacheBackendChecker` holds an instance of the CacheBackendChecker interface. It helps to determine the type of the backend.
 	stop                  chan bool                    // `stop` channel to signal the expiration and eviction loops to stop
+	workerPool            *WorkerPool                  // `workerPool` holds a pointer to the worker pool that the cache uses to run the expiration and eviction loops.
 	expirationTriggerCh   chan bool                    // `expirationTriggerCh` channel to signal the expiration trigger loop to start
 	evictCh               chan bool                    // `evictCh` channel to signal the eviction loop to start
 	evictionAlgorithmName string                       // `evictionAlgorithmName` name of the eviction algorithm to use when evicting items
@@ -65,7 +68,7 @@ type HyperCache[T backend.IBackendConstrain] struct {
 //   - The maximum cache size in bytes is set to 0 (no limitations).
 func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMemory], err error) {
 	// Initialize the configuration
-	config := NewConfig[backend.InMemory]()
+	config := NewConfig[backend.InMemory]("in-memory")
 	// Set the default options
 	config.HyperCacheOptions = []Option[backend.InMemory]{
 		WithEvictionInterval[backend.InMemory](10 * time.Minute),
@@ -92,27 +95,31 @@ func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMem
 //   - The expiration interval is set to 30 minutes.
 //   - The stats collector is set to the HistogramStatsCollector stats collector.
 func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache[T], err error) {
+	// Get the backend constructor from the registry
+	constructor, exists := backendRegistry[config.BackendType]
+	// Check if the backend type is registered
+	if !exists {
+		return nil, fmt.Errorf("unknown backend type: %s", config.BackendType)
+	}
+	// Check if the backend constructor is valid
+	typedConstructor, ok := constructor.(BackendConstructor[T])
+	if !ok {
+		return nil, errors.ErrInvalidBackendType
+	}
+	// Initialize the backend
+	backend, err := typedConstructor(config)
+	if err != nil {
+		// Return the error
+		return nil, err
+	}
 
 	// Initialize the cache
 	hyperCache = &HyperCache[T]{
+		backend:            backend,
+		workerPool:         NewWorkerPool(runtime.NumCPU()),
 		stop:               make(chan bool, 2),
 		expirationInterval: 30 * time.Minute,
 		evictionInterval:   10 * time.Minute,
-	}
-
-	// Initialize the backend
-	t, _ := utils.TypeName(hyperCache.backendType) // Get the backend type name
-	switch t {
-	case "backend.InMemory":
-		hyperCache.backend, err = backend.NewInMemory(config.InMemoryOptions...)
-	case "backend.Redis":
-		hyperCache.backend, err = backend.NewRedisBackend(config.RedisOptions...)
-	default:
-		err = errors.ErrInvalidBackendType
-	}
-	// No, or invalid backend specified, we return
-	if err != nil {
-		return
 	}
 
 	// Initialize the cache backend type checker
@@ -208,79 +215,87 @@ func New[T backend.IBackendConstrain](config *Config[T]) (hyperCache *HyperCache
 
 // expirationLoop is a function that runs in a separate goroutine and expires items in the cache based on their expiration duration.
 func (hyperCache *HyperCache[T]) expirationLoop() {
-	hyperCache.StatsCollector.Incr("expiration_loop_count", 1)
-	defer hyperCache.StatsCollector.Timing("expiration_loop_duration", time.Now().UnixNano())
+	// Enqueue the expiration loop in the worker pool to avoid blocking the main goroutine
+	hyperCache.workerPool.Enqueue(func() error {
+		hyperCache.StatsCollector.Incr("expiration_loop_count", 1)
+		defer hyperCache.StatsCollector.Timing("expiration_loop_duration", time.Now().UnixNano())
 
-	var (
-		expiredCount int64
-		items        []*models.Item
-		err          error
-	)
-
-	// get all expired items
-	if cb, ok := hyperCache.backend.(*backend.InMemory); ok {
-		items, err = cb.List(
-			backend.WithSortBy[backend.InMemory](types.SortByExpiration),
-			backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
-				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
-			}),
+		var (
+			expiredCount int64
+			items        []*models.Item
+			err          error
 		)
 
-	} else if cb, ok := hyperCache.backend.(*backend.Redis); ok {
-		items, err = cb.List(
-			backend.WithSortBy[backend.Redis](types.SortByExpiration),
-			backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
-				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
-			}),
-		)
-	}
+		// get all expired items
+		if hyperCache.cacheBackendChecker.IsInMemory() {
+			items, err = hyperCache.backend.(*backend.InMemory).List(
+				backend.WithSortBy[backend.InMemory](types.SortByExpiration),
+				backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
+					return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+				}),
+			)
+		} else if hyperCache.cacheBackendChecker.IsRedis() {
+			items, err = hyperCache.backend.(*backend.Redis).List(context.TODO(),
+				backend.WithSortBy[backend.Redis](types.SortByExpiration),
+				backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
+					return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+				}),
+			)
+		}
 
-	// when error, return
-	if err != nil {
-		return
-	}
-	// iterate all expired items and remove them
-	for _, item := range items {
-		expiredCount++
-		hyperCache.Remove(item.Key)
-		models.ItemPool.Put(item)
-		hyperCache.StatsCollector.Incr("item_expired_count", 1)
-	}
+		// when error, return
+		if err != nil {
+			return err
+		}
+		// iterate all expired items and remove them
+		for _, item := range items {
+			expiredCount++
+			hyperCache.Remove(item.Key)
+			models.ItemPool.Put(item)
+			hyperCache.StatsCollector.Incr("item_expired_count", 1)
+		}
 
-	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count()))
-	hyperCache.StatsCollector.Gauge("expired_item_count", expiredCount)
+		hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count()))
+		hyperCache.StatsCollector.Gauge("expired_item_count", expiredCount)
+
+		return nil
+	})
 }
 
 // evictionLoop is a function that runs in a separate goroutine and evicts items from the cache based on the cache's capacity and the max eviction count.
 // The eviction is determined by the eviction algorithm.
 func (hyperCache *HyperCache[T]) evictionLoop() {
-	hyperCache.StatsCollector.Incr("eviction_loop_count", 1)
-	defer hyperCache.StatsCollector.Timing("eviction_loop_duration", time.Now().UnixNano())
-	var evictedCount int64
+	// Enqueue the eviction loop in the worker pool to avoid blocking the main goroutine if the eviction loop is slow
+	hyperCache.workerPool.Enqueue(func() error {
+		hyperCache.StatsCollector.Incr("eviction_loop_count", 1)
+		defer hyperCache.StatsCollector.Timing("eviction_loop_duration", time.Now().UnixNano())
+		var evictedCount int64
 
-	for {
-		if hyperCache.backend.Count() <= hyperCache.backend.Capacity() {
-			break
+		for {
+			if hyperCache.backend.Count() <= hyperCache.backend.Capacity() {
+				break
+			}
+
+			if hyperCache.maxEvictionCount == uint(evictedCount) {
+				break
+			}
+
+			key, ok := hyperCache.evictionAlgorithm.Evict()
+			if !ok {
+				// no more items to evict
+				break
+			}
+
+			// remove the item from the cache
+			hyperCache.Remove(key)
+			evictedCount++
+			hyperCache.StatsCollector.Incr("item_evicted_count", 1)
 		}
 
-		if hyperCache.maxEvictionCount == uint(evictedCount) {
-			break
-		}
-
-		key, ok := hyperCache.evictionAlgorithm.Evict()
-		if !ok {
-			// no more items to evict
-			break
-		}
-
-		// remove the item from the cache
-		hyperCache.Remove(key)
-		evictedCount++
-		hyperCache.StatsCollector.Incr("item_evicted_count", 1)
-	}
-
-	hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count()))
-	hyperCache.StatsCollector.Gauge("evicted_item_count", evictedCount)
+		hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count()))
+		hyperCache.StatsCollector.Gauge("evicted_item_count", evictedCount)
+		return nil
+	})
 }
 
 // evictItem is a helper function that removes an item from the cache and returns the key of the evicted item.
@@ -326,6 +341,7 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	// Insert the item into the cache
 	err = hyperCache.backend.Set(item)
 	if err != nil {
+		hyperCache.memoryAllocation.Add(-item.Size)
 		models.ItemPool.Put(item)
 		return err
 	}
@@ -432,6 +448,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 	// Insert the item into the cache
 	err = hyperCache.backend.Set(item)
 	if err != nil {
+		hyperCache.memoryAllocation.Add(-item.Size)
 		models.ItemPool.Put(item)
 		return nil, err
 	}
@@ -483,7 +500,7 @@ func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]
 // List lists the items in the cache that meet the specified criteria.
 // It takes in a variadic number of any type as filters, it then checks the backend type, and calls the corresponding
 // implementation of the List function for that backend, with the filters passed in as arguments
-func (hyperCache *HyperCache[T]) List(filters ...any) ([]*models.Item, error) {
+func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...any) ([]*models.Item, error) {
 	var listInstance listFunc
 
 	// checking the backend type
@@ -498,18 +515,18 @@ func (hyperCache *HyperCache[T]) List(filters ...any) ([]*models.Item, error) {
 	}
 
 	// calling the corresponding implementation of the list function
-	return listInstance(filters...)
+	return listInstance(ctx, filters...)
 }
 
 // listFunc is a type that defines a function that takes in a variable number of any type as arguments, and returns
 // a slice of Item pointers, and an error
-type listFunc func(options ...any) ([]*models.Item, error)
+type listFunc func(ctx context.Context, options ...any) ([]*models.Item, error)
 
 // listInMemory is a function that takes in an InMemory, and returns a ListFunc
 // it takes any type as filters, and converts them to the specific FilterOption type for the InMemory,
 // and calls the InMemory's List function with these filters.
 func listInMemory(cacheBackend *backend.InMemory) listFunc {
-	return func(options ...any) ([]*models.Item, error) {
+	return func(ctx context.Context, options ...any) ([]*models.Item, error) {
 		// here we are converting the filters of any type to the specific FilterOption type for the InMemory
 		filterOptions := make([]backend.FilterOption[backend.InMemory], len(options))
 		for i, option := range options {
@@ -523,13 +540,13 @@ func listInMemory(cacheBackend *backend.InMemory) listFunc {
 // it takes any type as filters, and converts them to the specific FilterOption type for the Redis,
 // and calls the Redis's List function with these filters.
 func listRedis(cacheBackend *backend.Redis) listFunc {
-	return func(options ...any) ([]*models.Item, error) {
+	return func(ctx context.Context, options ...any) ([]*models.Item, error) {
 		// here we are converting the filters of any type to the specific FilterOption type for the Redis
 		filterOptions := make([]backend.FilterOption[backend.Redis], len(options))
 		for i, option := range options {
 			filterOptions[i] = option.(backend.FilterOption[backend.Redis])
 		}
-		return cacheBackend.List(filterOptions...)
+		return cacheBackend.List(ctx, filterOptions...)
 	}
 }
 
@@ -560,7 +577,7 @@ func (hyperCache *HyperCache[T]) Clear() error {
 		items, err = cb.List()
 		cb.Clear()
 	} else if cb, ok := hyperCache.backend.(*backend.Redis); ok {
-		items, err = cb.List()
+		items, err = cb.List(context.TODO())
 		if err != nil {
 			return err
 		}
@@ -625,6 +642,7 @@ func (hyperCache *HyperCache[T]) Stop() {
 	}()
 	wg.Wait()
 	hyperCache.once = sync.Once{}
+	hyperCache.workerPool.Shutdown()
 }
 
 // GetStats returns the stats collected by the cache.

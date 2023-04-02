@@ -50,11 +50,11 @@ goos: darwin
 goarch: amd64
 pkg: github.com/hyp3rd/hypercache/tests/benchmark
 cpu: Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz
-BenchmarkHyperCache_Get-16                          39429110           115.7 ns/op         0 B/op          0 allocs/op
-BenchmarkHyperCache_Get_ProactiveEviction-16        42094736           118.0 ns/op         0 B/op          0 allocs/op
-BenchmarkHyperCache_List-16                         10898176           437.0 ns/op        85 B/op          1 allocs/op
-BenchmarkHyperCache_Set-16                           3034786          1546 ns/op         252 B/op          4 allocs/op
-BenchmarkHyperCache_Set_Proactive_Eviction-16        2725557          1833 ns/op         162 B/op          3 allocs/op
+BenchmarkHyperCache_Get-16                          37481116           115.7 ns/op         0 B/op          0 allocs/op
+BenchmarkHyperCache_Get_ProactiveEviction-16        39486261           116.2 ns/op         0 B/op          0 allocs/op
+BenchmarkHyperCache_List-16                         11299632           412.0 ns/op        85 B/op          1 allocs/op
+BenchmarkHyperCache_Set-16                           2765406          1556 ns/op         248 B/op          4 allocs/op
+BenchmarkHyperCache_Set_Proactive_Eviction-16        2947629          1700 ns/op         162 B/op          3 allocs/op
 PASS
 ok      github.com/hyp3rd/hypercache/tests/benchmark    30.031s
 ```

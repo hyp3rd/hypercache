@@ -1,7 +1,8 @@
 package backend
 
 import (
-	"github.com/hyp3rd/hypercache/errors"
+	"context"
+
 	"github.com/hyp3rd/hypercache/models"
 )
 
@@ -25,7 +26,7 @@ type IRedisBackend[T IBackendConstrain] interface {
 	// IBackend[T] is the interface that must be implemented by cache backends.
 	IBackend[T]
 	// List the items in the cache that meet the specified criteria.
-	List(options ...FilterOption[Redis]) ([]*models.Item, error)
+	List(ctx context.Context, options ...FilterOption[Redis]) ([]*models.Item, error)
 	// Clear removes all items from the cache.
 	Clear() error
 }
@@ -45,25 +46,4 @@ type IBackend[T IBackendConstrain] interface {
 	Count() int
 	// Remove deletes the item with the given key from the cache.
 	Remove(keys ...string) error
-}
-
-// NewBackend creates a new cache backend.
-// Deprecated: Use specific backend constructors instead, e.g. NewInMemory or NewRedisBackend.
-func NewBackend[T IBackendConstrain](backendType string, opts ...any) (IBackend[T], error) {
-	switch backendType {
-	case "memory":
-		Options := make([]Option[InMemory], len(opts))
-		for i, option := range opts {
-			Options[i] = option.(Option[InMemory])
-		}
-		return NewInMemory(Options...)
-	case "redis":
-		Options := make([]Option[Redis], len(opts))
-		for i, option := range opts {
-			Options[i] = option.(Option[Redis])
-		}
-		return NewRedisBackend(Options...)
-	default:
-		return nil, errors.ErrInvalidBackendType
-	}
 }

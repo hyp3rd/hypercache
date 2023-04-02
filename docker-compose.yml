@@ -21,7 +21,7 @@ services:
       REDIS_DISABLE_COMMANDS: FLUSHDB,FLUSHALL,CONFIG
       REDIS_PASSWORD: k7oMs2G5bc4mRN45jPZjLBZxuMFrCLahvPn648Zwq1lT41gSYZqapBRnSF2L995FaYcZBz8c7xkKXku94HeReDgdwBu1N4CzgfQ94Z504hjfzrST1u0idVkbXe8ust
     hostname: redis-store
-    image: bitnami/redis:7.0.7
+    image: bitnami/redis:7.0.10
     # networks:
     #   hypercache-redis-store-net: null
     #######################################

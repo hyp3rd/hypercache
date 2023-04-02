@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -23,6 +24,7 @@ func main() {
 	}
 
 	conf := &hypercache.Config[backend.Redis]{
+		BackendType: "redis",
 		RedisOptions: []backend.Option[backend.Redis]{
 			backend.WithRedisClient(redisStore.Client),
 			backend.WithCapacity[backend.Redis](20),
@@ -38,6 +40,7 @@ func main() {
 		panic(err)
 	}
 
+	fmt.Println("setting 50 items to the cache")
 	for i := 0; i < 50; i++ {
 		err = hyperCache.Set(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i), time.Hour)
 		if err != nil {
@@ -48,7 +51,8 @@ func main() {
 	fmt.Println("count", hyperCache.Count())
 	fmt.Println("capacity", hyperCache.Capacity())
 
-	allItems, err := hyperCache.List(
+	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
+	allItems, err := hyperCache.List(context.TODO(),
 		backend.WithSortBy[backend.Redis](types.SortByKey),
 		backend.WithSortOrderAsc[backend.Redis](true),
 		backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
@@ -61,6 +65,7 @@ func main() {
 		fmt.Println(err)
 	}
 
+	fmt.Println("printing all items")
 	// Print the list of items
 	for _, item := range allItems {
 		fmt.Println(item.Key, item.Value)
@@ -69,9 +74,11 @@ func main() {
 	fmt.Println("count", hyperCache.Count())
 	fmt.Println("capacity", hyperCache.Capacity())
 
+	fmt.Println("sleep for 5 seconds to trigger eviction")
 	time.Sleep(time.Second * 5)
 
-	allItems, err = hyperCache.List(
+	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
+	allItems, err = hyperCache.List(context.TODO(),
 		backend.WithSortBy[backend.Redis](types.SortByKey),
 		backend.WithSortOrderAsc[backend.Redis](true),
 		backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
@@ -83,6 +90,7 @@ func main() {
 		fmt.Println(err)
 	}
 
+	fmt.Println("printing all items")
 	// Print the list of items
 	for _, item := range allItems {
 		fmt.Println(item.Key, item.Value)

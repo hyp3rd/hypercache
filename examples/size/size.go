@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	config := hypercache.NewConfig[backend.InMemory]()
+	config := hypercache.NewConfig[backend.InMemory]("in-memory")
 
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](0),

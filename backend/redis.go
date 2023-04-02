@@ -14,16 +14,15 @@ import (
 
 // Redis is a cache backend that stores the items in a redis implementation.
 type Redis struct {
-	rdb         *redis.Client // redis client to interact with the redis server
-	capacity    int           // capacity of the cache, limits the number of items that can be stored in the cache
-	keysSetName string        // keysSetName is the name of the set that holds the keys of the items in the cache
-	// mutex       sync.RWMutex           // mutex to protect the cache from concurrent access
+	rdb         *redis.Client          // redis client to interact with the redis server
+	capacity    int                    // capacity of the cache, limits the number of items that can be stored in the cache
+	keysSetName string                 // keysSetName is the name of the set that holds the keys of the items in the cache
 	Serializer  serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
 	SortFilters                        // SortFilters holds the filters applied when listing the items in the cache
 }
 
-// NewRedisBackend creates a new redis cache with the given options.
-func NewRedisBackend[T Redis](redisOptions ...Option[Redis]) (backend IRedisBackend[T], err error) {
+// NewRedis creates a new redis cache with the given options.
+func NewRedis(redisOptions ...Option[Redis]) (backend IRedisBackend[Redis], err error) {
 	rb := &Redis{}
 	// Apply the backend options
 	ApplyOptions(rb, redisOptions...)
@@ -146,21 +145,21 @@ func (cacheBackend *Redis) Set(item *models.Item) error {
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-func (cacheBackend *Redis) List(options ...FilterOption[Redis]) ([]*models.Item, error) {
+func (cacheBackend *Redis) List(ctx context.Context, options ...FilterOption[Redis]) ([]*models.Item, error) {
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
 
 	// Get the set of keys held in the cacheBackend with the given `keysSetName`
-	keys, err := cacheBackend.rdb.SMembers(context.Background(), cacheBackend.keysSetName).Result()
+	keys, err := cacheBackend.rdb.SMembers(ctx, cacheBackend.keysSetName).Result()
 	if err != nil {
 		return nil, err
 	}
 
 	// Execute the Redis commands in a pipeline transaction to improve performance and reduce the number of round trips
-	cmds, err := cacheBackend.rdb.Pipelined(context.Background(), func(pipe redis.Pipeliner) error {
+	cmds, err := cacheBackend.rdb.Pipelined(ctx, func(pipe redis.Pipeliner) error {
 		// Get the items from the cacheBackend
 		for _, key := range keys {
-			pipe.HGet(context.Background(), key, "data")
+			pipe.HGetAll(ctx, key)
 		}
 		return nil
 	})
@@ -173,11 +172,11 @@ func (cacheBackend *Redis) List(options ...FilterOption[Redis]) ([]*models.Item,
 
 	// Deserialize the items and add them to the slice of items to return
 	for _, cmd := range cmds {
-		data, _ := cmd.(*redis.StringCmd).Bytes() // Ignore the error because it is already checked in the pipeline transaction
+		data, _ := cmd.(*redis.MapStringStringCmd).Result() // Change the type assertion to match HGetAll
 		item := models.ItemPool.Get().(*models.Item)
 		// Return the item to the pool
 		defer models.ItemPool.Put(item)
-		err := cacheBackend.Serializer.Unmarshal(data, item)
+		err := cacheBackend.Serializer.Unmarshal([]byte(data["data"]), item)
 		if err == nil {
 			if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
 				continue

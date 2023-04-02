@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"time"
 
 	"github.com/hyp3rd/hypercache"
@@ -71,13 +72,13 @@ func (mw StatsCollectorMiddleware) GetMultiple(keys ...string) (result map[strin
 }
 
 // List collects stats for the List method.
-func (mw StatsCollectorMiddleware) List(filters ...any) ([]*models.Item, error) {
+func (mw StatsCollectorMiddleware) List(ctx context.Context, filters ...any) ([]*models.Item, error) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_list_duration", time.Since(start).Nanoseconds())
 		mw.statsCollector.Incr("hypercache_list_count", 1)
 	}()
-	return mw.next.List(filters...)
+	return mw.next.List(ctx, filters...)
 }
 
 // Remove collects stats for the Remove method.

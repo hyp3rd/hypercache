@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 
 func main() {
 	// Create a new HyperCache with a capacity of 100
-	config := hypercache.NewConfig[backend.InMemory]()
+	config := hypercache.NewConfig[backend.InMemory]("in-memory")
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](3 * time.Second),
 		hypercache.WithEvictionAlgorithm[backend.InMemory]("lru"),
@@ -50,7 +51,7 @@ func main() {
 	time.Sleep(time.Second * 7)
 
 	// Retrieve the list of items from the cache
-	list, err := hyperCache.List(
+	list, err := hyperCache.List(context.TODO(),
 		backend.WithSortBy[backend.InMemory](types.SortByKey),
 		backend.WithSortOrderAsc[backend.InMemory](true),
 		backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
