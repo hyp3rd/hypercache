@@ -34,32 +34,32 @@ func (rbc RedisBackendConstructor) Create(config interface{}) (interface{}, erro
 	return backend.NewRedis(redisConfig.RedisOptions...)
 }
 
-// HyperCacheManager is a factory for creating HyperCache backend instances
-type HyperCacheManager struct {
+// BackendManager is a factory for creating HyperCache backend instances
+type BackendManager struct {
 	backendRegistry map[string]IBackendConstructor
 }
 
-// NewHyperCacheManager creates a new HyperCacheManager
-func NewHyperCacheManager() *HyperCacheManager {
-	return &HyperCacheManager{
+// NewBackendManager creates a new BackendManager
+func NewBackendManager() *BackendManager {
+	return &BackendManager{
 		backendRegistry: make(map[string]IBackendConstructor),
 	}
 }
 
 // RegisterBackend registers a new backend constructor
-func (hcm *HyperCacheManager) RegisterBackend(name string, constructor IBackendConstructor) {
+func (hcm *BackendManager) RegisterBackend(name string, constructor IBackendConstructor) {
 	hcm.backendRegistry[name] = constructor
 }
 
-var defaultManager *HyperCacheManager
+var defaultManager *BackendManager
 
-// GetDefaultManager returns the default HyperCacheManager
-func GetDefaultManager() *HyperCacheManager {
+// GetDefaultManager returns the default BackendManager
+func GetDefaultManager() *BackendManager {
 	return defaultManager
 }
 
 func init() {
-	defaultManager = NewHyperCacheManager()
+	defaultManager = NewBackendManager()
 	defaultManager.RegisterBackend("in-memory", InMemoryBackendConstructor{})
 	defaultManager.RegisterBackend("redis", RedisBackendConstructor{})
 }

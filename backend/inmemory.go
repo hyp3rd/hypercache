@@ -78,7 +78,7 @@ func (cacheBackend *InMemory) Set(item *models.Item) error {
 	return nil
 }
 
-// List returns a list of all items in the cache filtered and ordered by the given options
+// ListV1 returns a list of all items in the cache filtered and ordered by the given options
 func (cacheBackend *InMemory) ListV1(options ...FilterOption[InMemory]) ([]*models.Item, error) {
 	// Apply the filter options
 	ApplyFilterOptions(cacheBackend, options...)
