@@ -15,7 +15,7 @@ func BenchmarkHyperCache_List(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Store a value in the cache with a key and expiration duration
-		cache.Set("key", "value", time.Hour)
+		cache.Set(context.TODO(), "key", "value", time.Hour)
 	}
 
 	list, _ := cache.List(context.TODO())

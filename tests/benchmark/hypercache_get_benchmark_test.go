@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ func BenchmarkHyperCache_Get(b *testing.B) {
 	cache, _ := hypercache.NewInMemoryWithDefaults(1000)
 
 	// Store a value in the cache with a key and expiration duration
-	cache.Set("key", "value", time.Hour)
+	cache.Set(context.TODO(), "key", "value", time.Hour)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -38,7 +39,7 @@ func BenchmarkHyperCache_Get_ProactiveEviction(b *testing.B) {
 	cache, _ := hypercache.New(hypercache.GetDefaultManager(), config)
 
 	// Store a value in the cache with a key and expiration duration
-	cache.Set("key", "value", time.Hour)
+	cache.Set(context.TODO(), "key", "value", time.Hour)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
