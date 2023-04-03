@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/hyp3rd/hypercache"
@@ -18,7 +19,7 @@ func main() {
 
 	fmt.Println("adding 100000 items to cache")
 	for i := 0; i < 100000; i++ {
-		cache.Set(fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i), 0)
+		cache.Set(context.TODO(), fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i), 0)
 	}
 
 	item, ok := cache.Get("key100")
@@ -30,7 +31,7 @@ func main() {
 	fmt.Println("count", cache.Count())
 	fmt.Println("allocation", cache.Allocation())
 	fmt.Println("clearing cache")
-	cache.Clear()
+	cache.Clear(context.TODO())
 	fmt.Println("capacity", cache.Capacity())
 	fmt.Println("count", cache.Count())
 	fmt.Println("allocation", cache.Allocation())

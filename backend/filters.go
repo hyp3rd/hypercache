@@ -3,19 +3,21 @@ package backend
 import (
 	"sort"
 
-	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
 
+// IFilter is a backend agnostic interface for a filter that can be applied to a list of items.
 type IFilter interface {
-	ApplyFilter(backendType string, items []*models.Item) []*models.Item
+	ApplyFilter(backendType string, items []*types.Item) []*types.Item
 }
 
+// sortByFilter is a filter that sorts the items by a given field.
 type sortByFilter struct {
 	field string
 }
 
-func (f sortByFilter) ApplyFilter(backendType string, items []*models.Item) []*models.Item {
+// ApplyFilter applies the sort filter to the given list of items.
+func (f sortByFilter) ApplyFilter(backendType string, items []*types.Item) []*types.Item {
 	var sorter sort.Interface
 	switch f.field {
 	case types.SortByKey.String():
@@ -33,11 +35,13 @@ func (f sortByFilter) ApplyFilter(backendType string, items []*models.Item) []*m
 	return items
 }
 
-type sortOrderFilter struct {
+// SortOrderFilter is a filter that sorts the items by a given field.
+type SortOrderFilter struct {
 	ascending bool
 }
 
-func (f sortOrderFilter) ApplyFilter(backendType string, items []*models.Item) []*models.Item {
+// ApplyFilter applies the sort order filter to the given list of items.
+func (f SortOrderFilter) ApplyFilter(backendType string, items []*types.Item) []*types.Item {
 	if !f.ascending {
 		sort.Slice(items, func(i, j int) bool {
 			return items[j].Key > items[i].Key
@@ -50,12 +54,14 @@ func (f sortOrderFilter) ApplyFilter(backendType string, items []*models.Item) [
 	return items
 }
 
-type filterFuncFilter struct {
-	fn func(item *models.Item) bool
+// filterFunc is a filter that filters the items by a given field's value.
+type filterFunc struct {
+	fn func(item *types.Item) bool
 }
 
-func (f filterFuncFilter) ApplyFilter(backendType string, items []*models.Item) []*models.Item {
-	filteredItems := make([]*models.Item, 0)
+// ApplyFilter applies the filter function to the given list of items.
+func (f filterFunc) ApplyFilter(backendType string, items []*types.Item) []*types.Item {
+	filteredItems := make([]*types.Item, 0)
 	for _, item := range items {
 		if f.fn(item) {
 			filteredItems = append(filteredItems, item)
@@ -64,14 +70,17 @@ func (f filterFuncFilter) ApplyFilter(backendType string, items []*models.Item) 
 	return filteredItems
 }
 
+// WithSortBy returns a filter that sorts the items by a given field.
 func WithSortBy(field string) IFilter {
 	return sortByFilter{field: field}
 }
 
-func WithSortOrderAsc(ascending bool) sortOrderFilter {
-	return sortOrderFilter{ascending: ascending}
+// WithSortOrderAsc returns a filter that determins whether to sort ascending or not.
+func WithSortOrderAsc(ascending bool) SortOrderFilter {
+	return SortOrderFilter{ascending: ascending}
 }
 
-func WithFilterFunc(fn func(item *models.Item) bool) IFilter {
-	return filterFuncFilter{fn: fn}
+// WithFilterFunc returns a filter that filters the items by a given field's value.
+func WithFilterFunc(fn func(item *types.Item) bool) IFilter {
+	return filterFunc{fn: fn}
 }

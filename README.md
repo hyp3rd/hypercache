@@ -4,9 +4,9 @@
 
 ## Synopsis
 
-HyperCache is a **thread-safe** **high-performance** cache implementation in `Go` that supports multiple backends with an optional size limit, expiration, and eviction of items supporting custom algorithms alongside the defaults. It can be used as a standalone cache or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept and decorate the cache methods with middleware (default or custom).
-It is optimized for performance and flexibility, allowing to specify the expiration and eviction intervals, and providing and registering new eviction algorithms, stats collectors, and middleware(s).
-It ships with a default [historigram stats collector](./stats/statscollector.go) and several eviction algorithms, but you can develop and register your own as long as it implements the [Eviction Algorithm interface](./eviction/eviction.go).:
+HyperCache is a **thread-safe** **high-performance** cache implementation in `Go` that supports multiple backends with an optional size limit, expiration, and eviction of items with custom algorithms alongside the defaults. It can be used as a standalone cache, distributed environents, or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept and decorate the cache methods with middleware (default or custom).
+It is optimized for performance and flexibility, allowing to specify of the expiration and eviction intervals and providing and registering new eviction algorithms, stats collectors, and middleware(s).
+It ships with a default [historigram stats collector](./stats/stats.go) and several eviction algorithms. However, you can develop and register your own if it implements the [Eviction Algorithm interface](./eviction/eviction.go).:
 
 - [Recently Used (LRU) eviction algorithm](./eviction/lru.go)
 - [The Least Frequently Used (LFU) algorithm](./eviction/lfu.go)
@@ -18,7 +18,7 @@ It ships with a default [historigram stats collector](./stats/statscollector.go)
 
 - Thread-safe
 - High-performance
-- Supports multiple backends, default backends are:
+- Supports multiple, custom backends. Default backends are:
     1. [In-memory](./backend/inmemory.go)
     2. [Redis](./backend/redis.go)
 - Store items in the cache with a key and expiration duration
@@ -27,8 +27,8 @@ It ships with a default [historigram stats collector](./stats/statscollector.go)
 - Clear the cache of all items
 - Evitc items in the background based on the cache capacity and items access leveraging several custom eviction algorithms
 - Expire items in the background based on their duration
-- [Eviction Algorithm interface](./eviction.go) to implement custom eviction algorithms.
-- Stats collection with a default [stats collector](./stats/statscollector.go) or a custom one that implements the StatsCollector interface.
+- [Eviction Algorithm interface](./eviction/eviction.go) to implement custom eviction algorithms.
+- Stats collection with a default [stats collector](./stats/stats.go) or a custom one that implements the StatsCollector interface.
 - [Service interface implementation](./service.go) to allow intercepting cache methods and decorate them with custom or default middleware(s).
 
 ## Installation
@@ -87,7 +87,7 @@ if err != nil {
 }
 ```
 
-For a fine-grained control over the cache configuration, use the `New` function, for instance:
+For fine-grained control over the cache configuration, use the `New` function, for instance:
 
 ```golang
 config := hypercache.NewConfig[backend.InMemory]()
@@ -108,174 +108,12 @@ if err != nil {
 }
 ```
 
-**For the full configuration options, refer to the [config.go](./config.go) file.**
-
-### Set
-
-Set adds an item to the cache with the given key and value.
-
-```golang
-err := cache.Set("key", "value", time.Hour)
-if err != nil {
-    // handle error
-}
-```
-
-The `Set` function takes a key, a value, and a duration as arguments. The key must be a non-empty string, the value can be of any type, and the duration specifies how long the item should stay in the cache before it expires.
-
-### Get
-
-`Get` retrieves the item with the given key from the cache.
-
-```golang
-value, ok := cache.Get("key")
-if !ok {
-    // handle item not found
-}
-```
-
-The `Get` function returns the value associated with the given key or an error if the key is not found or has expired.
-
-### Remove
-
-`Remove` deletes items with the given key from the cache. If an item is not found, it does nothing.
-
-```golang
-err := cache.Remove("key", "key2", "key3")
-if err != nil {
-    // handle error
-}
-```
-
-The `Remove` function takes a variadic number of keys as arguments and returns an error if any keys are not found.
-
+**Refer to the [config.go](./config.go) file for the full configuration options.**
 **For a comprehensive API overview, see the [documentation](https://pkg.go.dev/github.com/hyp3rd/hypercache).**
-
-## Service interface for microservices implementation
-
-The `Service` interface allows intercepting cache methods and decorating them with custom or default middleware(s).
-
-```golang
-var svc hypercache.Service
-hyperCache, err := hypercache.NewInMemoryWithDefaults(10)
-
-if err != nil {
-    fmt.Println(err)
-    return
-}
-// assign statsCollector of the backend to use it in middleware
-statsCollector := hyperCache.StatsCollector
-svc = hyperCache
-
-if err != nil {
-    fmt.Println(err)
-    return
-}
-
-// Example of using zap logger from uber
-logger, _ := zap.NewProduction()
-
-sugar := logger.Sugar()
-defer sugar.Sync()
-defer logger.Sync()
-
-// apply middleware in the same order as you want to execute them
-svc = hypercache.ApplyMiddleware(svc,
-    // middleware.YourMiddleware,
-    func(next hypercache.Service) hypercache.Service {
-        return middleware.NewLoggingMiddleware(next, sugar)
-    },
-    func(next hypercache.Service) hypercache.Service {
-        return middleware.NewStatsCollectorMiddleware(next, statsCollector)
-    },
-)
-
-err = svc.Set("key string", "value any", 0)
-if err != nil {
-    fmt.Println(err)
-    return
-}
-key, ok := svc.Get("key string")
-if !ok {
-    fmt.Println("key not found")
-    return
-}
-fmt.Println(key)
-```
 
 ## Usage
 
-Here is an example of using the HyperCache package. See the [examples](./examples/README.md) directory for a more comprehensive overview.
-
-```golang
-package main
-
-import (
-    "fmt"
-    "log"
-    "time"
-
-    "github.com/hyp3rd/hypercache"
-)
-
-func main() {
-    // Create a new HyperCache with a capacity of 10
-    cache, err := hypercache.NewInMemoryWithDefaults(10)
-    if err != nil {
-        fmt.Println(err)
-        return
-    }
-    // Stop the cache when the program exits
-    defer cache.Stop()
-
-    log.Println("adding items to the cache")
-    // Add 10 items to the cache
-    for i := 0; i < 10; i++ {
-        key := fmt.Sprintf("key%d", i)
-        val := fmt.Sprintf("val%d", i)
-
-        err = cache.Set(key, val, time.Minute)
-
-        if err != nil {
-            fmt.Printf("unexpected error: %v\n", err)
-            return
-        }
-    }
-
-    log.Println("fetching items from the cache using the `GetMultiple` method, key11 does not exist")
-    // Retrieve the specific of items from the cache
-    items, errs := cache.GetMultiple("key1", "key7", "key9", "key11")
-
-    // Print the errors if any
-    for k, e := range errs {
-        log.Printf("error fetching item %s: %s\n", k, e)
-    }
-
-    // Print the items
-    for k, v := range items {
-        fmt.Println(k, v)
-    }
-
-    log.Println("fetching items from the cache using the `GetOrSet` method")
-    // Retrieve a specific of item from the cache
-    // If the item is not found, set it and return the value
-    val, err := cache.GetOrSet("key11", "val11", time.Minute)
-    if err != nil {
-        fmt.Println(err)
-        return
-    }
-    fmt.Println(val)
-
-    log.Println("fetching items from the cache using the simple `Get` method")
-    item, ok := cache.Get("key7")
-    if !ok {
-        fmt.Println("item not found")
-        return
-    }
-    fmt.Println(item)
-}
-
-```
+Examples can be too broad for a readme, refer to the [examples](./examples/README.md) directory for a more comprehensive overview.
 
 ## License
 

@@ -49,7 +49,7 @@ func executeExample(evictionInterval time.Duration) {
 		key := fmt.Sprintf("key%d", i)
 		val := fmt.Sprintf("val%d", i)
 
-		err = cache.Set(key, val, time.Minute)
+		err = cache.Set(context.TODO(), key, val, time.Minute)
 
 		if err != nil {
 			fmt.Printf("unexpected error: %v\n", err)

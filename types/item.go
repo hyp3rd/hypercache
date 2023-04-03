@@ -1,4 +1,4 @@
-package models
+package types
 
 // Item represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 

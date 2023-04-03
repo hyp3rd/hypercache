@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -24,7 +25,7 @@ func main() {
 		key := fmt.Sprintf("key%d", i)
 		val := fmt.Sprintf("val%d", i)
 
-		err = cache.Set(key, val, time.Minute)
+		err = cache.Set(context.TODO(), key, val, time.Minute)
 
 		if err != nil {
 			fmt.Printf("unexpected error: %v\n", err)
@@ -34,7 +35,7 @@ func main() {
 
 	log.Println("fetching items from the cache using the `GetMultiple` method, key11 does not exist")
 	// Retrieve the specific of items from the cache
-	items, errs := cache.GetMultiple("key1", "key7", "key9", "key11")
+	items, errs := cache.GetMultiple(context.TODO(), "key1", "key7", "key9", "key11")
 
 	// Print the errors if any
 	for k, e := range errs {
@@ -49,7 +50,7 @@ func main() {
 	log.Println("fetching items from the cache using the `GetOrSet` method")
 	// Retrieve a specific of item from the cache
 	// If the item is not found, set it and return the value
-	val, err := cache.GetOrSet("key11", "val11", time.Minute)
+	val, err := cache.GetOrSet(context.TODO(), "key11", "val11", time.Minute)
 	if err != nil {
 		fmt.Println(err)
 		return
