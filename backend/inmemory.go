@@ -1,14 +1,12 @@
 package backend
 
 import (
-	"fmt"
-	"sort"
+	"context"
 	"sync"
 
 	datastructure "github.com/hyp3rd/hypercache/datastructure/v4"
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/models"
-	"github.com/hyp3rd/hypercache/types"
 )
 
 // InMemory is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
@@ -21,7 +19,7 @@ type InMemory struct {
 }
 
 // NewInMemory creates a new in-memory cache with the given options.
-func NewInMemory(opts ...Option[InMemory]) (backend IInMemory[InMemory], err error) {
+func NewInMemory(opts ...Option[InMemory]) (backend IBackend[InMemory], err error) {
 	InMemory := &InMemory{
 		items: datastructure.New(),
 	}
@@ -79,11 +77,57 @@ func (cacheBackend *InMemory) Set(item *models.Item) error {
 }
 
 // ListV1 returns a list of all items in the cache filtered and ordered by the given options
-func (cacheBackend *InMemory) ListV1(options ...FilterOption[InMemory]) ([]*models.Item, error) {
-	// Apply the filter options
-	ApplyFilterOptions(cacheBackend, options...)
+// func (cacheBackend *InMemory) ListV1(options ...FilterOption[InMemory]) ([]*models.Item, error) {
+// 	// Apply the filter options
+// 	ApplyFilterOptions(cacheBackend, options...)
 
-	items := make([]*models.Item, 0, cacheBackend.items.Count())
+// 	items := make([]*models.Item, 0, cacheBackend.items.Count())
+// 	wg := sync.WaitGroup{}
+// 	wg.Add(cacheBackend.items.Count())
+// 	for item := range cacheBackend.items.IterBuffered() {
+// 		go func(item datastructure.Tuple) {
+// 			defer wg.Done()
+// 			if cacheBackend.FilterFunc == nil || cacheBackend.FilterFunc(&item.Val) {
+// 				items = append(items, &item.Val)
+// 			}
+// 		}(item)
+// 	}
+// 	wg.Wait()
+
+// 	if cacheBackend.SortBy == "" {
+// 		return items, nil
+// 	}
+
+// 	var sorter sort.Interface
+// 	switch cacheBackend.SortBy {
+// 	case types.SortByKey.String():
+// 		sorter = &itemSorterByKey{items: items}
+// 	case types.SortByLastAccess.String():
+// 		sorter = &itemSorterByLastAccess{items: items}
+// 	case types.SortByAccessCount.String():
+// 		sorter = &itemSorterByAccessCount{items: items}
+// 	case types.SortByExpiration.String():
+// 		sorter = &itemSorterByExpiration{items: items}
+// 	default:
+// 		return nil, fmt.Errorf("unknown sortBy field: %s", cacheBackend.SortBy)
+// 	}
+
+// 	if !cacheBackend.SortAscending {
+// 		sorter = sort.Reverse(sorter)
+// 	}
+
+// 	sort.Sort(sorter)
+// 	return items, nil
+// }
+
+// List returns a list of all items in the cache filtered and ordered by the given options
+// func (cacheBackend *InMemory) List(ctx context.Context, options ...FilterOption[InMemory]) ([]*models.Item, error) {
+func (cacheBackend *InMemory) List(ctx context.Context, filters ...IFilter) ([]*models.Item, error) {
+	// Apply the filters
+	cacheBackend.mutex.RLock()
+	defer cacheBackend.mutex.RUnlock()
+
+	items := make([]*models.Item, 0, cacheBackend.Count())
 	wg := sync.WaitGroup{}
 	wg.Add(cacheBackend.items.Count())
 	for item := range cacheBackend.items.IterBuffered() {
@@ -96,78 +140,10 @@ func (cacheBackend *InMemory) ListV1(options ...FilterOption[InMemory]) ([]*mode
 	}
 	wg.Wait()
 
-	if cacheBackend.SortBy == "" {
-		return items, nil
+	for _, filter := range filters {
+		items = filter.ApplyFilter("in-memory", items)
 	}
 
-	var sorter sort.Interface
-	switch cacheBackend.SortBy {
-	case types.SortByKey.String():
-		sorter = &itemSorterByKey{items: items}
-	case types.SortByLastAccess.String():
-		sorter = &itemSorterByLastAccess{items: items}
-	case types.SortByAccessCount.String():
-		sorter = &itemSorterByAccessCount{items: items}
-	case types.SortByExpiration.String():
-		sorter = &itemSorterByExpiration{items: items}
-	default:
-		return nil, fmt.Errorf("unknown sortBy field: %s", cacheBackend.SortBy)
-	}
-
-	if !cacheBackend.SortAscending {
-		sorter = sort.Reverse(sorter)
-	}
-
-	sort.Sort(sorter)
-	return items, nil
-}
-
-// List returns a list of all items in the cache filtered and ordered by the given options
-func (cacheBackend *InMemory) List(options ...FilterOption[InMemory]) ([]*models.Item, error) {
-	// Apply the filter options
-	ApplyFilterOptions(cacheBackend, options...)
-
-	wg := sync.WaitGroup{}
-
-	cacheBackend.mutex.RLock()
-	defer cacheBackend.mutex.RUnlock()
-	itemsCount := cacheBackend.items.Count()
-	items := make([]*models.Item, 0, itemsCount)
-
-	wg.Add(itemsCount)
-	for item := range cacheBackend.items.IterBuffered() {
-		go func(item datastructure.Tuple) {
-			defer wg.Done()
-			if cacheBackend.FilterFunc == nil || cacheBackend.FilterFunc(&item.Val) {
-				items = append(items, &item.Val)
-			}
-		}(item)
-	}
-	wg.Wait()
-
-	if cacheBackend.SortBy == "" {
-		return items, nil
-	}
-
-	var sorter sort.Interface
-	switch cacheBackend.SortBy {
-	case types.SortByKey.String():
-		sorter = &itemSorterByKey{items: items}
-	case types.SortByLastAccess.String():
-		sorter = &itemSorterByLastAccess{items: items}
-	case types.SortByAccessCount.String():
-		sorter = &itemSorterByAccessCount{items: items}
-	case types.SortByExpiration.String():
-		sorter = &itemSorterByExpiration{items: items}
-	default:
-		return nil, fmt.Errorf("unknown sortBy field: %s", cacheBackend.SortBy)
-	}
-
-	if !cacheBackend.SortAscending {
-		sorter = sort.Reverse(sorter)
-	}
-
-	sort.Sort(sorter)
 	return items, nil
 }
 
@@ -184,7 +160,9 @@ func (cacheBackend *InMemory) Remove(keys ...string) (err error) {
 }
 
 // Clear removes all items from the cacheBackend.
-func (cacheBackend *InMemory) Clear() {
+func (cacheBackend *InMemory) Clear() error {
 	// clear the cacheBackend
 	cacheBackend.items.Clear()
+
+	return nil
 }

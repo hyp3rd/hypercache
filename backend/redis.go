@@ -2,13 +2,10 @@ package backend
 
 import (
 	"context"
-	"fmt"
-	"sort"
 
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/libs/serializer"
 	"github.com/hyp3rd/hypercache/models"
-	"github.com/hyp3rd/hypercache/types"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,7 +19,7 @@ type Redis struct {
 }
 
 // NewRedis creates a new redis cache with the given options.
-func NewRedis(redisOptions ...Option[Redis]) (backend IRedisBackend[Redis], err error) {
+func NewRedis(redisOptions ...Option[Redis]) (backend IBackend[Redis], err error) {
 	rb := &Redis{}
 	// Apply the backend options
 	ApplyOptions(rb, redisOptions...)
@@ -145,9 +142,13 @@ func (cacheBackend *Redis) Set(item *models.Item) error {
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-func (cacheBackend *Redis) List(ctx context.Context, options ...FilterOption[Redis]) ([]*models.Item, error) {
-	// Apply the filter options
-	ApplyFilterOptions(cacheBackend, options...)
+// func (cacheBackend *Redis) List(ctx context.Context, options ...FilterOption[Redis]) ([]*models.Item, error) {
+func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*models.Item, error) {
+	// Apply the filters
+	// filterOptions := make([]FilterOption[Redis], len(filters))
+	// for i, option := range filters {
+	// 	filterOptions[i] = option.(FilterOption[Redis])
+	// }
 
 	// Get the set of keys held in the cacheBackend with the given `keysSetName`
 	keys, err := cacheBackend.rdb.SMembers(ctx, cacheBackend.keysSetName).Result()
@@ -185,35 +186,42 @@ func (cacheBackend *Redis) List(ctx context.Context, options ...FilterOption[Red
 		}
 	}
 
-	// Check if the items should be sorted
-	if cacheBackend.SortBy == "" {
-		// No sorting
-		return items, nil
+	// Apply the filters
+	for _, filter := range filters {
+		items = filter.ApplyFilter("redis", items)
 	}
-
-	// Sort the items
-	var sorter sort.Interface
-	switch cacheBackend.SortBy {
-	case types.SortByKey.String(): // Sort by key
-		sorter = &itemSorterByKey{items: items}
-	case types.SortByLastAccess.String(): // Sort by last access
-		sorter = &itemSorterByLastAccess{items: items}
-	case types.SortByAccessCount.String(): // Sort by access count
-		sorter = &itemSorterByAccessCount{items: items}
-	case types.SortByExpiration.String(): // Sort by expiration
-		sorter = &itemSorterByExpiration{items: items}
-	default:
-		return nil, fmt.Errorf("unknown sortBy field: %s", cacheBackend.SortBy)
-	}
-
-	// Reverse the sort order if needed
-	if !cacheBackend.SortAscending {
-		sorter = sort.Reverse(sorter)
-	}
-	// Sort the items by the given field
-	sort.Sort(sorter)
 
 	return items, nil
+
+	// Check if the items should be sorted
+	// if cacheBackend.SortBy == "" {
+	// 	// No sorting
+	// 	return items, nil
+	// }
+
+	// // Sort the items
+	// var sorter sort.Interface
+	// switch cacheBackend.SortBy {
+	// case types.SortByKey.String(): // Sort by key
+	// 	sorter = &itemSorterByKey{items: items}
+	// case types.SortByLastAccess.String(): // Sort by last access
+	// 	sorter = &itemSorterByLastAccess{items: items}
+	// case types.SortByAccessCount.String(): // Sort by access count
+	// 	sorter = &itemSorterByAccessCount{items: items}
+	// case types.SortByExpiration.String(): // Sort by expiration
+	// 	sorter = &itemSorterByExpiration{items: items}
+	// default:
+	// 	return nil, fmt.Errorf("unknown sortBy field: %s", cacheBackend.SortBy)
+	// }
+
+	// // Reverse the sort order if needed
+	// if !cacheBackend.SortAscending {
+	// 	sorter = sort.Reverse(sorter)
+	// }
+	// // Sort the items by the given field
+	// sort.Sort(sorter)
+
+	// return items, nil
 }
 
 // Remove removes an item from the cache with the given key

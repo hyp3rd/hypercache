@@ -51,22 +51,36 @@ func main() {
 	fmt.Println("capacity", hyperCache.Capacity())
 
 	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
-	allItems, err := hyperCache.List(context.TODO(),
-		backend.WithSortBy[backend.Redis](types.SortByKey),
-		backend.WithSortOrderAsc[backend.Redis](true),
-		backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
-			return item.Value != "value-16"
-		}),
-	)
 
-	// Check for errors
+	// Retrieve the list of items from the cache
+	allItems, err := hyperCache.List(context.TODO())
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
+
+	// Apply filters
+	// Define a filter function
+	itemsFilterFunc := func(item *models.Item) bool {
+		// return time.Since(item.LastAccess) > 1*time.Microsecond
+		return item.Value != "value-16"
+	}
+
+	sortByFilter := backend.WithSortBy(types.SortByKey.String())
+	// sortOrderFilter := backend.WithSortOrderAsc(true)
+
+	// Create a filterFuncFilter with the defined filter function
+	filter := backend.WithFilterFunc(itemsFilterFunc)
+
+	// Apply the filter to the items
+	filteredItems := filter.ApplyFilter("redis", allItems)
+
+	// Apply the sort filter to the filtered items
+	filteredItems = sortByFilter.ApplyFilter("redis", filteredItems)
 
 	fmt.Println("printing all items")
 	// Print the list of items
-	for _, item := range allItems {
+	for _, item := range filteredItems {
 		fmt.Println(item.Key, item.Value)
 	}
 
@@ -76,17 +90,11 @@ func main() {
 	fmt.Println("sleep for 5 seconds to trigger eviction")
 	time.Sleep(time.Second * 5)
 
-	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
-	allItems, err = hyperCache.List(context.TODO(),
-		backend.WithSortBy[backend.Redis](types.SortByKey),
-		backend.WithSortOrderAsc[backend.Redis](true),
-		backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
-			return item.Value != "value-16"
-		}),
-	)
-	// Check for errors
+	fmt.Println("fetching all items again")
+	allItems, err = hyperCache.List(context.TODO())
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
 
 	fmt.Println("printing all items")

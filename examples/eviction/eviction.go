@@ -60,22 +60,33 @@ func executeExample(evictionInterval time.Duration) {
 	log.Println("capacity after adding 15 items", cache.Capacity())
 
 	log.Println("listing all items in the cache")
-	list, err := cache.List(context.TODO(), backend.WithSortBy[backend.InMemory](types.SortByKey))
+	items, err := cache.List(context.TODO())
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	// Print the list of items
-	for i, ci := range list {
-		fmt.Println(i, ci.Value)
+	// Apply filters
+	sortByFilter := backend.WithSortBy(types.SortByKey.String())
+	sortOrderFilter := backend.WithSortOrderAsc(true)
+
+	filteredItems := sortByFilter.ApplyFilter("in-memory", items)
+	sortedItems := sortOrderFilter.ApplyFilter("in-memory", filteredItems)
+
+	for _, item := range sortedItems {
+		fmt.Println(item.Key, item.Value)
+	}
+
+	if err != nil {
+		fmt.Println(err)
+		return
 	}
 
 	if evictionInterval > 0 {
 		fmt.Println("sleeping to allow the evition loop to complete", evictionInterval+2*time.Second)
 		time.Sleep(evictionInterval + 2*time.Second)
 		log.Println("listing all items in the cache the eviction is triggered")
-		list, err = cache.List(context.TODO(), backend.WithSortBy[backend.InMemory](types.SortByKey))
+		list, err := cache.List(context.TODO())
 		if err != nil {
 			fmt.Println(err)
 			return
