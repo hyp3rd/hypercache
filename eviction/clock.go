@@ -10,12 +10,12 @@ import (
 	"sync"
 
 	"github.com/hyp3rd/hypercache/errors"
-	"github.com/hyp3rd/hypercache/models"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 // ClockAlgorithm is an in-memory cache with the Clock algorithm.
 type ClockAlgorithm struct {
-	items      []*models.Item
+	items      []*types.Item
 	keys       map[string]int
 	mutex      sync.RWMutex
 	evictMutex sync.Mutex
@@ -30,7 +30,7 @@ func NewClockAlgorithm(capacity int) (*ClockAlgorithm, error) {
 	}
 
 	return &ClockAlgorithm{
-		items:    make([]*models.Item, capacity),
+		items:    make([]*types.Item, capacity),
 		keys:     make(map[string]int, capacity),
 		capacity: capacity,
 		hand:     0,
@@ -52,7 +52,7 @@ func (c *ClockAlgorithm) Evict() (string, bool) {
 			item.AccessCount--
 		} else {
 			delete(c.keys, item.Key)
-			models.ItemPool.Put(item)
+			types.ItemPool.Put(item)
 			c.items[c.hand] = nil
 			return item.Key, true
 		}
@@ -71,7 +71,7 @@ func (c *ClockAlgorithm) Set(key string, value any) {
 		c.Delete(evictedKey)
 	}
 
-	item := models.ItemPool.Get().(*models.Item)
+	item := types.ItemPool.Get().(*types.Item)
 	item.Key = key
 	item.Value = value
 	item.AccessCount = 1
@@ -107,5 +107,5 @@ func (c *ClockAlgorithm) Delete(key string) {
 	item := c.items[index]
 	delete(c.keys, key)
 	c.items[index] = nil
-	models.ItemPool.Put(item)
+	types.ItemPool.Put(item)
 }

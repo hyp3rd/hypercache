@@ -6,8 +6,8 @@ import (
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
-	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/stats"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 // StatsCollectorMiddleware is a middleware that collects stats. It can and should re-use the same stats collector as the hypercache.
@@ -53,7 +53,7 @@ func (mw StatsCollectorMiddleware) GetOrSet(key string, value any, expiration ti
 }
 
 // GetWithInfo collects stats for the GetWithInfo method.
-func (mw StatsCollectorMiddleware) GetWithInfo(key string) (*models.Item, bool) {
+func (mw StatsCollectorMiddleware) GetWithInfo(key string) (*types.Item, bool) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_get_with_info_duration", time.Since(start).Nanoseconds())
@@ -73,7 +73,7 @@ func (mw StatsCollectorMiddleware) GetMultiple(keys ...string) (result map[strin
 }
 
 // List collects stats for the List method.
-func (mw StatsCollectorMiddleware) List(ctx context.Context, filters ...backend.IFilter) ([]*models.Item, error) {
+func (mw StatsCollectorMiddleware) List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_list_duration", time.Since(start).Nanoseconds())

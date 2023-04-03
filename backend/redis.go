@@ -5,7 +5,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/libs/serializer"
-	"github.com/hyp3rd/hypercache/models"
+	"github.com/hyp3rd/hypercache/types"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -70,7 +70,7 @@ func (cacheBackend *Redis) Count() int {
 }
 
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
-func (cacheBackend *Redis) Get(key string) (item *models.Item, ok bool) {
+func (cacheBackend *Redis) Get(key string) (item *types.Item, ok bool) {
 	// Check if the key is in the set of keys
 	isMember, err := cacheBackend.rdb.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
 	if err != nil {
@@ -81,9 +81,9 @@ func (cacheBackend *Redis) Get(key string) (item *models.Item, ok bool) {
 	}
 
 	// Get the item from the cacheBackend
-	item = models.ItemPool.Get().(*models.Item)
+	item = types.ItemPool.Get().(*types.Item)
 	// Return the item to the pool
-	defer models.ItemPool.Put(item)
+	defer types.ItemPool.Put(item)
 
 	data, err := cacheBackend.rdb.HGet(context.Background(), key, "data").Bytes()
 	if err != nil {
@@ -102,7 +102,7 @@ func (cacheBackend *Redis) Get(key string) (item *models.Item, ok bool) {
 }
 
 // Set stores the Item in the cacheBackend.
-func (cacheBackend *Redis) Set(item *models.Item) error {
+func (cacheBackend *Redis) Set(item *types.Item) error {
 	pipe := cacheBackend.rdb.TxPipeline()
 
 	// Check if the item is valid
@@ -142,8 +142,8 @@ func (cacheBackend *Redis) Set(item *models.Item) error {
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-// func (cacheBackend *Redis) List(ctx context.Context, options ...FilterOption[Redis]) ([]*models.Item, error) {
-func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*models.Item, error) {
+// func (cacheBackend *Redis) List(ctx context.Context, options ...FilterOption[Redis]) ([]*types.Item, error) {
+func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*types.Item, error) {
 	// Apply the filters
 	// filterOptions := make([]FilterOption[Redis], len(filters))
 	// for i, option := range filters {
@@ -169,14 +169,14 @@ func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*mod
 	}
 
 	// Create a slice to hold the items
-	items := make([]*models.Item, 0, len(keys))
+	items := make([]*types.Item, 0, len(keys))
 
 	// Deserialize the items and add them to the slice of items to return
 	for _, cmd := range cmds {
 		data, _ := cmd.(*redis.MapStringStringCmd).Result() // Change the type assertion to match HGetAll
-		item := models.ItemPool.Get().(*models.Item)
+		item := types.ItemPool.Get().(*types.Item)
 		// Return the item to the pool
-		defer models.ItemPool.Put(item)
+		defer types.ItemPool.Put(item)
 		err := cacheBackend.Serializer.Unmarshal([]byte(data["data"]), item)
 		if err == nil {
 			if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {

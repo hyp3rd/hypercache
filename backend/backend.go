@@ -3,7 +3,7 @@ package backend
 import (
 	"context"
 
-	"github.com/hyp3rd/hypercache/models"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 // IBackendConstrain is the interface that defines the constrain type that must be implemented by cache backends.
@@ -16,7 +16,7 @@ import (
 // 	// IBackend[T] is the interface that must be implemented by cache backends.
 // 	IBackend[T]
 // 	// List the items in the cache that meet the specified criteria.
-// 	List(options ...FilterOption[InMemory]) ([]*models.Item, error)
+// 	List(options ...FilterOption[InMemory]) ([]*types.Item, error)
 // 	// Clear removes all items from the cache.
 // 	Clear()
 // }
@@ -26,7 +26,7 @@ import (
 // 	// IBackend[T] is the interface that must be implemented by cache backends.
 // 	IBackend[T]
 // 	// List the items in the cache that meet the specified criteria.
-// 	List(ctx context.Context, options ...FilterOption[Redis]) ([]*models.Item, error)
+// 	List(ctx context.Context, options ...FilterOption[Redis]) ([]*types.Item, error)
 // 	// Clear removes all items from the cache.
 // 	Clear() error
 // }
@@ -35,9 +35,9 @@ import (
 // type IBackend[T IBackendConstrain] interface {
 // 	// Get retrieves the item with the given key from the cache.
 // 	// If the key is not found in the cache, it returns nil.
-// 	Get(key string) (item *models.Item, ok bool)
+// 	Get(key string) (item *types.Item, ok bool)
 // 	// Set adds a new item to the cache.
-// 	Set(item *models.Item) error
+// 	Set(item *types.Item) error
 // 	// Capacity returns the maximum number of items that can be stored in the cache.
 // 	Capacity() int
 // 	// SetCapacity sets the maximum number of items that can be stored in the cache.
@@ -57,9 +57,9 @@ type IBackendConstrain interface {
 type IBackend[T IBackendConstrain] interface {
 	// Get retrieves the item with the given key from the cache.
 	// If the key is not found in the cache, it returns nil.
-	Get(key string) (item *models.Item, ok bool)
+	Get(key string) (item *types.Item, ok bool)
 	// Set adds a new item to the cache.
-	Set(item *models.Item) error
+	Set(item *types.Item) error
 	// Capacity returns the maximum number of items that can be stored in the cache.
 	Capacity() int
 	// SetCapacity sets the maximum number of items that can be stored in the cache.
@@ -69,8 +69,8 @@ type IBackend[T IBackendConstrain] interface {
 	// Remove deletes the item with the given key from the cache.
 	Remove(keys ...string) error
 	// List the items in the cache that meet the specified criteria.
-	// List(ctx context.Context, options ...FilterOption[T]) ([]*models.Item, error)
-	List(ctx context.Context, filters ...IFilter) ([]*models.Item, error)
+	// List(ctx context.Context, options ...FilterOption[T]) ([]*types.Item, error)
+	List(ctx context.Context, filters ...IFilter) ([]*types.Item, error)
 	// Clear removes all items from the cache.
 	Clear() error
 }

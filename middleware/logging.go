@@ -6,8 +6,8 @@ import (
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
-	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/stats"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 // Logger describes a logging interface allowing to implement different external, or custom logger.
@@ -60,7 +60,7 @@ func (mw LoggingMiddleware) GetOrSet(key string, value any, expiration time.Dura
 }
 
 // GetWithInfo logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) GetWithInfo(key string) (item *models.Item, ok bool) {
+func (mw LoggingMiddleware) GetWithInfo(key string) (item *types.Item, ok bool) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method GetWithInfo took: %s", time.Since(begin))
 	}(time.Now())
@@ -80,7 +80,7 @@ func (mw LoggingMiddleware) GetMultiple(keys ...string) (result map[string]any, 
 }
 
 // List logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) List(ctx context.Context, filters ...backend.IFilter) ([]*models.Item, error) {
+func (mw LoggingMiddleware) List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method List took: %s", time.Since(begin))
 	}(time.Now())

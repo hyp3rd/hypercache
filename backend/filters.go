@@ -3,19 +3,18 @@ package backend
 import (
 	"sort"
 
-	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
 
 type IFilter interface {
-	ApplyFilter(backendType string, items []*models.Item) []*models.Item
+	ApplyFilter(backendType string, items []*types.Item) []*types.Item
 }
 
 type sortByFilter struct {
 	field string
 }
 
-func (f sortByFilter) ApplyFilter(backendType string, items []*models.Item) []*models.Item {
+func (f sortByFilter) ApplyFilter(backendType string, items []*types.Item) []*types.Item {
 	var sorter sort.Interface
 	switch f.field {
 	case types.SortByKey.String():
@@ -37,7 +36,7 @@ type sortOrderFilter struct {
 	ascending bool
 }
 
-func (f sortOrderFilter) ApplyFilter(backendType string, items []*models.Item) []*models.Item {
+func (f sortOrderFilter) ApplyFilter(backendType string, items []*types.Item) []*types.Item {
 	if !f.ascending {
 		sort.Slice(items, func(i, j int) bool {
 			return items[j].Key > items[i].Key
@@ -51,11 +50,11 @@ func (f sortOrderFilter) ApplyFilter(backendType string, items []*models.Item) [
 }
 
 type filterFuncFilter struct {
-	fn func(item *models.Item) bool
+	fn func(item *types.Item) bool
 }
 
-func (f filterFuncFilter) ApplyFilter(backendType string, items []*models.Item) []*models.Item {
-	filteredItems := make([]*models.Item, 0)
+func (f filterFuncFilter) ApplyFilter(backendType string, items []*types.Item) []*types.Item {
+	filteredItems := make([]*types.Item, 0)
 	for _, item := range items {
 		if f.fn(item) {
 			filteredItems = append(filteredItems, item)
@@ -72,6 +71,6 @@ func WithSortOrderAsc(ascending bool) sortOrderFilter {
 	return sortOrderFilter{ascending: ascending}
 }
 
-func WithFilterFunc(fn func(item *models.Item) bool) IFilter {
+func WithFilterFunc(fn func(item *types.Item) bool) IFilter {
 	return filterFuncFilter{fn: fn}
 }

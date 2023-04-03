@@ -8,7 +8,6 @@ import (
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/backend/redis"
-	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/types"
 )
 
@@ -61,7 +60,7 @@ func main() {
 
 	// Apply filters
 	// Define a filter function
-	itemsFilterFunc := func(item *models.Item) bool {
+	itemsFilterFunc := func(item *types.Item) bool {
 		// return time.Since(item.LastAccess) > 1*time.Microsecond
 		return item.Value != "value-16"
 	}

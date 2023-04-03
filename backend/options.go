@@ -2,7 +2,7 @@ package backend
 
 import (
 	"github.com/hyp3rd/hypercache/libs/serializer"
-	"github.com/hyp3rd/hypercache/models"
+	"github.com/hyp3rd/hypercache/types"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -35,7 +35,7 @@ func (rb *Redis) setSortBy(sortBy string) {
 }
 
 // FilterFunc is a predicate that takes a `Item` as an argument and returns a boolean indicating whether the item should be included in the cache.
-type FilterFunc func(item *models.Item) bool // filters applied when listing the items in the cache
+type FilterFunc func(item *types.Item) bool // filters applied when listing the items in the cache
 
 // IFilterableBackend is an interface that defines the methods that a backend should implement to be filterable.
 type IFilterableBackend interface {
@@ -143,7 +143,7 @@ func WithSerializer[T Redis](serializer serializer.ISerializer) Option[Redis] {
 
 // // WithFilterFunc is an option that sets the filter function to use.
 // // The filter function is a predicate that takes a `Item` as an argument and returns a boolean indicating whether the item should be included in the cache.
-// func WithFilterFunc[T any](fn func(item *models.Item) bool) FilterOption[T] {
+// func WithFilterFunc[T any](fn func(item *types.Item) bool) FilterOption[T] {
 // 	return func(a *T) {
 // 		if filterable, ok := any(a).(IFilterableBackend); ok {
 // 			filterable.setFilterFunc(fn)

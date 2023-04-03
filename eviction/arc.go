@@ -10,19 +10,19 @@ import (
 	"sync"
 
 	"github.com/hyp3rd/hypercache/errors"
-	"github.com/hyp3rd/hypercache/models"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 // ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
 type ARC struct {
-	capacity int                     // capacity is the maximum number of items that can be stored in the cache
-	t1       map[string]*models.Item // t1 is a list of items that have been accessed recently
-	t2       map[string]*models.Item // t2 is a list of items that have been accessed less recently
-	b1       map[string]bool         // b1 is a list of items that have been evicted from t1
-	b2       map[string]bool         // b2 is a list of items that have been evicted from t2
-	p        int                     // p is the promotion threshold
-	c        int                     // c is the current number of items in the cache
-	mutex    sync.RWMutex            // mutex is a read-write mutex that protects the cache
+	capacity int                    // capacity is the maximum number of items that can be stored in the cache
+	t1       map[string]*types.Item // t1 is a list of items that have been accessed recently
+	t2       map[string]*types.Item // t2 is a list of items that have been accessed less recently
+	b1       map[string]bool        // b1 is a list of items that have been evicted from t1
+	b2       map[string]bool        // b2 is a list of items that have been evicted from t2
+	p        int                    // p is the promotion threshold
+	c        int                    // c is the current number of items in the cache
+	mutex    sync.RWMutex           // mutex is a read-write mutex that protects the cache
 }
 
 // NewARCAlgorithm creates a new in-memory cache with the given capacity and the Adaptive Replacement Cache (ARC) algorithm.
@@ -33,8 +33,8 @@ func NewARCAlgorithm(capacity int) (*ARC, error) {
 	}
 	return &ARC{
 		capacity: capacity,
-		t1:       make(map[string]*models.Item, capacity),
-		t2:       make(map[string]*models.Item, capacity),
+		t1:       make(map[string]*types.Item, capacity),
+		t2:       make(map[string]*types.Item, capacity),
 		b1:       make(map[string]bool, capacity),
 		b2:       make(map[string]bool, capacity),
 		p:        0,
@@ -117,7 +117,7 @@ func (arc *ARC) Set(key string, value any) {
 		arc.Delete(evictedKey)
 	}
 	// Add new item to cache
-	item := models.ItemPool.Get().(*models.Item)
+	item := types.ItemPool.Get().(*types.Item)
 	item.Value = value
 
 	arc.t1[key] = item
@@ -139,7 +139,7 @@ func (arc *ARC) Delete(key string) {
 		if arc.p < 0 {
 			arc.p = 0
 		}
-		models.ItemPool.Put(item)
+		types.ItemPool.Put(item)
 		return
 	}
 	// Check t2
@@ -147,7 +147,7 @@ func (arc *ARC) Delete(key string) {
 	if ok {
 		delete(arc.t2, key)
 		arc.c--
-		models.ItemPool.Put(item)
+		types.ItemPool.Put(item)
 	}
 }
 
@@ -158,14 +158,14 @@ func (arc *ARC) Evict() (string, bool) {
 	for key, val := range arc.t1 {
 		delete(arc.t1, key)
 		arc.c--
-		models.ItemPool.Put(val)
+		types.ItemPool.Put(val)
 		return key, true
 	}
 	// Check t2
 	for key, val := range arc.t2 {
 		delete(arc.t2, key)
 		arc.c--
-		models.ItemPool.Put(val)
+		types.ItemPool.Put(val)
 		return key, true
 	}
 	return "", false

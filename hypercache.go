@@ -18,7 +18,6 @@ import (
 	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/eviction"
-	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/stats"
 	"github.com/hyp3rd/hypercache/types"
 	"github.com/hyp3rd/hypercache/utils"
@@ -225,7 +224,7 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 
 		var (
 			expiredCount int64
-			items        []*models.Item
+			items        []*types.Item
 			err          error
 		)
 
@@ -236,7 +235,7 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 		}
 
 		sortByFilter := backend.WithSortBy(types.SortByExpiration.String())
-		filterFuncFilter := backend.WithFilterFunc(func(item *models.Item) bool {
+		filterFuncFilter := backend.WithFilterFunc(func(item *types.Item) bool {
 			return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
 		})
 
@@ -247,7 +246,7 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 		for _, item := range sortedItems {
 			expiredCount++
 			hyperCache.Remove(item.Key)
-			models.ItemPool.Put(item)
+			types.ItemPool.Put(item)
 			hyperCache.StatsCollector.Incr("item_expired_count", 1)
 		}
 
@@ -312,7 +311,7 @@ func (hyperCache *HyperCache[T]) evictItem() (string, bool) {
 // If the capacity of the cache is reached, the cache will leverage the eviction algorithm proactively if the evictionInterval is zero. If not, the background process will take care of the eviction.
 func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Duration) error {
 	// Create a new cache item and set its properties
-	item := models.ItemPool.Get().(*models.Item)
+	item := types.ItemPool.Get().(*types.Item)
 	item.Key = key
 	item.Value = value
 	item.Expiration = expiration
@@ -338,7 +337,7 @@ func (hyperCache *HyperCache[T]) Set(key string, value any, expiration time.Dura
 	err = hyperCache.backend.Set(item)
 	if err != nil {
 		hyperCache.memoryAllocation.Add(-item.Size)
-		models.ItemPool.Put(item)
+		types.ItemPool.Put(item)
 		return err
 	}
 
@@ -363,7 +362,7 @@ func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
 	// Check if the item has expired, if so, trigger the expiration loop
 	if item.Expired() {
 		go func() {
-			models.ItemPool.Put(item)
+			types.ItemPool.Put(item)
 			hyperCache.expirationTriggerCh <- true
 		}()
 		return nil, false
@@ -375,7 +374,7 @@ func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
 }
 
 // GetWithInfo retrieves the item with the given key from the cache returning the `Item` object and a boolean indicating if the item was found.
-func (hyperCache *HyperCache[T]) GetWithInfo(key string) (*models.Item, bool) {
+func (hyperCache *HyperCache[T]) GetWithInfo(key string) (*types.Item, bool) {
 	item, ok := hyperCache.backend.Get(key)
 	// Check if the item has expired if it exists, if so, trigger the expiration loop
 	if !ok {
@@ -385,7 +384,7 @@ func (hyperCache *HyperCache[T]) GetWithInfo(key string) (*models.Item, bool) {
 	// Check if the item has expired, if so, trigger the expiration loop
 	if item.Expired() {
 		go func() {
-			models.ItemPool.Put(item)
+			types.ItemPool.Put(item)
 			hyperCache.expirationTriggerCh <- true
 		}()
 		return nil, false
@@ -405,7 +404,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 		// Check if the item has expired
 		if item.Expired() {
 			go func() {
-				models.ItemPool.Put(item)
+				types.ItemPool.Put(item)
 				hyperCache.expirationTriggerCh <- true
 			}()
 			return nil, errors.ErrKeyExpired
@@ -418,7 +417,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 	}
 
 	// if the item is not found, add it to the cache
-	item := models.ItemPool.Get().(*models.Item)
+	item := types.ItemPool.Get().(*types.Item)
 	item.Key = key
 	item.Value = value
 	item.Expiration = expiration
@@ -437,7 +436,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 	hyperCache.memoryAllocation.Add(item.Size)
 	if hyperCache.maxCacheSize > 0 && hyperCache.memoryAllocation.Load() > hyperCache.maxCacheSize {
 		hyperCache.memoryAllocation.Add(-item.Size)
-		models.ItemPool.Put(item)
+		types.ItemPool.Put(item)
 		return nil, errors.ErrCacheFull
 	}
 
@@ -445,7 +444,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 	err = hyperCache.backend.Set(item)
 	if err != nil {
 		hyperCache.memoryAllocation.Add(-item.Size)
-		models.ItemPool.Put(item)
+		types.ItemPool.Put(item)
 		return nil, err
 	}
 
@@ -454,7 +453,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(key string, value any, expiration time
 		hyperCache.evictionAlgorithm.Set(key, item.Value)
 		// If the cache is at capacity, evict an item when the eviction interval is zero
 		if hyperCache.shouldEvict.Load() && hyperCache.backend.Count() > hyperCache.backend.Capacity() {
-			models.ItemPool.Put(item)
+			types.ItemPool.Put(item)
 			hyperCache.evictItem()
 		}
 	}()
@@ -477,7 +476,7 @@ func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]
 		// Check if the item has expired
 		if item.Expired() {
 			// Put the item back in the pool
-			models.ItemPool.Put(item)
+			types.ItemPool.Put(item)
 			// Add the key to the errors map
 			failed[key] = errors.ErrKeyExpired
 			// Trigger the expiration loop
@@ -493,14 +492,14 @@ func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]
 	return
 }
 
-func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IFilter) ([]*models.Item, error) {
+func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error) {
 	return hyperCache.backend.List(ctx, filters...)
 }
 
 // List lists the items in the cache that meet the specified criteria.
 // It takes in a variadic number of any type as filters, it then checks the backend type, and calls the corresponding
 // implementation of the List function for that backend, with the filters passed in as arguments
-// func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...any) ([]*models.Item, error) {
+// func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...any) ([]*types.Item, error) {
 // 	var listInstance listFunc
 
 // 	// checking the backend type
@@ -520,13 +519,13 @@ func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IF
 
 // // listFunc is a type that defines a function that takes in a variable number of any type as arguments, and returns
 // // a slice of Item pointers, and an error
-// type listFunc func(ctx context.Context, options ...any) ([]*models.Item, error)
+// type listFunc func(ctx context.Context, options ...any) ([]*types.Item, error)
 
 // // listInMemory is a function that takes in an InMemory, and returns a ListFunc
 // // it takes any type as filters, and converts them to the specific FilterOption type for the InMemory,
 // // and calls the InMemory's List function with these filters.
 // func listInMemory(cacheBackend *backend.InMemory) listFunc {
-// 	return func(ctx context.Context, options ...any) ([]*models.Item, error) {
+// 	return func(ctx context.Context, options ...any) ([]*types.Item, error) {
 // 		// here we are converting the filters of any type to the specific FilterOption type for the InMemory
 // 		filterOptions := make([]backend.FilterOption[backend.InMemory], len(options))
 // 		for i, option := range options {
@@ -540,7 +539,7 @@ func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IF
 // // it takes any type as filters, and converts them to the specific FilterOption type for the Redis,
 // // and calls the Redis's List function with these filters.
 // func listRedis(cacheBackend *backend.Redis) listFunc {
-// 	return func(ctx context.Context, options ...any) ([]*models.Item, error) {
+// 	return func(ctx context.Context, options ...any) ([]*types.Item, error) {
 // 		// here we are converting the filters of any type to the specific FilterOption type for the Redis
 // 		filterOptions := make([]backend.FilterOption[backend.Redis], len(options))
 // 		for i, option := range options {
@@ -568,7 +567,7 @@ func (hyperCache *HyperCache[T]) Remove(keys ...string) {
 // Clear removes all items from the cache.
 func (hyperCache *HyperCache[T]) Clear() error {
 	var (
-		items []*models.Item
+		items []*types.Item
 		err   error
 	)
 
