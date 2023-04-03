@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/models"
 	"github.com/hyp3rd/hypercache/stats"
 )
@@ -79,7 +80,7 @@ func (mw LoggingMiddleware) GetMultiple(keys ...string) (result map[string]any, 
 }
 
 // List logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) List(ctx context.Context, filters ...any) ([]*models.Item, error) {
+func (mw LoggingMiddleware) List(ctx context.Context, filters ...backend.IFilter) ([]*models.Item, error) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method List took: %s", time.Since(begin))
 	}(time.Now())

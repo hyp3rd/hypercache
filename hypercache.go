@@ -97,9 +97,9 @@ func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMem
 //   - The eviction algorithm is set to CAWOLFU.
 //   - The expiration interval is set to 30 minutes.
 //   - The stats collector is set to the HistogramStatsCollector stats collector.
-func New[T backend.IBackendConstrain](hcm *BackendManager, config *Config[T]) (hyperCache *HyperCache[T], err error) {
+func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (hyperCache *HyperCache[T], err error) {
 	// Get the backend constructor from the registry
-	constructor, exists := hcm.backendRegistry[config.BackendType]
+	constructor, exists := bm.backendRegistry[config.BackendType]
 	if !exists {
 		return nil, fmt.Errorf("unknown backend type: %s", config.BackendType)
 	}
@@ -127,7 +127,8 @@ func New[T backend.IBackendConstrain](hcm *BackendManager, config *Config[T]) (h
 
 	// Initialize the cache backend type checker
 	hyperCache.cacheBackendChecker = utils.CacheBackendChecker[T]{
-		Backend: hyperCache.backend,
+		Backend:     hyperCache.backend,
+		BackendType: config.BackendType,
 	}
 
 	// Apply options
@@ -218,7 +219,6 @@ func New[T backend.IBackendConstrain](hcm *BackendManager, config *Config[T]) (h
 
 // expirationLoop is a function that runs in a separate goroutine and expires items in the cache based on their expiration duration.
 func (hyperCache *HyperCache[T]) expirationLoop() {
-	// Enqueue the expiration loop in the worker pool to avoid blocking the main goroutine
 	hyperCache.workerPool.Enqueue(func() error {
 		hyperCache.StatsCollector.Incr("expiration_loop_count", 1)
 		defer hyperCache.StatsCollector.Timing("expiration_loop_duration", time.Now().UnixNano())
@@ -230,28 +230,21 @@ func (hyperCache *HyperCache[T]) expirationLoop() {
 		)
 
 		// get all expired items
-		if hyperCache.cacheBackendChecker.IsInMemory() {
-			items, err = hyperCache.backend.(*backend.InMemory).List(
-				backend.WithSortBy[backend.InMemory](types.SortByExpiration),
-				backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
-					return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
-				}),
-			)
-		} else if hyperCache.cacheBackendChecker.IsRedis() {
-			items, err = hyperCache.backend.(*backend.Redis).List(context.TODO(),
-				backend.WithSortBy[backend.Redis](types.SortByExpiration),
-				backend.WithFilterFunc[backend.Redis](func(item *models.Item) bool {
-					return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
-				}),
-			)
-		}
-
-		// when error, return
+		items, err = hyperCache.List(context.TODO())
 		if err != nil {
 			return err
 		}
+
+		sortByFilter := backend.WithSortBy(types.SortByExpiration.String())
+		filterFuncFilter := backend.WithFilterFunc(func(item *models.Item) bool {
+			return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+		})
+
+		filteredItems := filterFuncFilter.ApplyFilter(hyperCache.cacheBackendChecker.GetRegisteredType(), items)
+		sortedItems := sortByFilter.ApplyFilter(hyperCache.cacheBackendChecker.GetRegisteredType(), filteredItems)
+
 		// iterate all expired items and remove them
-		for _, item := range items {
+		for _, item := range sortedItems {
 			expiredCount++
 			hyperCache.Remove(item.Key)
 			models.ItemPool.Put(item)
@@ -500,58 +493,62 @@ func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]
 	return
 }
 
+func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IFilter) ([]*models.Item, error) {
+	return hyperCache.backend.List(ctx, filters...)
+}
+
 // List lists the items in the cache that meet the specified criteria.
 // It takes in a variadic number of any type as filters, it then checks the backend type, and calls the corresponding
 // implementation of the List function for that backend, with the filters passed in as arguments
-func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...any) ([]*models.Item, error) {
-	var listInstance listFunc
+// func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...any) ([]*models.Item, error) {
+// 	var listInstance listFunc
 
-	// checking the backend type
-	if hyperCache.cacheBackendChecker.IsInMemory() {
-		// if the backend is an InMemory, we set the listFunc to the ListInMemory function
-		listInstance = listInMemory(hyperCache.backend.(*backend.InMemory))
-	}
+// 	// checking the backend type
+// 	if hyperCache.cacheBackendChecker.IsInMemory() {
+// 		// if the backend is an InMemory, we set the listFunc to the ListInMemory function
+// 		listInstance = listInMemory(hyperCache.backend.(*backend.InMemory))
+// 	}
 
-	if hyperCache.cacheBackendChecker.IsRedis() {
-		// if the backend is a Redis, we set the listFunc to the ListRedis function
-		listInstance = listRedis(hyperCache.backend.(*backend.Redis))
-	}
+// 	if hyperCache.cacheBackendChecker.IsRedis() {
+// 		// if the backend is a Redis, we set the listFunc to the ListRedis function
+// 		listInstance = listRedis(hyperCache.backend.(*backend.Redis))
+// 	}
 
-	// calling the corresponding implementation of the list function
-	return listInstance(ctx, filters...)
-}
+// 	// calling the corresponding implementation of the list function
+// 	return listInstance(ctx, filters...)
+// }
 
-// listFunc is a type that defines a function that takes in a variable number of any type as arguments, and returns
-// a slice of Item pointers, and an error
-type listFunc func(ctx context.Context, options ...any) ([]*models.Item, error)
+// // listFunc is a type that defines a function that takes in a variable number of any type as arguments, and returns
+// // a slice of Item pointers, and an error
+// type listFunc func(ctx context.Context, options ...any) ([]*models.Item, error)
 
-// listInMemory is a function that takes in an InMemory, and returns a ListFunc
-// it takes any type as filters, and converts them to the specific FilterOption type for the InMemory,
-// and calls the InMemory's List function with these filters.
-func listInMemory(cacheBackend *backend.InMemory) listFunc {
-	return func(ctx context.Context, options ...any) ([]*models.Item, error) {
-		// here we are converting the filters of any type to the specific FilterOption type for the InMemory
-		filterOptions := make([]backend.FilterOption[backend.InMemory], len(options))
-		for i, option := range options {
-			filterOptions[i] = option.(backend.FilterOption[backend.InMemory])
-		}
-		return cacheBackend.List(filterOptions...)
-	}
-}
+// // listInMemory is a function that takes in an InMemory, and returns a ListFunc
+// // it takes any type as filters, and converts them to the specific FilterOption type for the InMemory,
+// // and calls the InMemory's List function with these filters.
+// func listInMemory(cacheBackend *backend.InMemory) listFunc {
+// 	return func(ctx context.Context, options ...any) ([]*models.Item, error) {
+// 		// here we are converting the filters of any type to the specific FilterOption type for the InMemory
+// 		filterOptions := make([]backend.FilterOption[backend.InMemory], len(options))
+// 		for i, option := range options {
+// 			filterOptions[i] = option.(backend.FilterOption[backend.InMemory])
+// 		}
+// 		return cacheBackend.List(filterOptions...)
+// 	}
+// }
 
-// listRedis is a function that takes in a Redis, and returns a ListFunc
-// it takes any type as filters, and converts them to the specific FilterOption type for the Redis,
-// and calls the Redis's List function with these filters.
-func listRedis(cacheBackend *backend.Redis) listFunc {
-	return func(ctx context.Context, options ...any) ([]*models.Item, error) {
-		// here we are converting the filters of any type to the specific FilterOption type for the Redis
-		filterOptions := make([]backend.FilterOption[backend.Redis], len(options))
-		for i, option := range options {
-			filterOptions[i] = option.(backend.FilterOption[backend.Redis])
-		}
-		return cacheBackend.List(ctx, filterOptions...)
-	}
-}
+// // listRedis is a function that takes in a Redis, and returns a ListFunc
+// // it takes any type as filters, and converts them to the specific FilterOption type for the Redis,
+// // and calls the Redis's List function with these filters.
+// func listRedis(cacheBackend *backend.Redis) listFunc {
+// 	return func(ctx context.Context, options ...any) ([]*models.Item, error) {
+// 		// here we are converting the filters of any type to the specific FilterOption type for the Redis
+// 		filterOptions := make([]backend.FilterOption[backend.Redis], len(options))
+// 		for i, option := range options {
+// 			filterOptions[i] = option.(backend.FilterOption[backend.Redis])
+// 		}
+// 		return cacheBackend.List(ctx, filterOptions...)
+// 	}
+// }
 
 // Remove removes items with the given key from the cache. If an item is not found, it does nothing.
 func (hyperCache *HyperCache[T]) Remove(keys ...string) {
@@ -576,16 +573,26 @@ func (hyperCache *HyperCache[T]) Clear() error {
 	)
 
 	// get all expired items
-	if cb, ok := hyperCache.backend.(*backend.InMemory); ok {
-		items, err = cb.List()
-		cb.Clear()
-	} else if cb, ok := hyperCache.backend.(*backend.Redis); ok {
-		items, err = cb.List(context.TODO())
-		if err != nil {
-			return err
-		}
-		err = cb.Clear()
+	items, err = hyperCache.backend.List(context.TODO())
+	if err != nil {
+		return err
 	}
+
+	// clear the cacheBackend
+	err = hyperCache.backend.Clear()
+	if err != nil {
+		return err
+	}
+	// if cb, ok := hyperCache.backend.(*backend.InMemory); ok {
+	// 	items, err = cb.List()
+	// 	cb.Clear()
+	// } else if cb, ok := hyperCache.backend.(*backend.Redis); ok {
+	// 	items, err = cb.List(context.TODO())
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	err = cb.Clear()
+	// }
 
 	for _, item := range items {
 		hyperCache.evictionAlgorithm.Delete(item.Key)

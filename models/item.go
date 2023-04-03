@@ -21,16 +21,6 @@ var (
 	}
 
 	// buf is a buffer used to calculate the size of the item.
-	// buf bytes.Buffer
-
-	// encoderPool is a pool of encoders used to calculate the size of the item.
-	// encoderPool = sync.Pool{
-	// 	New: func() any {
-	// 		return gob.NewEncoder(&buf)
-	// 	},
-	// }
-
-	// buf is a buffer used to calculate the size of the item.
 	buf []byte
 
 	// encoderPool is a pool of encoders used to calculate the size of the item.
@@ -50,23 +40,6 @@ type Item struct {
 	LastAccess  time.Time     // LastAccess time of the item
 	AccessCount uint          // AccessCount of times the item has been accessed
 }
-
-// SetSize stores the size of the Item in bytes
-// func (item *Item) SetSize() error {
-// 	// Get an encoder from the pool
-// 	enc := encoderPool.Get().(*gob.Encoder)
-// 	// Reset the buffer and put the encoder back in the pool
-// 	defer buf.Reset()
-// 	defer encoderPool.Put(enc)
-
-// 	// Encode the item
-// 	if err := enc.Encode(item.Value); err != nil {
-// 		return errors.ErrInvalidSize
-// 	}
-// 	// Set the size of the item
-// 	item.Size = int64(buf.Len())
-// 	return nil
-// }
 
 // SetSize stores the size of the Item in bytes
 func (item *Item) SetSize() error {

@@ -3,7 +3,6 @@ package backend
 import (
 	"github.com/hyp3rd/hypercache/libs/serializer"
 	"github.com/hyp3rd/hypercache/models"
-	"github.com/hyp3rd/hypercache/types"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -113,41 +112,41 @@ func WithSerializer[T Redis](serializer serializer.ISerializer) Option[Redis] {
 }
 
 // FilterOption is a function type that can be used to configure the `Filter` struct.
-type FilterOption[T any] func(*T)
+// type FilterOption[T any] func(*T)
 
-// ApplyFilterOptions applies the given options to the given filter.
-func ApplyFilterOptions[T IBackendConstrain](backend *T, options ...FilterOption[T]) {
-	for _, option := range options {
-		option(backend)
-	}
-}
+// // ApplyFilterOptions applies the given options to the given filter.
+// func ApplyFilterOptions[T IBackendConstrain](backend *T, options ...FilterOption[T]) {
+// 	for _, option := range options {
+// 		option(backend)
+// 	}
+// }
 
-// WithSortBy is an option that sets the field to sort the items by.
-// The field can be any of the fields in the `Item` struct.
-func WithSortBy[T IBackendConstrain](field types.SortingField) FilterOption[T] {
-	return func(a *T) {
-		if sortable, ok := any(a).(iSortableBackend); ok {
-			sortable.setSortBy(field.String())
-		}
-	}
-}
+// // WithSortBy is an option that sets the field to sort the items by.
+// // The field can be any of the fields in the `Item` struct.
+// func WithSortBy[T IBackendConstrain](field types.SortingField) FilterOption[T] {
+// 	return func(a *T) {
+// 		if sortable, ok := any(a).(iSortableBackend); ok {
+// 			sortable.setSortBy(field.String())
+// 		}
+// 	}
+// }
 
-// WithSortOrderAsc is an option that sets the sort order to ascending or descending.
-// When sorting the items in the cache, they will be sorted in ascending or descending order based on the field specified with the `WithSortBy` option.
-func WithSortOrderAsc[T IBackendConstrain](ascending bool) FilterOption[T] {
-	return func(a *T) {
-		if sortable, ok := any(a).(iSortableBackend); ok {
-			sortable.setSortAscending(ascending)
-		}
-	}
-}
+// // WithSortOrderAsc is an option that sets the sort order to ascending or descending.
+// // When sorting the items in the cache, they will be sorted in ascending or descending order based on the field specified with the `WithSortBy` option.
+// func WithSortOrderAsc[T IBackendConstrain](ascending bool) FilterOption[T] {
+// 	return func(a *T) {
+// 		if sortable, ok := any(a).(iSortableBackend); ok {
+// 			sortable.setSortAscending(ascending)
+// 		}
+// 	}
+// }
 
-// WithFilterFunc is an option that sets the filter function to use.
-// The filter function is a predicate that takes a `Item` as an argument and returns a boolean indicating whether the item should be included in the cache.
-func WithFilterFunc[T any](fn func(item *models.Item) bool) FilterOption[T] {
-	return func(a *T) {
-		if filterable, ok := any(a).(IFilterableBackend); ok {
-			filterable.setFilterFunc(fn)
-		}
-	}
-}
+// // WithFilterFunc is an option that sets the filter function to use.
+// // The filter function is a predicate that takes a `Item` as an argument and returns a boolean indicating whether the item should be included in the cache.
+// func WithFilterFunc[T any](fn func(item *models.Item) bool) FilterOption[T] {
+// 	return func(a *T) {
+// 		if filterable, ok := any(a).(IFilterableBackend); ok {
+// 			filterable.setFilterFunc(fn)
+// 		}
+// 	}
+// }

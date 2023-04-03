@@ -7,8 +7,6 @@ import (
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
-	"github.com/hyp3rd/hypercache/models"
-	"github.com/hyp3rd/hypercache/types"
 )
 
 func main() {
@@ -51,15 +49,9 @@ func main() {
 	time.Sleep(time.Second * 7)
 
 	// Retrieve the list of items from the cache
-	list, err := hyperCache.List(context.TODO(),
-		backend.WithSortBy[backend.InMemory](types.SortByKey),
-		backend.WithSortOrderAsc[backend.InMemory](true),
-		backend.WithFilterFunc[backend.InMemory](func(item *models.Item) bool {
-			return item.Expiration > time.Second
-		}),
-	)
+	list, err := hyperCache.List(context.TODO())
 
-	//
+	// Check for errors
 	if err != nil {
 		fmt.Println(err)
 		return
