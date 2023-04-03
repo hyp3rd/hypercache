@@ -5,7 +5,7 @@ import (
 	"hash/fnv"
 	"sync"
 
-	"github.com/hyp3rd/hypercache/models"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 const (
@@ -15,16 +15,16 @@ const (
 	ShardCount32 uint32 = uint32(ShardCount)
 )
 
-// ConcurrentMap is a "thread" safe map of type string:*models.Item.
+// ConcurrentMap is a "thread" safe map of type string:*types.Item.
 // To avoid lock bottlenecks this map is dived to several (ShardCount) map shards.
 type ConcurrentMap struct {
 	shards []*ConcurrentMapShard
 	hasher hash.Hash32
 }
 
-// ConcurrentMapShard is a "thread" safe string to `*models.Item`.
+// ConcurrentMapShard is a "thread" safe string to `*types.Item`.
 type ConcurrentMapShard struct {
-	items map[string]*models.Item
+	items map[string]*types.Item
 	sync.RWMutex
 }
 
@@ -42,7 +42,7 @@ func New() ConcurrentMap {
 func create() []*ConcurrentMapShard {
 	shards := make([]*ConcurrentMapShard, ShardCount)
 	for i := 0; i < ShardCount; i++ {
-		shards[i] = &ConcurrentMapShard{items: make(map[string]*models.Item)}
+		shards[i] = &ConcurrentMapShard{items: make(map[string]*types.Item)}
 	}
 	return shards
 }
@@ -55,7 +55,7 @@ func (m *ConcurrentMap) GetShard(key string) *ConcurrentMapShard {
 }
 
 // Set sets the given value under the specified key.
-func (m *ConcurrentMap) Set(key string, value *models.Item) {
+func (m *ConcurrentMap) Set(key string, value *types.Item) {
 	shard := m.GetShard(key)
 	shard.Lock()
 	shard.items[key] = value
@@ -63,7 +63,7 @@ func (m *ConcurrentMap) Set(key string, value *models.Item) {
 }
 
 // Get retrieves an element from map under given key.
-func (m *ConcurrentMap) Get(key string) (*models.Item, bool) {
+func (m *ConcurrentMap) Get(key string) (*types.Item, bool) {
 	// Get shard
 	shard := m.GetShard(key)
 	shard.RLock()
@@ -85,7 +85,7 @@ func (m *ConcurrentMap) Has(key string) bool {
 }
 
 // Pop removes an element from the map and returns it.
-func (m *ConcurrentMap) Pop(key string) (*models.Item, bool) {
+func (m *ConcurrentMap) Pop(key string) (*types.Item, bool) {
 	shard := m.GetShard(key)
 	shard.Lock()
 	item, ok := shard.items[key]
@@ -101,7 +101,7 @@ func (m *ConcurrentMap) Pop(key string) (*models.Item, bool) {
 // Tuple is used by the IterBuffered functions to wrap two variables together over a channel,
 type Tuple struct {
 	Key string
-	Val models.Item
+	Val types.Item
 }
 
 // IterBuffered returns a buffered iterator which could be used in a for range loop.

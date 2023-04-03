@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -41,7 +42,7 @@ func main() {
 	)
 	defer svc.Stop()
 
-	err = svc.Set("key string", "value any", 0)
+	err = svc.Set(context.TODO(), "key string", "value any", 0)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -54,10 +55,10 @@ func main() {
 	fmt.Println(key)
 
 	for i := 0; i < 10; i++ {
-		svc.Set(fmt.Sprintf("key%v", i), fmt.Sprintf("val%v", i), 0)
+		svc.Set(context.TODO(), fmt.Sprintf("key%v", i), fmt.Sprintf("val%v", i), 0)
 	}
 
-	items, errs := svc.GetMultiple("key1", "key7", "key9", "key9999")
+	items, errs := svc.GetMultiple(context.TODO(), "key1", "key7", "key9", "key9999")
 	for k, e := range errs {
 		fmt.Printf("error fetching item %s: %s\n", k, e)
 	}
@@ -66,7 +67,7 @@ func main() {
 		fmt.Println(k, v)
 	}
 
-	val, err := svc.GetOrSet("key9999", "val9999", 0)
+	val, err := svc.GetOrSet(context.TODO(), "key9999", "val9999", 0)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -74,5 +75,5 @@ func main() {
 
 	fmt.Println(val)
 
-	svc.Remove("key9999", "key1")
+	svc.Remove(context.TODO(), "key9999", "key1")
 }

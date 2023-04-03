@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/longbridgeapp/assert v1.1.0
-	github.com/redis/go-redis/v9 v9.0.2
+	github.com/redis/go-redis/v9 v9.0.3
 	github.com/shamaton/msgpack/v2 v2.1.1
 	github.com/ugorji/go/codec v1.2.11
 )

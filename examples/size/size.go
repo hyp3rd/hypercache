@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -22,7 +23,7 @@ func main() {
 	}
 
 	// Create a new HyperCache with a capacity of 10
-	cache, err := hypercache.New(config)
+	cache, err := hypercache.New(hypercache.GetDefaultManager(), config)
 
 	if err != nil {
 		panic(err)
@@ -583,7 +584,7 @@ func main() {
 	}
 
 	for i := 0; i < 3; i++ {
-		err = cache.Set(fmt.Sprintf("key-%d", i), users, 0)
+		err = cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), users, 0)
 		if err != nil {
 			fmt.Println(err, "set", i)
 		}

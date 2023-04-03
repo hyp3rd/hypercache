@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/hyp3rd/hypercache/models"
+	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/stats"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 // Service is the service interface for the HyperCache.
@@ -14,19 +15,19 @@ type Service interface {
 	// Get retrieves a value from the cache using the key
 	Get(key string) (value interface{}, ok bool)
 	// Set stores a value in the cache using the key and expiration duration
-	Set(key string, value any, expiration time.Duration) error
+	Set(ctx context.Context, key string, value any, expiration time.Duration) error
 	// GetOrSet retrieves a value from the cache using the key, if the key does not exist, it will set the value using the key and expiration duration
-	GetOrSet(key string, value any, expiration time.Duration) (any, error)
-	// GetWithInfo fetches from the cache using the key, and returns the `models.Item` and a boolean indicating if the key exists
-	GetWithInfo(key string) (*models.Item, bool)
+	GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error)
+	// GetWithInfo fetches from the cache using the key, and returns the `types.Item` and a boolean indicating if the key exists
+	GetWithInfo(key string) (*types.Item, bool)
 	// GetMultiple retrieves a list of values from the cache using the keys
-	GetMultiple(keys ...string) (result map[string]any, failed map[string]error)
+	GetMultiple(ctx context.Context, keys ...string) (result map[string]any, failed map[string]error)
 	// List returns a list of all items in the cache
-	List(ctx context.Context, filters ...any) ([]*models.Item, error)
+	List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error)
 	// Remove removes a value from the cache using the key
-	Remove(keys ...string)
+	Remove(ctx context.Context, keys ...string)
 	// Clear removes all values from the cache
-	Clear() error
+	Clear(ctx context.Context) error
 	// Capacity returns the capacity of the cache
 	Capacity() int
 	// Allocation returns the allocation in bytes of the current cache

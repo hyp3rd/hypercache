@@ -23,7 +23,8 @@ func TypeName(object interface{}) (typeName string, inferredType string) {
 
 // CacheBackendChecker is a helper struct to check the type of the backend
 type CacheBackendChecker[T backend.IBackendConstrain] struct {
-	Backend backend.IBackend[T]
+	Backend     backend.IBackend[T]
+	BackendType string
 }
 
 // IsInMemory returns true if the backend is an InMemory
@@ -38,7 +39,7 @@ func (c *CacheBackendChecker[T]) IsRedis() bool {
 	return ok
 }
 
-// func (c *CacheBackendChecker[T]) IsRedisBackend() (backend.Redis, bool) {
-//     obj, ok := c.backend.(*backend.Redis)
-//     return *obj, ok
-// }
+// GetRegisteredType returns the backend type as a string.
+func (c *CacheBackendChecker[T]) GetRegisteredType() string {
+	return c.BackendType
+}

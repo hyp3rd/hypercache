@@ -5,8 +5,9 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/models"
+	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/stats"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 // Logger describes a logging interface allowing to implement different external, or custom logger.
@@ -39,27 +40,27 @@ func (mw LoggingMiddleware) Get(key string) (value interface{}, ok bool) {
 }
 
 // Set logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) Set(key string, value any, expiration time.Duration) error {
+func (mw LoggingMiddleware) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method Set took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("Set method called with key: %s value: %s", key, value)
-	return mw.next.Set(key, value, expiration)
+	return mw.next.Set(ctx, key, value, expiration)
 }
 
 // GetOrSet logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) GetOrSet(key string, value any, expiration time.Duration) (any, error) {
+func (mw LoggingMiddleware) GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method GetOrSet took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("GetOrSet method invoked with key: %s value: %s", key, value)
-	return mw.next.GetOrSet(key, value, expiration)
+	return mw.next.GetOrSet(ctx, key, value, expiration)
 }
 
 // GetWithInfo logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) GetWithInfo(key string) (item *models.Item, ok bool) {
+func (mw LoggingMiddleware) GetWithInfo(key string) (item *types.Item, ok bool) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method GetWithInfo took: %s", time.Since(begin))
 	}(time.Now())
@@ -69,17 +70,17 @@ func (mw LoggingMiddleware) GetWithInfo(key string) (item *models.Item, ok bool)
 }
 
 // GetMultiple logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) GetMultiple(keys ...string) (result map[string]any, failed map[string]error) {
+func (mw LoggingMiddleware) GetMultiple(ctx context.Context, keys ...string) (result map[string]any, failed map[string]error) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method GetMultiple took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("GetMultiple method invoked with keys: %s", keys)
-	return mw.next.GetMultiple(keys...)
+	return mw.next.GetMultiple(ctx, keys...)
 }
 
 // List logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) List(ctx context.Context, filters ...any) ([]*models.Item, error) {
+func (mw LoggingMiddleware) List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method List took: %s", time.Since(begin))
 	}(time.Now())
@@ -89,23 +90,23 @@ func (mw LoggingMiddleware) List(ctx context.Context, filters ...any) ([]*models
 }
 
 // Remove logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) Remove(keys ...string) {
+func (mw LoggingMiddleware) Remove(ctx context.Context, keys ...string) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method Remove took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("Remove method invoked with keys: %s", keys)
-	mw.next.Remove(keys...)
+	mw.next.Remove(ctx, keys...)
 }
 
 // Clear logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) Clear() error {
+func (mw LoggingMiddleware) Clear(ctx context.Context) error {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method Clear took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("Clear method invoked")
-	return mw.next.Clear()
+	return mw.next.Clear(ctx)
 }
 
 // Capacity takes to execute the next middleware.

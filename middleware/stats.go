@@ -5,8 +5,9 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/models"
+	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/stats"
+	"github.com/hyp3rd/hypercache/types"
 )
 
 // StatsCollectorMiddleware is a middleware that collects stats. It can and should re-use the same stats collector as the hypercache.
@@ -32,27 +33,27 @@ func (mw StatsCollectorMiddleware) Get(key string) (interface{}, bool) {
 }
 
 // Set collects stats for the Set method.
-func (mw StatsCollectorMiddleware) Set(key string, value any, expiration time.Duration) error {
+func (mw StatsCollectorMiddleware) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_set_duration", time.Since(start).Nanoseconds())
 		mw.statsCollector.Incr("hypercache_set_count", 1)
 	}()
-	return mw.next.Set(key, value, expiration)
+	return mw.next.Set(ctx, key, value, expiration)
 }
 
 // GetOrSet collects stats for the GetOrSet method.
-func (mw StatsCollectorMiddleware) GetOrSet(key string, value any, expiration time.Duration) (any, error) {
+func (mw StatsCollectorMiddleware) GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_get_or_set_duration", time.Since(start).Nanoseconds())
 		mw.statsCollector.Incr("hypercache_get_or_set_count", 1)
 	}()
-	return mw.next.GetOrSet(key, value, expiration)
+	return mw.next.GetOrSet(ctx, key, value, expiration)
 }
 
 // GetWithInfo collects stats for the GetWithInfo method.
-func (mw StatsCollectorMiddleware) GetWithInfo(key string) (*models.Item, bool) {
+func (mw StatsCollectorMiddleware) GetWithInfo(key string) (*types.Item, bool) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_get_with_info_duration", time.Since(start).Nanoseconds())
@@ -62,17 +63,17 @@ func (mw StatsCollectorMiddleware) GetWithInfo(key string) (*models.Item, bool) 
 }
 
 // GetMultiple collects stats for the GetMultiple method.
-func (mw StatsCollectorMiddleware) GetMultiple(keys ...string) (result map[string]any, failed map[string]error) {
+func (mw StatsCollectorMiddleware) GetMultiple(ctx context.Context, keys ...string) (result map[string]any, failed map[string]error) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_get_multiple_duration", time.Since(start).Nanoseconds())
 		mw.statsCollector.Incr("hypercache_get_multiple_count", 1)
 	}()
-	return mw.next.GetMultiple(keys...)
+	return mw.next.GetMultiple(ctx, keys...)
 }
 
 // List collects stats for the List method.
-func (mw StatsCollectorMiddleware) List(ctx context.Context, filters ...any) ([]*models.Item, error) {
+func (mw StatsCollectorMiddleware) List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_list_duration", time.Since(start).Nanoseconds())
@@ -82,23 +83,23 @@ func (mw StatsCollectorMiddleware) List(ctx context.Context, filters ...any) ([]
 }
 
 // Remove collects stats for the Remove method.
-func (mw StatsCollectorMiddleware) Remove(keys ...string) {
+func (mw StatsCollectorMiddleware) Remove(ctx context.Context, keys ...string) {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_remove_duration", time.Since(start).Nanoseconds())
 		mw.statsCollector.Incr("hypercache_remove_count", 1)
 	}()
-	mw.next.Remove(keys...)
+	mw.next.Remove(ctx, keys...)
 }
 
 // Clear collects stats for the Clear method.
-func (mw StatsCollectorMiddleware) Clear() error {
+func (mw StatsCollectorMiddleware) Clear(ctx context.Context) error {
 	start := time.Now()
 	defer func() {
 		mw.statsCollector.Timing("hypercache_clear_duration", time.Since(start).Nanoseconds())
 		mw.statsCollector.Incr("hypercache_clear_count", 1)
 	}()
-	return mw.next.Clear()
+	return mw.next.Clear(ctx)
 }
 
 // Capacity returns the capacity of the cache
