@@ -11,7 +11,6 @@ import (
 
 // InMemory is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
 type InMemory struct {
-	// items            datastructure.ConcurrentMap[string, *types.Item] // map to store the items in the cache
 	items       datastructure.ConcurrentMap // map to store the items in the cache
 	capacity    int                         // capacity of the cache, limits the number of items that can be stored in the cache
 	mutex       sync.RWMutex                // mutex to protect the cache from concurrent access
@@ -75,50 +74,6 @@ func (cacheBackend *InMemory) Set(item *types.Item) error {
 	cacheBackend.items.Set(item.Key, item)
 	return nil
 }
-
-// ListV1 returns a list of all items in the cache filtered and ordered by the given options
-// func (cacheBackend *InMemory) ListV1(options ...FilterOption[InMemory]) ([]*types.Item, error) {
-// 	// Apply the filter options
-// 	ApplyFilterOptions(cacheBackend, options...)
-
-// 	items := make([]*types.Item, 0, cacheBackend.items.Count())
-// 	wg := sync.WaitGroup{}
-// 	wg.Add(cacheBackend.items.Count())
-// 	for item := range cacheBackend.items.IterBuffered() {
-// 		go func(item datastructure.Tuple) {
-// 			defer wg.Done()
-// 			if cacheBackend.FilterFunc == nil || cacheBackend.FilterFunc(&item.Val) {
-// 				items = append(items, &item.Val)
-// 			}
-// 		}(item)
-// 	}
-// 	wg.Wait()
-
-// 	if cacheBackend.SortBy == "" {
-// 		return items, nil
-// 	}
-
-// 	var sorter sort.Interface
-// 	switch cacheBackend.SortBy {
-// 	case types.SortByKey.String():
-// 		sorter = &itemSorterByKey{items: items}
-// 	case types.SortByLastAccess.String():
-// 		sorter = &itemSorterByLastAccess{items: items}
-// 	case types.SortByAccessCount.String():
-// 		sorter = &itemSorterByAccessCount{items: items}
-// 	case types.SortByExpiration.String():
-// 		sorter = &itemSorterByExpiration{items: items}
-// 	default:
-// 		return nil, fmt.Errorf("unknown sortBy field: %s", cacheBackend.SortBy)
-// 	}
-
-// 	if !cacheBackend.SortAscending {
-// 		sorter = sort.Reverse(sorter)
-// 	}
-
-// 	sort.Sort(sorter)
-// 	return items, nil
-// }
 
 // List returns a list of all items in the cache filtered and ordered by the given options
 // func (cacheBackend *InMemory) List(ctx context.Context, options ...FilterOption[InMemory]) ([]*types.Item, error) {

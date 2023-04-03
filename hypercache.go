@@ -492,62 +492,12 @@ func (hyperCache *HyperCache[T]) GetMultiple(keys ...string) (result map[string]
 	return
 }
 
-func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error) {
-	return hyperCache.backend.List(ctx, filters...)
-}
-
 // List lists the items in the cache that meet the specified criteria.
 // It takes in a variadic number of any type as filters, it then checks the backend type, and calls the corresponding
 // implementation of the List function for that backend, with the filters passed in as arguments
-// func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...any) ([]*types.Item, error) {
-// 	var listInstance listFunc
-
-// 	// checking the backend type
-// 	if hyperCache.cacheBackendChecker.IsInMemory() {
-// 		// if the backend is an InMemory, we set the listFunc to the ListInMemory function
-// 		listInstance = listInMemory(hyperCache.backend.(*backend.InMemory))
-// 	}
-
-// 	if hyperCache.cacheBackendChecker.IsRedis() {
-// 		// if the backend is a Redis, we set the listFunc to the ListRedis function
-// 		listInstance = listRedis(hyperCache.backend.(*backend.Redis))
-// 	}
-
-// 	// calling the corresponding implementation of the list function
-// 	return listInstance(ctx, filters...)
-// }
-
-// // listFunc is a type that defines a function that takes in a variable number of any type as arguments, and returns
-// // a slice of Item pointers, and an error
-// type listFunc func(ctx context.Context, options ...any) ([]*types.Item, error)
-
-// // listInMemory is a function that takes in an InMemory, and returns a ListFunc
-// // it takes any type as filters, and converts them to the specific FilterOption type for the InMemory,
-// // and calls the InMemory's List function with these filters.
-// func listInMemory(cacheBackend *backend.InMemory) listFunc {
-// 	return func(ctx context.Context, options ...any) ([]*types.Item, error) {
-// 		// here we are converting the filters of any type to the specific FilterOption type for the InMemory
-// 		filterOptions := make([]backend.FilterOption[backend.InMemory], len(options))
-// 		for i, option := range options {
-// 			filterOptions[i] = option.(backend.FilterOption[backend.InMemory])
-// 		}
-// 		return cacheBackend.List(filterOptions...)
-// 	}
-// }
-
-// // listRedis is a function that takes in a Redis, and returns a ListFunc
-// // it takes any type as filters, and converts them to the specific FilterOption type for the Redis,
-// // and calls the Redis's List function with these filters.
-// func listRedis(cacheBackend *backend.Redis) listFunc {
-// 	return func(ctx context.Context, options ...any) ([]*types.Item, error) {
-// 		// here we are converting the filters of any type to the specific FilterOption type for the Redis
-// 		filterOptions := make([]backend.FilterOption[backend.Redis], len(options))
-// 		for i, option := range options {
-// 			filterOptions[i] = option.(backend.FilterOption[backend.Redis])
-// 		}
-// 		return cacheBackend.List(ctx, filterOptions...)
-// 	}
-// }
+func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error) {
+	return hyperCache.backend.List(ctx, filters...)
+}
 
 // Remove removes items with the given key from the cache. If an item is not found, it does nothing.
 func (hyperCache *HyperCache[T]) Remove(keys ...string) {
