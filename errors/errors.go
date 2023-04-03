@@ -51,4 +51,7 @@ var (
 
 	// ErrBackendNotFound is returned when a backend is not found.
 	ErrBackendNotFound = errors.New("backend not found")
+
+	// ErrTimeoutOrCanceled is returned when a timeout or cancellation occurs.
+	ErrTimeoutOrCanceled = errors.New("the operation timedout or was canceled")
 )

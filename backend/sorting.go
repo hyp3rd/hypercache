@@ -11,7 +11,7 @@ type SortFilters struct {
 	// If set to false, the items will be sorted in descending order.
 	SortAscending bool
 	// FilterFunc is a predicate that takes a `Item` as an argument and returns a boolean indicating whether the item should be included in the cache.
-	FilterFunc func(item *types.Item) bool // filters applied when listing the items in the cache
+	// FilterFunc func(item *types.Item) bool // filters applied when listing the items in the cache
 }
 
 type itemSorterByKey struct {

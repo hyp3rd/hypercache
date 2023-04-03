@@ -40,7 +40,7 @@ func main() {
 
 	fmt.Println("setting 50 items to the cache")
 	for i := 0; i < 50; i++ {
-		err = hyperCache.Set(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i), time.Hour)
+		err = hyperCache.Set(context.TODO(), fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i), time.Hour)
 		if err != nil {
 			panic(err)
 		}

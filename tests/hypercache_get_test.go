@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -68,7 +69,7 @@ func TestHyperCache_Get(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if test.shouldSet {
-				err = cache.Set(test.key, test.value, test.expiry)
+				err = cache.Set(context.TODO(), test.key, test.value, test.expiry)
 				if err != nil {
 					assert.Equal(t, test.expectedErr, err)
 				}

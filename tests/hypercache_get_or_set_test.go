@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -78,7 +79,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 
 			shouldExpire := test.expectedErr == errors.ErrKeyExpired
 
-			val, err = cache.GetOrSet(test.key, test.value, test.expiry)
+			val, err = cache.GetOrSet(context.TODO(), test.key, test.value, test.expiry)
 			if !shouldExpire {
 				assert.Equal(t, test.expectedErr, err)
 			}
@@ -90,7 +91,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 			if shouldExpire {
 				t.Log("sleeping for 2 Millisecond to allow the key to expire")
 				time.Sleep(2 * time.Millisecond)
-				_, err = cache.GetOrSet(test.key, test.value, test.expiry)
+				_, err = cache.GetOrSet(context.TODO(), test.key, test.value, test.expiry)
 				assert.Equal(t, test.expectedErr, err)
 
 			}

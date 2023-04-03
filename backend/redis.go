@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"sync"
 
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/libs/serializer"
@@ -15,7 +16,7 @@ type Redis struct {
 	capacity    int                    // capacity of the cache, limits the number of items that can be stored in the cache
 	keysSetName string                 // keysSetName is the name of the set that holds the keys of the items in the cache
 	Serializer  serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
-	SortFilters                        // SortFilters holds the filters applied when listing the items in the cache
+	// SortFilters                        // SortFilters holds the filters applied when listing the items in the cache
 }
 
 // NewRedis creates a new redis cache with the given options.
@@ -142,14 +143,7 @@ func (cacheBackend *Redis) Set(item *types.Item) error {
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-// func (cacheBackend *Redis) List(ctx context.Context, options ...FilterOption[Redis]) ([]*types.Item, error) {
 func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*types.Item, error) {
-	// Apply the filters
-	// filterOptions := make([]FilterOption[Redis], len(filters))
-	// for i, option := range filters {
-	// 	filterOptions[i] = option.(FilterOption[Redis])
-	// }
-
 	// Get the set of keys held in the cacheBackend with the given `keysSetName`
 	keys, err := cacheBackend.rdb.SMembers(ctx, cacheBackend.keysSetName).Result()
 	if err != nil {
@@ -179,64 +173,39 @@ func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*typ
 		defer types.ItemPool.Put(item)
 		err := cacheBackend.Serializer.Unmarshal([]byte(data["data"]), item)
 		if err == nil {
-			if cacheBackend.FilterFunc != nil && !cacheBackend.FilterFunc(item) {
-				continue
-			}
 			items = append(items, item)
 		}
 	}
 
 	// Apply the filters
-	for _, filter := range filters {
-		items = filter.ApplyFilter("redis", items)
+	if len(filters) > 0 {
+		wg := sync.WaitGroup{}
+		wg.Add(len(filters))
+		for _, filter := range filters {
+			go func(filter IFilter) {
+				defer wg.Done()
+				items = filter.ApplyFilter("redis", items)
+			}(filter)
+		}
+		wg.Wait()
 	}
 
 	return items, nil
-
-	// Check if the items should be sorted
-	// if cacheBackend.SortBy == "" {
-	// 	// No sorting
-	// 	return items, nil
-	// }
-
-	// // Sort the items
-	// var sorter sort.Interface
-	// switch cacheBackend.SortBy {
-	// case types.SortByKey.String(): // Sort by key
-	// 	sorter = &itemSorterByKey{items: items}
-	// case types.SortByLastAccess.String(): // Sort by last access
-	// 	sorter = &itemSorterByLastAccess{items: items}
-	// case types.SortByAccessCount.String(): // Sort by access count
-	// 	sorter = &itemSorterByAccessCount{items: items}
-	// case types.SortByExpiration.String(): // Sort by expiration
-	// 	sorter = &itemSorterByExpiration{items: items}
-	// default:
-	// 	return nil, fmt.Errorf("unknown sortBy field: %s", cacheBackend.SortBy)
-	// }
-
-	// // Reverse the sort order if needed
-	// if !cacheBackend.SortAscending {
-	// 	sorter = sort.Reverse(sorter)
-	// }
-	// // Sort the items by the given field
-	// sort.Sort(sorter)
-
-	// return items, nil
 }
 
 // Remove removes an item from the cache with the given key
-func (cacheBackend *Redis) Remove(keys ...string) error {
+func (cacheBackend *Redis) Remove(ctx context.Context, keys ...string) error {
 	pipe := cacheBackend.rdb.TxPipeline()
 
-	pipe.SRem(context.Background(), cacheBackend.keysSetName, keys).Result()
-	pipe.Del(context.Background(), keys...).Result()
+	pipe.SRem(ctx, cacheBackend.keysSetName, keys).Result()
+	pipe.Del(ctx, keys...).Result()
 
-	_, err := pipe.Exec(context.Background())
+	_, err := pipe.Exec(ctx)
 	return err
 }
 
 // Clear removes all items from the cache
-func (cacheBackend *Redis) Clear() error {
-	_, err := cacheBackend.rdb.FlushDB(context.Background()).Result()
+func (cacheBackend *Redis) Clear(ctx context.Context) error {
+	_, err := cacheBackend.rdb.FlushDB(ctx).Result()
 	return err
 }

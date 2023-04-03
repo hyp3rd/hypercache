@@ -11,10 +11,10 @@ import (
 
 // InMemory is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
 type InMemory struct {
-	items       datastructure.ConcurrentMap // map to store the items in the cache
-	capacity    int                         // capacity of the cache, limits the number of items that can be stored in the cache
-	mutex       sync.RWMutex                // mutex to protect the cache from concurrent access
-	SortFilters                             // filters applied when listing the items in the cache
+	items        datastructure.ConcurrentMap // map to store the items in the cache
+	capacity     int                         // capacity of the cache, limits the number of items that can be stored in the cache
+	sync.RWMutex                             // mutex to protect the cache from concurrent access
+	// SortFilters                             // filters applied when listing the items in the cache
 }
 
 // NewInMemory creates a new in-memory cache with the given options.
@@ -68,56 +68,74 @@ func (cacheBackend *InMemory) Set(item *types.Item) error {
 		return err
 	}
 
-	cacheBackend.mutex.Lock()
-	defer cacheBackend.mutex.Unlock()
+	cacheBackend.Lock()
+	defer cacheBackend.Unlock()
 
 	cacheBackend.items.Set(item.Key, item)
 	return nil
 }
 
 // List returns a list of all items in the cache filtered and ordered by the given options
-// func (cacheBackend *InMemory) List(ctx context.Context, options ...FilterOption[InMemory]) ([]*types.Item, error) {
 func (cacheBackend *InMemory) List(ctx context.Context, filters ...IFilter) ([]*types.Item, error) {
 	// Apply the filters
-	cacheBackend.mutex.RLock()
-	defer cacheBackend.mutex.RUnlock()
+	cacheBackend.RLock()
+	defer cacheBackend.RUnlock()
 
-	items := make([]*types.Item, 0, cacheBackend.Count())
-	wg := sync.WaitGroup{}
-	wg.Add(cacheBackend.items.Count())
+	items := make([]*types.Item, 0, cacheBackend.items.Count())
+
 	for item := range cacheBackend.items.IterBuffered() {
-		go func(item datastructure.Tuple) {
-			defer wg.Done()
-			if cacheBackend.FilterFunc == nil || cacheBackend.FilterFunc(&item.Val) {
-				items = append(items, &item.Val)
-			}
-		}(item)
+		copy := item
+		items = append(items, &copy.Val)
 	}
-	wg.Wait()
 
-	for _, filter := range filters {
-		items = filter.ApplyFilter("in-memory", items)
+	// Apply the filters
+	if len(filters) > 0 {
+		wg := sync.WaitGroup{}
+		wg.Add(len(filters))
+		for _, filter := range filters {
+			go func(filter IFilter) {
+				defer wg.Done()
+				items = filter.ApplyFilter("in-memory", items)
+			}(filter)
+		}
+		wg.Wait()
 	}
 
 	return items, nil
 }
 
 // Remove removes items with the given key from the cacheBackend. If an item is not found, it does nothing.
-func (cacheBackend *InMemory) Remove(keys ...string) (err error) {
-	//TODO: determine if handling the error or not
-	// var ok bool
-	// item := types.ItemPool.Get().(*types.Item)
-	// defer types.ItemPool.Put(item)
-	for _, key := range keys {
-		cacheBackend.items.Remove(key)
+func (cacheBackend *InMemory) Remove(ctx context.Context, keys ...string) (err error) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, key := range keys {
+			cacheBackend.items.Remove(key)
+		}
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return errors.ErrTimeoutOrCanceled
 	}
-	return
 }
 
 // Clear removes all items from the cacheBackend.
-func (cacheBackend *InMemory) Clear() error {
-	// clear the cacheBackend
-	cacheBackend.items.Clear()
+func (cacheBackend *InMemory) Clear(ctx context.Context) error {
 
-	return nil
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// clear the cacheBackend
+		cacheBackend.items.Clear()
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return errors.ErrTimeoutOrCanceled
+	}
 }

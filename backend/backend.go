@@ -25,9 +25,9 @@ type IBackend[T IBackendConstrain] interface {
 	// Count returns the number of items currently stored in the cache.
 	Count() int
 	// Remove deletes the item with the given key from the cache.
-	Remove(keys ...string) error
+	Remove(ctx context.Context, keys ...string) error
 	// List the items in the cache that meet the specified criteria.
 	List(ctx context.Context, filters ...IFilter) ([]*types.Item, error)
 	// Clear removes all items from the cache.
-	Clear() error
+	Clear(ctx context.Context) error
 }
