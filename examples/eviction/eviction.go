@@ -60,20 +60,16 @@ func executeExample(evictionInterval time.Duration) {
 	log.Println("capacity after adding 15 items", cache.Capacity())
 
 	log.Println("listing all items in the cache")
-	items, err := cache.List(context.TODO())
+
+	// Apply filters
+	sortByFilter := backend.WithSortBy(types.SortByKey.String())
+	items, err := cache.List(context.TODO(), sortByFilter)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	// Apply filters
-	sortByFilter := backend.WithSortBy(types.SortByKey.String())
-	sortOrderFilter := backend.WithSortOrderAsc(true)
-
-	filteredItems := sortByFilter.ApplyFilter("in-memory", items)
-	sortedItems := sortOrderFilter.ApplyFilter("in-memory", filteredItems)
-
-	for _, item := range sortedItems {
+	for _, item := range items {
 		fmt.Println(item.Key, item.Value)
 	}
 

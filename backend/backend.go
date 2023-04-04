@@ -27,7 +27,7 @@ type IBackend[T IBackendConstrain] interface {
 	// Remove deletes the item with the given key from the cache.
 	Remove(ctx context.Context, keys ...string) error
 	// List the items in the cache that meet the specified criteria.
-	List(ctx context.Context, filters ...IFilter) ([]*types.Item, error)
+	List(ctx context.Context, filters ...IFilter) (items []*types.Item, err error)
 	// Clear removes all items from the cache.
 	Clear(ctx context.Context) error
 }

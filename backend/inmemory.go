@@ -14,7 +14,6 @@ type InMemory struct {
 	items        datastructure.ConcurrentMap // map to store the items in the cache
 	capacity     int                         // capacity of the cache, limits the number of items that can be stored in the cache
 	sync.RWMutex                             // mutex to protect the cache from concurrent access
-	// SortFilters                             // filters applied when listing the items in the cache
 }
 
 // NewInMemory creates a new in-memory cache with the given options.
@@ -76,12 +75,12 @@ func (cacheBackend *InMemory) Set(item *types.Item) error {
 }
 
 // List returns a list of all items in the cache filtered and ordered by the given options
-func (cacheBackend *InMemory) List(ctx context.Context, filters ...IFilter) ([]*types.Item, error) {
+func (cacheBackend *InMemory) List(ctx context.Context, filters ...IFilter) (items []*types.Item, err error) {
 	// Apply the filters
 	cacheBackend.RLock()
 	defer cacheBackend.RUnlock()
 
-	items := make([]*types.Item, 0, cacheBackend.items.Count())
+	items = make([]*types.Item, 0, cacheBackend.items.Count())
 
 	for item := range cacheBackend.items.IterBuffered() {
 		copy := item
@@ -90,18 +89,13 @@ func (cacheBackend *InMemory) List(ctx context.Context, filters ...IFilter) ([]*
 
 	// Apply the filters
 	if len(filters) > 0 {
-		wg := sync.WaitGroup{}
-		wg.Add(len(filters))
 		for _, filter := range filters {
-			go func(filter IFilter) {
-				defer wg.Done()
-				items = filter.ApplyFilter("in-memory", items)
-			}(filter)
+			items, err = filter.ApplyFilter("in-memory", items)
 		}
-		wg.Wait()
+
 	}
 
-	return items, nil
+	return items, err
 }
 
 // Remove removes items with the given key from the cacheBackend. If an item is not found, it does nothing.

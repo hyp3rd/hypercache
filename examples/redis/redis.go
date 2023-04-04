@@ -51,13 +51,6 @@ func main() {
 
 	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
 
-	// Retrieve the list of items from the cache
-	allItems, err := hyperCache.List(context.TODO())
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
 	// Apply filters
 	// Define a filter function
 	itemsFilterFunc := func(item *types.Item) bool {
@@ -71,15 +64,16 @@ func main() {
 	// Create a filterFuncFilter with the defined filter function
 	filter := backend.WithFilterFunc(itemsFilterFunc)
 
-	// Apply the filter to the items
-	filteredItems := filter.ApplyFilter("redis", allItems)
-
-	// Apply the sort filter to the filtered items
-	filteredItems = sortByFilter.ApplyFilter("redis", filteredItems)
+	// Retrieve the list of items from the cache
+	allItems, err := hyperCache.List(context.TODO(), sortByFilter, filter)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
 	fmt.Println("printing all items")
 	// Print the list of items
-	for _, item := range filteredItems {
+	for _, item := range allItems {
 		fmt.Println(item.Key, item.Value)
 	}
 
