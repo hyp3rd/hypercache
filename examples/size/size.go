@@ -601,6 +601,3 @@ func main() {
 	fmt.Println(cache.Count())
 	fmt.Println(cache.Allocation())
 }
-
-// `	fmt.Println("size", kate.Size)`
-// the first method returns 43

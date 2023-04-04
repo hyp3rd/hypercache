@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"sync"
 
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/libs/serializer"
@@ -16,7 +15,6 @@ type Redis struct {
 	capacity    int                    // capacity of the cache, limits the number of items that can be stored in the cache
 	keysSetName string                 // keysSetName is the name of the set that holds the keys of the items in the cache
 	Serializer  serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
-	// SortFilters                        // SortFilters holds the filters applied when listing the items in the cache
 }
 
 // NewRedis creates a new redis cache with the given options.
@@ -143,7 +141,7 @@ func (cacheBackend *Redis) Set(item *types.Item) error {
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*types.Item, error) {
+func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) (items []*types.Item, err error) {
 	// Get the set of keys held in the cacheBackend with the given `keysSetName`
 	keys, err := cacheBackend.rdb.SMembers(ctx, cacheBackend.keysSetName).Result()
 	if err != nil {
@@ -163,7 +161,7 @@ func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*typ
 	}
 
 	// Create a slice to hold the items
-	items := make([]*types.Item, 0, len(keys))
+	items = make([]*types.Item, 0, len(keys))
 
 	// Deserialize the items and add them to the slice of items to return
 	for _, cmd := range cmds {
@@ -179,18 +177,12 @@ func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*typ
 
 	// Apply the filters
 	if len(filters) > 0 {
-		wg := sync.WaitGroup{}
-		wg.Add(len(filters))
 		for _, filter := range filters {
-			go func(filter IFilter) {
-				defer wg.Done()
-				items = filter.ApplyFilter("redis", items)
-			}(filter)
+			items, err = filter.ApplyFilter("redis", items)
 		}
-		wg.Wait()
 	}
 
-	return items, nil
+	return items, err
 }
 
 // Remove removes an item from the cache with the given key

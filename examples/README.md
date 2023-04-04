@@ -15,3 +15,9 @@ All the code in this directory is for demonstration purposes only.
 5. [`Clear`](./clear/clear.go) - An example of using the HyperCache package to store a list of items and clear the cache.
 
 6. [`Service`](./service/service.go) - An example of implementing `HyperCacheService` and register middleware.
+
+7. [`Redis`](./redis/redis.go) - An example of implementing the `HyperCache` interface using Redis as the backend. It requires that you run the Redis server locally as the default configuration points to `localhost:6379`. To run the Redis server locally, use the following command: `docker compose up -d`
+
+8. [`Middleware`](./middleware/middleware.go) - An example of implementing a custom middleware and register it with the `HyperCacheService`.
+
+9. [`Size`](./size/size.go) - An example of using the HyperCache package to store a list of items and limit the cache based on size.

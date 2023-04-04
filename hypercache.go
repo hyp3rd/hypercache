@@ -233,21 +233,18 @@ func (hyperCache *HyperCache[T]) expirationLoop(ctx context.Context) {
 		)
 
 		// get all expired items
-		items, err = hyperCache.List(context.TODO())
+		items, err = hyperCache.List(context.TODO(),
+			backend.WithSortBy(types.SortByExpiration.String()),
+			backend.WithFilterFunc(func(item *types.Item) bool {
+				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
+			}))
+
 		if err != nil {
 			return err
 		}
 
-		sortByFilter := backend.WithSortBy(types.SortByExpiration.String())
-		filterFuncFilter := backend.WithFilterFunc(func(item *types.Item) bool {
-			return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
-		})
-
-		filteredItems := filterFuncFilter.ApplyFilter(hyperCache.cacheBackendChecker.GetRegisteredType(), items)
-		sortedItems := sortByFilter.ApplyFilter(hyperCache.cacheBackendChecker.GetRegisteredType(), filteredItems)
-
 		// iterate all expired items and remove them
-		for _, item := range sortedItems {
+		for _, item := range items {
 			expiredCount++
 			hyperCache.Remove(ctx, item.Key)
 			types.ItemPool.Put(item)

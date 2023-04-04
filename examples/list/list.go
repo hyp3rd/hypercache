@@ -43,13 +43,14 @@ func main() {
 	}
 
 	sortByFilter := backend.WithSortBy(types.SortByExpiration.String())
-	sortOrderFilter := backend.WithSortOrderAsc(true)
+
+	sortOrder := backend.WithSortOrderAsc(true)
 
 	// Create a filterFuncFilter with the defined filter function
 	filter := backend.WithFilterFunc(itemsFilterFunc)
 
 	// Retrieve the list of items from the cache
-	items, err := hyperCache.List(context.TODO(), sortByFilter, sortOrderFilter, filter)
+	items, err := hyperCache.List(context.TODO(), sortByFilter, sortOrder, filter)
 	if err != nil {
 		fmt.Println(err)
 		return
