@@ -238,7 +238,6 @@ func (hyperCache *HyperCache[T]) expirationLoop(ctx context.Context) {
 			backend.WithFilterFunc(func(item *types.Item) bool {
 				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
 			}))
-
 		if err != nil {
 			return err
 		}

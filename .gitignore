@@ -97,3 +97,4 @@ tags
 ### Project ###
 .dccache
 cmd/
+bin/

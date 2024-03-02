@@ -14,6 +14,9 @@ run:
 vet:
 	go vet -v ./...
 
+build:
+	go build -o bin/ -v ./... 
+
 # lint runs the staticcheck and golint static analysis tools on all packages in the project.
 lint:
 	$(call check_command_exists,staticcheck) && staticcheck ./...
