@@ -4,7 +4,7 @@ go 1.22
 
 require (
 	github.com/longbridgeapp/assert v1.1.0
-	github.com/redis/go-redis/v9 v9.5.1
+	github.com/redis/go-redis/v9 v9.5.5
 	github.com/shamaton/msgpack/v2 v2.1.1
 	github.com/ugorji/go/codec v1.2.12
 )
