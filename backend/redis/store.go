@@ -2,21 +2,22 @@ package redis
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/hyp3rd/ewrap"
 )
 
-// Store is a redis store instance with redis client
+// Store is a redis store instance with redis client.
 type Store struct {
 	Client *redis.Client
 }
 
 // New create redis store instance with given options and config
-// @param opts
+// @param opts.
 func New(opts ...Option) (*Store, error) {
 	// Setup redis client
 	opt := &redis.Options{
@@ -37,7 +38,7 @@ func New(opts ...Option) (*Store, error) {
 	ApplyOptions(opt, opts...)
 
 	if strings.TrimSpace(opt.Addr) == "" {
-		return nil, fmt.Errorf("redis address is empty")
+		return nil, ewrap.New("redis address is empty")
 	}
 
 	cli := redis.NewClient(opt)

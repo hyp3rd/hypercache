@@ -1,7 +1,7 @@
 package serializer
 
 import (
-	"fmt"
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/errors"
 )
@@ -19,12 +19,12 @@ var serializerRegistry = make(map[string]func() ISerializer)
 // New returns a new serializer based on the serializerType.
 func New(serializerType string) (ISerializer, error) {
 	if serializerType == "" {
-		return nil, fmt.Errorf("%s: %s", errors.ErrParamCannotBeEmpty, "serializerType")
+		return nil, ewrap.Wrap(errors.ErrParamCannotBeEmpty, "serializerType")
 	}
 
 	createFunc, ok := serializerRegistry[serializerType]
 	if !ok {
-		return nil, fmt.Errorf("%s: %s", errors.ErrSerializerNotFound, serializerType)
+		return nil, ewrap.Wrap(errors.ErrSerializerNotFound, serializerType)
 	}
 
 	return createFunc(), nil

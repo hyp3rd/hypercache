@@ -65,6 +65,7 @@ func WithMaxCacheSize[T backend.IBackendConstrain](maxCacheSize int64) Option[T]
 		if maxCacheSize < 0 {
 			maxCacheSize = 0
 		}
+
 		cache.maxCacheSize = maxCacheSize
 	}
 }

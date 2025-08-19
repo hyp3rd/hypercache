@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyp3rd/hypercache/backend"
 	"github.com/longbridgeapp/assert"
+
+	"github.com/hyp3rd/hypercache/backend"
 )
 
 func TestHyperCache_New(t *testing.T) {

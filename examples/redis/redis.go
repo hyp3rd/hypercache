@@ -17,7 +17,6 @@ func main() {
 		redis.WithPassword("k7oMs2G5bc4mRN45jPZjLBZxuMFrCLahvPn648Zwq1lT41gSYZqapBRnSF2L995FaYcZBz8c7xkKXku94HeReDgdwBu1N4CzgfQ94Z504hjfzrST1u0idVkbXe8ust"),
 		redis.WithDB(0),
 	)
-
 	if err != nil {
 		panic(err)
 	}
@@ -39,7 +38,8 @@ func main() {
 	}
 
 	fmt.Println("setting 50 items to the cache")
-	for i := 0; i < 50; i++ {
+
+	for i := range 50 {
 		err = hyperCache.Set(context.TODO(), fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i), time.Hour)
 		if err != nil {
 			panic(err)
@@ -68,6 +68,7 @@ func main() {
 	allItems, err := hyperCache.List(context.TODO(), sortByFilter, filter)
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 
@@ -84,9 +85,11 @@ func main() {
 	time.Sleep(time.Second * 5)
 
 	fmt.Println("fetching all items again")
+
 	allItems, err = hyperCache.List(context.TODO())
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 

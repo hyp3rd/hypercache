@@ -31,6 +31,7 @@ func NewARCAlgorithm(capacity int) (*ARC, error) {
 	if capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
 	}
+
 	return &ARC{
 		capacity: capacity,
 		t1:       make(map[string]*types.Item, capacity),
@@ -52,6 +53,7 @@ func (arc *ARC) Get(key string) (any, bool) {
 	if ok {
 		arc.mutex.RUnlock()
 		arc.promote(key)
+
 		return item.Value, true
 	}
 	// Check t2
@@ -59,42 +61,13 @@ func (arc *ARC) Get(key string) (any, bool) {
 	if ok {
 		arc.mutex.RUnlock()
 		arc.demote(key)
+
 		return item.Value, true
 	}
+
 	arc.mutex.RUnlock()
+
 	return nil, false
-}
-
-// Promote moves the item with the given key from t2 to t1.
-func (arc *ARC) promote(key string) {
-	arc.mutex.Lock()
-	defer arc.mutex.Unlock()
-	item, ok := arc.t2[key]
-	if !ok {
-		return
-	}
-	delete(arc.t2, key)
-	arc.t1[key] = item
-	arc.p++
-	if arc.p > arc.capacity {
-		arc.p = arc.capacity
-	}
-}
-
-// Demote moves the item with the given key from t1 to t2.
-func (arc *ARC) demote(key string) {
-	arc.mutex.Lock()
-	defer arc.mutex.Unlock()
-	item, ok := arc.t1[key]
-	if !ok {
-		return
-	}
-	delete(arc.t1, key)
-	arc.t2[key] = item
-	arc.p--
-	if arc.p < 0 {
-		arc.p = 0
-	}
 }
 
 // Set adds a new item to the cache with the given key.
@@ -114,14 +87,22 @@ func (arc *ARC) Set(key string, value any) {
 		if !ok {
 			return
 		}
+
 		arc.Delete(evictedKey)
 	}
 	// Add new item to cache
-	item := types.ItemPool.Get().(*types.Item)
+	var item *types.Item
+
+	item, ok = types.ItemPool.Get().(*types.Item)
+	if !ok {
+		item = &types.Item{}
+	}
+
 	item.Value = value
 
 	arc.t1[key] = item
 	arc.c++
+
 	arc.p++
 	if arc.p > arc.capacity {
 		arc.p = arc.capacity
@@ -135,11 +116,14 @@ func (arc *ARC) Delete(key string) {
 	if ok {
 		delete(arc.t1, key)
 		arc.c--
+
 		arc.p--
 		if arc.p < 0 {
 			arc.p = 0
 		}
+
 		types.ItemPool.Put(item)
+
 		return
 	}
 	// Check t2
@@ -147,6 +131,7 @@ func (arc *ARC) Delete(key string) {
 	if ok {
 		delete(arc.t2, key)
 		arc.c--
+
 		types.ItemPool.Put(item)
 	}
 }
@@ -158,15 +143,58 @@ func (arc *ARC) Evict() (string, bool) {
 	for key, val := range arc.t1 {
 		delete(arc.t1, key)
 		arc.c--
+
 		types.ItemPool.Put(val)
+
 		return key, true
 	}
 	// Check t2
 	for key, val := range arc.t2 {
 		delete(arc.t2, key)
 		arc.c--
+
 		types.ItemPool.Put(val)
+
 		return key, true
 	}
+
 	return "", false
+}
+
+// Promote moves the item with the given key from t2 to t1.
+func (arc *ARC) promote(key string) {
+	arc.mutex.Lock()
+	defer arc.mutex.Unlock()
+
+	item, ok := arc.t2[key]
+	if !ok {
+		return
+	}
+
+	delete(arc.t2, key)
+	arc.t1[key] = item
+
+	arc.p++
+	if arc.p > arc.capacity {
+		arc.p = arc.capacity
+	}
+}
+
+// Demote moves the item with the given key from t1 to t2.
+func (arc *ARC) demote(key string) {
+	arc.mutex.Lock()
+	defer arc.mutex.Unlock()
+
+	item, ok := arc.t1[key]
+	if !ok {
+		return
+	}
+
+	delete(arc.t1, key)
+	arc.t2[key] = item
+
+	arc.p--
+	if arc.p < 0 {
+		arc.p = 0
+	}
 }

@@ -1,8 +1,9 @@
 package backend
 
 import (
-	"github.com/hyp3rd/hypercache/libs/serializer"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/hyp3rd/hypercache/libs/serializer"
 )
 
 // iConfigurableBackend is an interface that defines the methods that a backend should implement to be configurable.
@@ -47,7 +48,7 @@ func WithRedisClient[T Redis](client *redis.Client) Option[Redis] {
 	}
 }
 
-// WithKeysSetName is an option that sets the name of the set that holds the keys of the items in the cache
+// WithKeysSetName is an option that sets the name of the set that holds the keys of the items in the cache.
 func WithKeysSetName[T Redis](keysSetName string) Option[Redis] {
 	return func(backend *Redis) {
 		backend.keysSetName = keysSetName

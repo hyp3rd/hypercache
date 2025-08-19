@@ -13,7 +13,7 @@ import (
 // It enables middleware to be added to the service.
 type Service interface {
 	// Get retrieves a value from the cache using the key
-	Get(key string) (value interface{}, ok bool)
+	Get(key string) (value any, ok bool)
 	// Set stores a value in the cache using the key and expiration duration
 	Set(ctx context.Context, key string, value any, expiration time.Duration) error
 	// GetOrSet retrieves a value from the cache using the key, if the key does not exist, it will set the value using the key and expiration duration
@@ -25,7 +25,7 @@ type Service interface {
 	// List returns a list of all items in the cache
 	List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error)
 	// Remove removes a value from the cache using the key
-	Remove(ctx context.Context, keys ...string)
+	Remove(ctx context.Context, keys ...string) error
 	// Clear removes all values from the cache
 	Clear(ctx context.Context) error
 	// Capacity returns the capacity of the cache

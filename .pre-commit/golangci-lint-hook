@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -e
+
+# ######################################
+# Ensure that a go module is initialized if not, skip the tests
+# #######################################
+ensure_go_module_initialized() {
+	if [[ ! -f go.mod ]]; then
+		echo "go.mod file not found, skipping the tests..."
+		exit 0
+	fi
+}
+
+# #######################################
+# Constants
+# #######################################
+GO_BIN_PATH="$(go env GOPATH)/bin"
+GOLANGCI_LINT_INSTALL_URL="https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh"
+GOLANGCI_LINT_VERSION="v2.4.0"
+
+# #######################################
+# Install dependencies to run the pre-commit hook
+# #######################################
+install_dependencies() {
+	# check if golangci-lint is installed or not
+	if ! command -v golangci-lint >/dev/null 2>&1; then
+		echo "installing golangci-lint ${GOLANGCI_LINT_VERSION}..."
+
+		# binary will be $(go env GOPATH)/bin/golangci-lint
+		curl -sSfL "${GOLANGCI_LINT_INSTALL_URL}" | sh -s -- -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
+
+		echo "Installed golangci-lint ${GOLANGCI_LINT_VERSION}"
+
+		"$(go env GOPATH)"/bin/golangci-lint --version
+
+		# export the golangci-lint path to the PATH variable
+		export PATH="${GO_BIN_PATH}:${PATH}"
+	else
+		echo "golangci-lint is already installed"
+	fi
+}
+
+# #######################################
+# Run the pre-commit
+# #######################################
+hook() {
+	install_dependencies
+
+	# get the root of the project
+	local root_dir
+	root_dir=$(git rev-parse --show-toplevel)
+
+	# run the pre-commit hook
+	pushd "${root_dir}" || exit
+
+	echo "Running golangci-lint..."
+	golangci-lint run ./... || exit 1
+
+	popd >/dev/null || exit
+}
+
+cat <<EOF
+golangci-lint hook
+=============================================================================
+
+This hook ensures and runs golangci-lint on the project.
+It should be installed and run as a pre-commit hook.
+
+If golangci-lint finds any errors it will prevent the commit.
+=============================================================================
+
+EOF
+
+# run the hook if the go module is initialized
+ensure_go_module_initialized
+hook

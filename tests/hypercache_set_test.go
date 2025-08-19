@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/longbridgeapp/assert"
+
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/errors"
-	"github.com/longbridgeapp/assert"
 )
 
 func TestHyperCache_Set(t *testing.T) {
@@ -74,7 +75,6 @@ func TestHyperCache_Set(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-
 			err = cache.Set(context.TODO(), test.key, test.value, test.expiry)
 			assert.Equal(t, test.expectedErr, err)
 			if err == nil {

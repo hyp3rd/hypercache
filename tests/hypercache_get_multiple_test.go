@@ -5,24 +5,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/longbridgeapp/assert"
+
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/errors"
-	"github.com/longbridgeapp/assert"
 )
 
 func TestGetMultiple(t *testing.T) {
 	tests := []struct {
 		name       string
 		keys       []string
-		wantValues map[string]interface{}
+		wantValues map[string]any
 		wantErrs   map[string]error
 		setup      func(cache *hypercache.HyperCache[backend.InMemory])
 	}{
 		{
 			name:       "get multiple keys with values",
 			keys:       []string{"key1", "key2", "key3"},
-			wantValues: map[string]interface{}{"key1": 1, "key2": 2, "key3": 3},
+			wantValues: map[string]any{"key1": 1, "key2": 2, "key3": 3},
 			wantErrs:   map[string]error(map[string]error{}),
 			setup: func(cache *hypercache.HyperCache[backend.InMemory]) {
 				cache.Set(context.TODO(), "key1", 1, 0)
@@ -33,7 +34,7 @@ func TestGetMultiple(t *testing.T) {
 		{
 			name:       "get multiple keys with missing values",
 			keys:       []string{"key1", "key2", "key3"},
-			wantValues: map[string]interface{}{"key1": 1, "key3": 3},
+			wantValues: map[string]any{"key1": 1, "key3": 3},
 			wantErrs:   map[string]error{"key2": errors.ErrKeyNotFound},
 			setup: func(cache *hypercache.HyperCache[backend.InMemory]) {
 				cache.Set(context.TODO(), "key1", 1, 0)
@@ -43,7 +44,7 @@ func TestGetMultiple(t *testing.T) {
 		{
 			name:       "get multiple keys with expired values",
 			keys:       []string{"key1", "key2", "key3"},
-			wantValues: map[string]interface{}{"key2": 2, "key3": 3},
+			wantValues: map[string]any{"key2": 2, "key3": 3},
 			wantErrs:   map[string]error{"key1": errors.ErrKeyNotFound},
 			setup: func(cache *hypercache.HyperCache[backend.InMemory]) {
 				cache.Set(context.TODO(), "key1", 1, time.Millisecond)

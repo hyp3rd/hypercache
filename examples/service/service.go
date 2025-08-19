@@ -11,11 +11,13 @@ import (
 
 func main() {
 	var svc hypercache.Service
+
 	hyperCache, err := hypercache.NewInMemoryWithDefaults(10)
 	defer hyperCache.Stop()
 
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 	// assign statsCollector of the backend to use it in middleware
@@ -24,6 +26,7 @@ func main() {
 
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 
@@ -45,16 +48,20 @@ func main() {
 	err = svc.Set(context.TODO(), "key string", "value any", 0)
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
+
 	key, ok := svc.Get("key string")
 	if !ok {
 		fmt.Println("key not found")
+
 		return
 	}
+
 	fmt.Println(key)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		svc.Set(context.TODO(), fmt.Sprintf("key%v", i), fmt.Sprintf("val%v", i), 0)
 	}
 
@@ -70,6 +77,7 @@ func main() {
 	val, err := svc.GetOrSet(context.TODO(), "key9999", "val9999", 0)
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 

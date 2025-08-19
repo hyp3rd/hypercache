@@ -9,11 +9,12 @@ package hypercache
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/errors"
@@ -87,6 +88,7 @@ func NewInMemoryWithDefaults(capacity int) (hyperCache *HyperCache[backend.InMem
 	if err != nil {
 		return nil, err
 	}
+
 	return hyperCache, nil
 }
 
@@ -100,7 +102,7 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (hy
 	// Get the backend constructor from the registry
 	constructor, exists := bm.backendRegistry[config.BackendType]
 	if !exists {
-		return nil, fmt.Errorf("unknown backend type: %s", config.BackendType)
+		return nil, ewrap.Newf("unknown backend type: %s", config.BackendType)
 	}
 
 	// Create the backend
@@ -149,8 +151,9 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (hy
 		// Use the specified eviction algorithm
 		hyperCache.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hyperCache.evictionAlgorithmName, int(hyperCache.maxEvictionCount))
 	}
+
 	if err != nil {
-		return
+		return hyperCache, err
 	}
 
 	// Initialize the stats collector
@@ -161,7 +164,7 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (hy
 		// Use the specified stats collector
 		hyperCache.StatsCollector, err = stats.NewCollector(hyperCache.statsCollectorName)
 		if err != nil {
-			return
+			return hyperCache, err
 		}
 	}
 
@@ -180,6 +183,7 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (hy
 	// Start expiration and eviction loops if capacity is greater than zero
 	hyperCache.once.Do(func() {
 		tick := time.NewTicker(hyperCache.expirationInterval)
+
 		go func() {
 			for {
 				select {
@@ -204,6 +208,7 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (hy
 			hyperCache.evictCh = make(chan bool, 1)
 			// Start the eviction loop
 			tick := time.NewTicker(hyperCache.evictionInterval)
+
 			go func() {
 				for {
 					select {
@@ -217,7 +222,7 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (hy
 		}
 	})
 
-	return
+	return hyperCache, err
 }
 
 // expirationLoop is a function that runs in a separate goroutine and expires items in the cache based on their expiration duration.
@@ -233,7 +238,7 @@ func (hyperCache *HyperCache[T]) expirationLoop(ctx context.Context) {
 		)
 
 		// get all expired items
-		items, err = hyperCache.List(context.TODO(),
+		items, err = hyperCache.List(ctx,
 			backend.WithSortBy(types.SortByExpiration.String()),
 			backend.WithFilterFunc(func(item *types.Item) bool {
 				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
@@ -245,6 +250,7 @@ func (hyperCache *HyperCache[T]) expirationLoop(ctx context.Context) {
 		// iterate all expired items and remove them
 		for _, item := range items {
 			expiredCount++
+
 			hyperCache.Remove(ctx, item.Key)
 			types.ItemPool.Put(item)
 			hyperCache.StatsCollector.Incr("item_expired_count", 1)
@@ -264,13 +270,10 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 	hyperCache.workerPool.Enqueue(func() error {
 		hyperCache.StatsCollector.Incr("eviction_loop_count", 1)
 		defer hyperCache.StatsCollector.Timing("eviction_loop_duration", time.Now().UnixNano())
+
 		var evictedCount int64
 
-		for {
-			if hyperCache.backend.Count() <= hyperCache.backend.Capacity() {
-				break
-			}
-
+		for hyperCache.backend.Count() > hyperCache.backend.Capacity() {
 			if hyperCache.maxEvictionCount == uint(evictedCount) {
 				break
 			}
@@ -283,12 +286,15 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 
 			// remove the item from the cache
 			hyperCache.Remove(ctx, key)
+
 			evictedCount++
+
 			hyperCache.StatsCollector.Incr("item_evicted_count", 1)
 		}
 
 		hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count()))
 		hyperCache.StatsCollector.Gauge("evicted_item_count", evictedCount)
+
 		return nil
 	})
 }
@@ -303,6 +309,7 @@ func (hyperCache *HyperCache[T]) evictItem(ctx context.Context) (string, bool) {
 	}
 
 	hyperCache.Remove(ctx, key)
+
 	return key, true
 }
 
@@ -310,8 +317,13 @@ func (hyperCache *HyperCache[T]) evictItem(ctx context.Context) (string, bool) {
 // If the expiration duration is greater than zero, the item will expire after the specified duration.
 // If the capacity of the cache is reached, the cache will leverage the eviction algorithm proactively if the evictionInterval is zero. If not, the background process will take care of the eviction.
 func (hyperCache *HyperCache[T]) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
+	var item *types.Item
 	// Create a new cache item and set its properties
-	item := types.ItemPool.Get().(*types.Item)
+	item, ok := types.ItemPool.Get().(*types.Item)
+	if !ok {
+		item = &types.Item{}
+	}
+
 	item.Key = key
 	item.Value = value
 	item.Expiration = expiration
@@ -328,8 +340,10 @@ func (hyperCache *HyperCache[T]) Set(ctx context.Context, key string, value any,
 
 	// check if adding this item will exceed the maxCacheSize
 	hyperCache.memoryAllocation.Add(item.Size)
+
 	if hyperCache.maxCacheSize > 0 && hyperCache.memoryAllocation.Load() > hyperCache.maxCacheSize {
 		hyperCache.memoryAllocation.Add(-item.Size)
+
 		return errors.ErrCacheFull
 	}
 
@@ -338,6 +352,7 @@ func (hyperCache *HyperCache[T]) Set(ctx context.Context, key string, value any,
 	if err != nil {
 		hyperCache.memoryAllocation.Add(-item.Size)
 		types.ItemPool.Put(item)
+
 		return err
 	}
 
@@ -363,13 +378,16 @@ func (hyperCache *HyperCache[T]) Get(key string) (value any, ok bool) {
 	if item.Expired() {
 		go func() {
 			types.ItemPool.Put(item)
+
 			hyperCache.expirationTriggerCh <- true
 		}()
+
 		return nil, false
 	}
 
 	// Update the last access time and access count
 	item.Touch()
+
 	return item.Value, true
 }
 
@@ -385,13 +403,16 @@ func (hyperCache *HyperCache[T]) GetWithInfo(key string) (*types.Item, bool) {
 	if item.Expired() {
 		go func() {
 			types.ItemPool.Put(item)
+
 			hyperCache.expirationTriggerCh <- true
 		}()
+
 		return nil, false
 	}
 
 	// Update the last access time and access count
 	item.Touch()
+
 	return item, true
 }
 
@@ -400,24 +421,30 @@ func (hyperCache *HyperCache[T]) GetWithInfo(key string) (*types.Item, bool) {
 func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error) {
 	// if the item is found, return the value
 	if item, ok := hyperCache.backend.Get(key); ok {
-
 		// Check if the item has expired
 		if item.Expired() {
 			go func() {
 				types.ItemPool.Put(item)
+
 				hyperCache.expirationTriggerCh <- true
 			}()
+
 			return nil, errors.ErrKeyExpired
 		}
 
 		// Update the last access time and access count
 		item.Touch()
-		return item.Value, nil
 
+		return item.Value, nil
 	}
 
+	var item *types.Item
 	// if the item is not found, add it to the cache
-	item := types.ItemPool.Get().(*types.Item)
+	item, ok := types.ItemPool.Get().(*types.Item)
+	if !ok {
+		item = &types.Item{}
+	}
+
 	item.Key = key
 	item.Value = value
 	item.Expiration = expiration
@@ -434,9 +461,11 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 
 	// check if adding this item will exceed the maxCacheSize
 	hyperCache.memoryAllocation.Add(item.Size)
+
 	if hyperCache.maxCacheSize > 0 && hyperCache.memoryAllocation.Load() > hyperCache.maxCacheSize {
 		hyperCache.memoryAllocation.Add(-item.Size)
 		types.ItemPool.Put(item)
+
 		return nil, errors.ErrCacheFull
 	}
 
@@ -445,6 +474,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 	if err != nil {
 		hyperCache.memoryAllocation.Add(-item.Size)
 		types.ItemPool.Put(item)
+
 		return nil, err
 	}
 
@@ -457,6 +487,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 			hyperCache.evictItem(ctx)
 		}
 	}()
+
 	return value, nil
 }
 
@@ -470,6 +501,7 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 		if !ok {
 			// Add the key to the errors map and continue
 			failed[key] = errors.ErrKeyNotFound
+
 			continue
 		}
 
@@ -486,7 +518,6 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 			// Add the item to the result map
 			result[key] = item.Value
 		}
-
 	}
 
 	return
@@ -494,13 +525,13 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 
 // List lists the items in the cache that meet the specified criteria.
 // It takes in a variadic number of any type as filters, it then checks the backend type, and calls the corresponding
-// implementation of the List function for that backend, with the filters passed in as arguments
+// implementation of the List function for that backend, with the filters passed in as arguments.
 func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error) {
 	return hyperCache.backend.List(ctx, filters...)
 }
 
 // Remove removes items with the given key from the cache. If an item is not found, it does nothing.
-func (hyperCache *HyperCache[T]) Remove(ctx context.Context, keys ...string) {
+func (hyperCache *HyperCache[T]) Remove(ctx context.Context, keys ...string) error {
 	// Remove the item from the eviction algorithm
 	// and update the memory allocation
 	for _, key := range keys {
@@ -511,7 +542,13 @@ func (hyperCache *HyperCache[T]) Remove(ctx context.Context, keys ...string) {
 			hyperCache.evictionAlgorithm.Delete(key)
 		}
 	}
-	hyperCache.backend.Remove(ctx, keys...)
+
+	err := hyperCache.backend.Remove(ctx, keys...)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Clear removes all items from the cache.
@@ -522,7 +559,7 @@ func (hyperCache *HyperCache[T]) Clear(ctx context.Context) error {
 	)
 
 	// get all expired items
-	items, err = hyperCache.backend.List(context.TODO())
+	items, err = hyperCache.backend.List(ctx)
 	if err != nil {
 		return err
 	}
@@ -539,6 +576,7 @@ func (hyperCache *HyperCache[T]) Clear(ctx context.Context) error {
 
 	// reset the memory allocation
 	hyperCache.memoryAllocation.Store(0)
+
 	return err
 }
 
@@ -585,11 +623,15 @@ func (hyperCache *HyperCache[T]) Stop() {
 	// Stop the expiration and eviction loops
 	wg := sync.WaitGroup{}
 	wg.Add(1)
+
 	go func() {
 		defer wg.Done()
+
 		hyperCache.stop <- true
 	}()
+
 	wg.Wait()
+
 	hyperCache.once = sync.Once{}
 	hyperCache.workerPool.Shutdown()
 }

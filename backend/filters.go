@@ -1,13 +1,14 @@
 package backend
 
 import (
-	"fmt"
 	"sort"
+
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/types"
 )
 
-// itemSorter is a custom sorter for the items
+// itemSorter is a custom sorter for the items.
 type itemSorter struct {
 	items []*types.Item
 	less  func(i, j *types.Item) bool
@@ -86,10 +87,11 @@ func (f sortByFilter) ApplyFilter(backendType string, items []*types.Item) ([]*t
 			},
 		}
 	default:
-		return nil, fmt.Errorf("invalid sort field: %s", f.field)
+		return nil, ewrap.Newf("invalid sort field: %s", f.field)
 	}
 
 	sort.Sort(sorter)
+
 	return items, nil
 }
 
@@ -100,16 +102,19 @@ func (f SortOrderFilter) ApplyFilter(backendType string, items []*types.Item) ([
 			items[i], items[j] = items[j], items[i]
 		}
 	}
+
 	return items, nil
 }
 
 // ApplyFilter applies the filter function to the given list of items.
 func (f filterFunc) ApplyFilter(backendType string, items []*types.Item) ([]*types.Item, error) {
 	filteredItems := make([]*types.Item, 0)
+
 	for _, item := range items {
 		if f.fn(item) {
 			filteredItems = append(filteredItems, item)
 		}
 	}
+
 	return filteredItems, nil
 }

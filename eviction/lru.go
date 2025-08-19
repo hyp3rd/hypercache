@@ -16,7 +16,7 @@ import (
 	"github.com/hyp3rd/hypercache/errors"
 )
 
-// lruCacheItem represents an item in the LRU cache
+// lruCacheItem represents an item in the LRU cache.
 type lruCacheItem struct {
 	Key   string
 	Value any
@@ -26,40 +26,45 @@ type lruCacheItem struct {
 
 // LRUCacheItemmPool is a pool of LRUCacheItemm values.
 var LRUCacheItemmPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &lruCacheItem{}
 	},
 }
 
-// LRU represents a LRU cache
+// LRU represents a LRU cache.
 type LRU struct {
-	capacity     int                      // The maximum number of items in the cache
-	items        map[string]*lruCacheItem // The items in the cache
-	head         *lruCacheItem            // The head of the linked list
-	tail         *lruCacheItem            // The tail of the linked list
-	sync.RWMutex                          // The mutex used to protect the cache
+	sync.RWMutex // The mutex used to protect the cache
+
+	capacity int                      // The maximum number of items in the cache
+	items    map[string]*lruCacheItem // The items in the cache
+	head     *lruCacheItem            // The head of the linked list
+	tail     *lruCacheItem            // The tail of the linked list
 }
 
-// NewLRUAlgorithm creates a new LRU cache with the given capacity
+// NewLRUAlgorithm creates a new LRU cache with the given capacity.
 func NewLRUAlgorithm(capacity int) (*LRU, error) {
 	if capacity < 0 {
 		return nil, errors.ErrInvalidCapacity
 	}
+
 	return &LRU{
 		capacity: capacity,
 		items:    make(map[string]*lruCacheItem, capacity),
 	}, nil
 }
 
-// Get retrieves the value for the given key from the cache. If the key is not
+// Get retrieves the value for the given key from the cache. If the key is not.
 func (lru *LRU) Get(key string) (any, bool) {
 	lru.RLock()
 	defer lru.RUnlock()
+
 	item, ok := lru.items[key]
 	if !ok {
 		return nil, false
 	}
+
 	lru.moveToFront(item)
+
 	return item.Value, true
 }
 
@@ -68,12 +73,15 @@ func (lru *LRU) Get(key string) (any, bool) {
 func (lru *LRU) Set(key string, value any) {
 	lru.Lock()
 	defer lru.Unlock()
+
 	item, ok := lru.items[key]
 	if ok {
 		item.Value = value
 		lru.moveToFront(item)
+
 		return
 	}
+
 	if len(lru.items) == lru.capacity {
 		delete(lru.items, lru.tail.Key)
 		lru.removeFromList(lru.tail)
@@ -93,13 +101,16 @@ func (lru *LRU) Set(key string, value any) {
 func (lru *LRU) Evict() (string, bool) {
 	lru.Lock()
 	defer lru.Unlock()
+
 	if lru.tail == nil {
 		return "", false
 	}
+
 	key := lru.tail.Key
 	LRUCacheItemmPool.Put(lru.tail)
 	lru.removeFromList(lru.tail)
 	delete(lru.items, key)
+
 	return key, true
 }
 
@@ -107,10 +118,12 @@ func (lru *LRU) Evict() (string, bool) {
 func (lru *LRU) Delete(key string) {
 	lru.Lock()
 	defer lru.Unlock()
+
 	item, ok := lru.items[key]
 	if !ok {
 		return
 	}
+
 	lru.removeFromList(item)
 	delete(lru.items, key)
 }
@@ -119,6 +132,7 @@ func (lru *LRU) Delete(key string) {
 func (lru *LRU) Len() int {
 	lru.RLock()
 	defer lru.RUnlock()
+
 	return len(lru.items)
 }
 
@@ -127,6 +141,7 @@ func (lru *LRU) moveToFront(item *lruCacheItem) {
 	if item == lru.head {
 		return
 	}
+
 	lru.removeFromList(item)
 	lru.addToFront(item)
 }
@@ -138,11 +153,13 @@ func (lru *LRU) removeFromList(item *lruCacheItem) {
 	} else {
 		item.prev.next = item.next
 	}
+
 	if item == lru.tail {
 		lru.tail = item.prev
 	} else {
 		item.next.prev = item.prev
 	}
+
 	item.prev = nil
 	item.next = nil
 }
@@ -152,8 +169,10 @@ func (lru *LRU) addToFront(item *lruCacheItem) {
 	if lru.head == nil {
 		lru.head = item
 		lru.tail = item
+
 		return
 	}
+
 	item.next = lru.head
 	lru.head.prev = item
 	lru.head = item

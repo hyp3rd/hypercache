@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/hyp3rd/hypercache"
@@ -10,27 +11,29 @@ import (
 	"github.com/hyp3rd/hypercache/types"
 )
 
-// This example demonstrates how to list items from the cache
+// This example demonstrates how to list items from the cache.
 func main() {
 	// Create a new HyperCache with a capacity of 400
 	hyperCache, err := hypercache.NewInMemoryWithDefaults(400)
-
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 	// Stop the cache when the program exits
 	defer hyperCache.Stop()
 
 	// Add 100 items to the cache
-	for i := 0; i < 10; i++ {
-		key := fmt.Sprintf("%d", i)
+	for i := range 10 {
+		key := strconv.Itoa(i)
 		val := fmt.Sprintf("val%d", i)
 
 		err = hyperCache.Set(context.TODO(), key, val, time.Minute)
 		time.Sleep(time.Millisecond * 350)
+
 		if err != nil {
 			fmt.Printf("unexpected error: %v\n", err)
+
 			return
 		}
 	}
@@ -53,6 +56,7 @@ func main() {
 	items, err := hyperCache.List(context.TODO(), sortByFilter, sortOrder, filter)
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 

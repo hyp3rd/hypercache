@@ -8,7 +8,7 @@ import (
 )
 
 // TypeName returns the type and inferred type name of the object passed in.
-func TypeName(object interface{}) (typeName string, inferredType string) {
+func TypeName(object any) (typeName string, inferredType string) {
 	typeString := fmt.Sprintf("%T", object)
 	parts := strings.Split(typeString, "[")
 
@@ -18,24 +18,27 @@ func TypeName(object interface{}) (typeName string, inferredType string) {
 	if len(parts) > 1 {
 		inferredType = strings.TrimSuffix(parts[1], "]")
 	}
+
 	return typeName, inferredType
 }
 
-// CacheBackendChecker is a helper struct to check the type of the backend
+// CacheBackendChecker is a helper struct to check the type of the backend.
 type CacheBackendChecker[T backend.IBackendConstrain] struct {
 	Backend     backend.IBackend[T]
 	BackendType string
 }
 
-// IsInMemory returns true if the backend is an InMemory
+// IsInMemory returns true if the backend is an InMemory.
 func (c *CacheBackendChecker[T]) IsInMemory() bool {
 	_, ok := c.Backend.(*backend.InMemory)
+
 	return ok
 }
 
-// IsRedisBackend returns true if the backend is a Redis
+// IsRedisBackend returns true if the backend is a Redis.
 func (c *CacheBackendChecker[T]) IsRedis() bool {
 	_, ok := c.Backend.(*backend.Redis)
+
 	return ok
 }
 

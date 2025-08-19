@@ -10,7 +10,7 @@ type Stat struct {
 	Mean float64
 	// Median value of the stat
 	Median float64
-	// Min is the minumum value of the stat
+	// Min is the minimum value of the stat
 	Min int64
 	// Max maximum value of the stat
 	Max int64

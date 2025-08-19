@@ -1,7 +1,7 @@
 package eviction
 
 import (
-	"fmt"
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/errors"
 )
@@ -26,15 +26,16 @@ var algorithmRegistry = make(map[string]func(capacity int) (IAlgorithm, error))
 func NewEvictionAlgorithm(algorithmName string, capacity int) (IAlgorithm, error) {
 	// Check the parameters.
 	if algorithmName == "" {
-		return nil, fmt.Errorf("%s: %s", errors.ErrParamCannotBeEmpty, "algorithmName")
+		return nil, ewrap.Wrap(errors.ErrParamCannotBeEmpty, "algorithmName")
 	}
+
 	if capacity < 0 {
-		return nil, errors.ErrInvalidCapacity
+		return nil, ewrap.Wrapf(errors.ErrInvalidCapacity, "capacity")
 	}
 
 	createFunc, ok := algorithmRegistry[algorithmName]
 	if !ok {
-		return nil, fmt.Errorf("%s: %s", errors.ErrAlgorithmNotFound, algorithmName)
+		return nil, ewrap.Wrap(errors.ErrAlgorithmNotFound, algorithmName)
 	}
 
 	return createFunc(capacity)

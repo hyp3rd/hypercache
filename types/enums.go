@@ -21,15 +21,15 @@ func (f SortingField) String() string {
 type Stat string
 
 const (
-	// StatIncr represent a stat that should be incremented
+	// StatIncr represent a stat that should be incremented.
 	StatIncr Stat = "incr"
-	// StatDecr represent a stat that should be decremented
+	// StatDecr represent a stat that should be decremented.
 	StatDecr Stat = "decr"
-	// StatTiming represent a stat that represents the time it takes for an event to occur
+	// StatTiming represent a stat that represents the time it takes for an event to occur.
 	StatTiming Stat = "timing"
-	// StatGauge represent a stat that represents the current value of a statistic
+	// StatGauge represent a stat that represents the current value of a statistic.
 	StatGauge Stat = "gauge"
-	// StatHistogram represent a stat that represents the statistical distribution of a set of values
+	// StatHistogram represent a stat that represents the statistical distribution of a set of values.
 	StatHistogram Stat = "histogram"
 )
 

@@ -24,7 +24,6 @@ func main() {
 
 	// Create a new HyperCache with a capacity of 10
 	cache, err := hypercache.New(hypercache.GetDefaultManager(), config)
-
 	if err != nil {
 		panic(err)
 	}
@@ -583,7 +582,7 @@ func main() {
 		},
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		err = cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), users, 0)
 		if err != nil {
 			fmt.Println(err, "set", i)
@@ -598,6 +597,7 @@ func main() {
 	} else {
 		fmt.Println("key not found")
 	}
+
 	fmt.Println(cache.Count())
 	fmt.Println(cache.Allocation())
 }

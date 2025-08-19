@@ -37,6 +37,7 @@ func (fh FrequencyHeap) Less(i, j int) bool {
 	if fh[i].count == fh[j].count {
 		return fh[i].index < fh[j].index
 	}
+
 	return fh[i].count < fh[j].count
 }
 
@@ -48,7 +49,7 @@ func (fh FrequencyHeap) Swap(i, j int) {
 }
 
 // Push adds a node to the heap.
-func (fh *FrequencyHeap) Push(x interface{}) {
+func (fh *FrequencyHeap) Push(x any) {
 	n := len(*fh)
 	node := x.(*Node)
 	node.index = n
@@ -56,12 +57,13 @@ func (fh *FrequencyHeap) Push(x interface{}) {
 }
 
 // Pop removes the last node from the heap.
-func (fh *FrequencyHeap) Pop() interface{} {
+func (fh *FrequencyHeap) Pop() any {
 	old := *fh
 	n := len(old)
 	node := old[n-1]
 	node.index = -1
 	*fh = old[0 : n-1]
+
 	return node
 }
 
@@ -79,23 +81,11 @@ func NewLFUAlgorithm(capacity int) (*LFUAlgorithm, error) {
 	}, nil
 }
 
-// internalEvict evicts an item from the cache based on the LFU algorithm.
-func (l *LFUAlgorithm) internalEvict() (string, bool) {
-	if l.length == 0 {
-		return "", false
-	}
-
-	node := heap.Pop(l.freqs).(*Node)
-	delete(l.items, node.key)
-	l.length--
-
-	return node.key, true
-}
-
 // Evict evicts an item from the cache based on the LFU algorithm.
 func (l *LFUAlgorithm) Evict() (string, bool) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
+
 	return l.internalEvict()
 }
 
@@ -130,6 +120,7 @@ func (l *LFUAlgorithm) Get(key string) (any, bool) {
 
 	node.count++
 	heap.Fix(l.freqs, node.index)
+
 	return node.value, true
 }
 
@@ -144,9 +135,24 @@ func (l *LFUAlgorithm) Delete(key string) {
 	}
 
 	heap.Remove(l.freqs, node.index)
+
 	for i := node.index; i < len(*l.freqs); i++ {
 		(*l.freqs)[i].index--
 	}
+
 	delete(l.items, key)
 	l.length--
+}
+
+// internalEvict evicts an item from the cache based on the LFU algorithm.
+func (l *LFUAlgorithm) internalEvict() (string, bool) {
+	if l.length == 0 {
+		return "", false
+	}
+
+	node := heap.Pop(l.freqs).(*Node)
+	delete(l.items, node.key)
+	l.length--
+
+	return node.key, true
 }

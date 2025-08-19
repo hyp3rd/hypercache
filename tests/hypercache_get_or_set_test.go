@@ -5,18 +5,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/longbridgeapp/assert"
+
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/errors"
-	"github.com/longbridgeapp/assert"
 )
 
 func TestHyperCache_GetOrSet(t *testing.T) {
 	tests := []struct {
 		name          string
 		key           string
-		value         interface{}
+		value         any
 		expiry        time.Duration
-		expectedValue interface{}
+		expectedValue any
 		expectedErr   error
 	}{
 		{
@@ -73,7 +74,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var (
-				val interface{}
+				val any
 				err error
 			)
 

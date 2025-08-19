@@ -26,6 +26,7 @@ func main() {
 	hyperCache, err := hypercache.New(hypercache.GetDefaultManager(), config)
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 	// Stop the cache when the program exits
@@ -33,14 +34,14 @@ func main() {
 
 	fmt.Println("Adding 300 items to the cache")
 	// Add 300 items to the cache
-	for i := 0; i < 300; i++ {
+	for i := range 300 {
 		key := fmt.Sprintf("key%d", i)
 		val := fmt.Sprintf("val%d", i)
 
 		err = hyperCache.Set(context.TODO(), key, val, time.Minute)
-
 		if err != nil {
 			fmt.Printf("unexpected error: %v\n", err)
+
 			return
 		}
 	}
@@ -50,10 +51,10 @@ func main() {
 
 	// Retrieve the list of items from the cache
 	list, err := hyperCache.List(context.TODO())
-
 	// Check for errors
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 

@@ -13,8 +13,8 @@ import (
 // Logger describes a logging interface allowing to implement different external, or custom logger.
 // Tested with logrus, and Uber's Zap (high-performance), but should work with any other logger that matches the interface.
 type Logger interface {
-	Printf(format string, v ...interface{})
-	// Errorf(format string, v ...interface{})
+	Printf(format string, v ...any)
+	// Errorf(format string, v ...any)
 }
 
 // LoggingMiddleware is a middleware that logs the time it takes to execute the next middleware.
@@ -30,12 +30,13 @@ func NewLoggingMiddleware(next hypercache.Service, logger Logger) hypercache.Ser
 }
 
 // Get logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) Get(key string) (value interface{}, ok bool) {
+func (mw LoggingMiddleware) Get(key string) (value any, ok bool) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method Get took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("Get method called with key: %s", key)
+
 	return mw.next.Get(key)
 }
 
@@ -46,6 +47,7 @@ func (mw LoggingMiddleware) Set(ctx context.Context, key string, value any, expi
 	}(time.Now())
 
 	mw.logger.Printf("Set method called with key: %s value: %s", key, value)
+
 	return mw.next.Set(ctx, key, value, expiration)
 }
 
@@ -56,6 +58,7 @@ func (mw LoggingMiddleware) GetOrSet(ctx context.Context, key string, value any,
 	}(time.Now())
 
 	mw.logger.Printf("GetOrSet method invoked with key: %s value: %s", key, value)
+
 	return mw.next.GetOrSet(ctx, key, value, expiration)
 }
 
@@ -66,6 +69,7 @@ func (mw LoggingMiddleware) GetWithInfo(key string) (item *types.Item, ok bool) 
 	}(time.Now())
 
 	mw.logger.Printf("GetWithInfo method invoked with key: %s", key)
+
 	return mw.next.GetWithInfo(key)
 }
 
@@ -76,6 +80,7 @@ func (mw LoggingMiddleware) GetMultiple(ctx context.Context, keys ...string) (re
 	}(time.Now())
 
 	mw.logger.Printf("GetMultiple method invoked with keys: %s", keys)
+
 	return mw.next.GetMultiple(ctx, keys...)
 }
 
@@ -86,17 +91,19 @@ func (mw LoggingMiddleware) List(ctx context.Context, filters ...backend.IFilter
 	}(time.Now())
 
 	mw.logger.Printf("List method invoked with filters: %s", filters)
+
 	return mw.next.List(ctx, filters...)
 }
 
 // Remove logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) Remove(ctx context.Context, keys ...string) {
+func (mw LoggingMiddleware) Remove(ctx context.Context, keys ...string) error {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method Remove took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("Remove method invoked with keys: %s", keys)
-	mw.next.Remove(ctx, keys...)
+
+	return mw.next.Remove(ctx, keys...)
 }
 
 // Clear logs the time it takes to execute the next middleware.
@@ -106,6 +113,7 @@ func (mw LoggingMiddleware) Clear(ctx context.Context) error {
 	}(time.Now())
 
 	mw.logger.Printf("Clear method invoked")
+
 	return mw.next.Clear(ctx)
 }
 
@@ -114,7 +122,7 @@ func (mw LoggingMiddleware) Capacity() int {
 	return mw.next.Capacity()
 }
 
-// Allocation returns the size allocation in bytes cache
+// Allocation returns the size allocation in bytes cache.
 func (mw LoggingMiddleware) Allocation() int64 {
 	return mw.next.Allocation()
 }
@@ -151,5 +159,6 @@ func (mw LoggingMiddleware) GetStats() stats.Stats {
 	}(time.Now())
 
 	mw.logger.Printf("GetStats method invoked")
+
 	return mw.next.GetStats()
 }

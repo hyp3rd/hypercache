@@ -12,13 +12,15 @@ func main() {
 	cache, err := hypercache.NewInMemoryWithDefaults(100000)
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 	// Stop the cache when the program exits
 	defer cache.Stop()
 
 	fmt.Println("adding 100000 items to cache")
-	for i := 0; i < 100000; i++ {
+
+	for i := range 100000 {
 		cache.Set(context.TODO(), fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i), 0)
 	}
 

@@ -25,32 +25,14 @@ func NewWorkerPool(workers int) *WorkerPool {
 		errorChan: make(chan error, workers),
 	}
 	pool.start()
-	return pool
-}
 
-// start starts the worker pool.
-func (pool *WorkerPool) start() {
-	for i := 0; i < pool.workers; i++ {
-		go func() {
-			for {
-				select {
-				case job := <-pool.jobs:
-					err := job()
-					if err != nil {
-						pool.errorChan <- err
-					}
-					pool.wg.Done()
-				case <-pool.quit:
-					return
-				}
-			}
-		}()
-	}
+	return pool
 }
 
 // Enqueue adds a job to the worker pool.
 func (pool *WorkerPool) Enqueue(job JobFunc) {
 	pool.wg.Add(1)
+
 	pool.jobs <- job
 }
 
@@ -82,7 +64,7 @@ func (pool *WorkerPool) Resize(newSize int) {
 
 	if diff > 0 {
 		// Increase the number of workers
-		for i := 0; i < diff; i++ {
+		for range diff {
 			go func() {
 				for job := range pool.jobs {
 					job()
@@ -91,8 +73,29 @@ func (pool *WorkerPool) Resize(newSize int) {
 		}
 	} else {
 		// Decrease the number of workers
-		for i := 0; i < -diff; i++ {
+		for range pool.workers {
 			pool.quit <- struct{}{}
 		}
+	}
+}
+
+// start starts the worker pool.
+func (pool *WorkerPool) start() {
+	for range pool.workers {
+		go func() {
+			for {
+				select {
+				case job := <-pool.jobs:
+					err := job()
+					if err != nil {
+						pool.errorChan <- err
+					}
+
+					pool.wg.Done()
+				case <-pool.quit:
+					return
+				}
+			}
+		}()
 	}
 }

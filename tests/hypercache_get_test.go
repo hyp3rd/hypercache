@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/longbridgeapp/assert"
+
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/errors"
-	"github.com/longbridgeapp/assert"
 )
 
 func TestHyperCache_Get(t *testing.T) {

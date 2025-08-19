@@ -25,6 +25,7 @@ func NewHistogramStatsCollector() *HistogramStatsCollector {
 func (c *HistogramStatsCollector) Incr(stat types.Stat, value int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.stats[stat.String()] = append(c.stats[stat.String()], value)
 }
 
@@ -32,14 +33,15 @@ func (c *HistogramStatsCollector) Incr(stat types.Stat, value int64) {
 func (c *HistogramStatsCollector) Decr(stat types.Stat, value int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.stats[stat.String()] = append(c.stats[stat.String()], -value)
 }
 
 // Timing records the time it took for an event to occur.
 func (c *HistogramStatsCollector) Timing(stat types.Stat, value int64) {
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.stats[stat.String()] = append(c.stats[stat.String()], value)
 }
 
@@ -47,6 +49,7 @@ func (c *HistogramStatsCollector) Timing(stat types.Stat, value int64) {
 func (c *HistogramStatsCollector) Gauge(stat types.Stat, value int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.stats[stat.String()] = append(c.stats[stat.String()], value)
 }
 
@@ -54,6 +57,7 @@ func (c *HistogramStatsCollector) Gauge(stat types.Stat, value int64) {
 func (c *HistogramStatsCollector) Histogram(stat types.Stat, value int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.stats[stat.String()] = append(c.stats[stat.String()], value)
 }
 
@@ -63,10 +67,12 @@ func (c *HistogramStatsCollector) Mean(stat types.Stat) float64 {
 	if len(values) == 0 {
 		return 0
 	}
+
 	var sum int64
 	for _, value := range values {
 		sum += value
 	}
+
 	return float64(sum) / float64(len(values))
 }
 
@@ -76,11 +82,14 @@ func (c *HistogramStatsCollector) Median(stat types.Stat) float64 {
 	if len(values) == 0 {
 		return 0
 	}
+
 	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+
 	mid := len(values) / 2
 	if len(values)%2 == 0 {
 		return float64(values[mid-1]+values[mid]) / 2
 	}
+
 	return float64(values[mid])
 }
 
@@ -90,8 +99,10 @@ func (c *HistogramStatsCollector) Percentile(stat types.Stat, p float64) float64
 	if len(values) == 0 {
 		return 0
 	}
+
 	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
 	index := int(float64(len(values)) * p)
+
 	return float64(values[index])
 }
 
@@ -106,6 +117,7 @@ func (c *HistogramStatsCollector) GetStats() Stats {
 	for stat, values := range c.stats {
 		mean := c.Mean(types.Stat(stat))
 		median := c.Median(types.Stat(stat))
+
 		sort.Slice(values, func(i, j int) bool {
 			return values[i] < values[j]
 		})
@@ -122,6 +134,7 @@ func (c *HistogramStatsCollector) GetStats() Stats {
 			Variance: variance(values, mean),
 		}
 	}
+
 	return stats
 }
 
@@ -131,6 +144,7 @@ func sum(values []int64) int64 {
 	for _, value := range values {
 		sum += value
 	}
+
 	return sum
 }
 
@@ -139,9 +153,11 @@ func variance(values []int64, mean float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
+
 	var variance float64
 	for _, value := range values {
 		variance += math.Pow(float64(value)-mean, 2)
 	}
+
 	return variance / float64(len(values))
 }

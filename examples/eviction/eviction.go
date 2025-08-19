@@ -11,7 +11,7 @@ import (
 	"github.com/hyp3rd/hypercache/types"
 )
 
-// This example demonstrates how to setup eviction of items from the cache
+// This example demonstrates how to setup eviction of items from the cache.
 func main() {
 	log.Println("running an example of eviction with a background 3 seconds interval")
 	executeExample(3 * time.Second)
@@ -20,7 +20,7 @@ func main() {
 	executeExample(0)
 }
 
-// executeExample runs the example
+// executeExample runs the example.
 func executeExample(evictionInterval time.Duration) {
 	// Create a new HyperCache with a capacity of 10
 	config := hypercache.NewConfig[backend.InMemory]("in-memory")
@@ -36,6 +36,7 @@ func executeExample(evictionInterval time.Duration) {
 	cache, err := hypercache.New(hypercache.GetDefaultManager(), config)
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 
@@ -45,14 +46,15 @@ func executeExample(evictionInterval time.Duration) {
 	log.Println("cache capacity", cache.Capacity())
 
 	log.Println("adding 15 items to the cache, 5 over capacity")
-	for i := 0; i < 15; i++ {
+
+	for i := range 15 {
 		key := fmt.Sprintf("key%d", i)
 		val := fmt.Sprintf("val%d", i)
 
 		err = cache.Set(context.TODO(), key, val, time.Minute)
-
 		if err != nil {
 			fmt.Printf("unexpected error: %v\n", err)
+
 			return
 		}
 	}
@@ -63,9 +65,11 @@ func executeExample(evictionInterval time.Duration) {
 
 	// Apply filters
 	sortByFilter := backend.WithSortBy(types.SortByKey.String())
+
 	items, err := cache.List(context.TODO(), sortByFilter)
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 
@@ -75,6 +79,7 @@ func executeExample(evictionInterval time.Duration) {
 
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 
@@ -82,9 +87,11 @@ func executeExample(evictionInterval time.Duration) {
 		fmt.Println("sleeping to allow the evition loop to complete", evictionInterval+2*time.Second)
 		time.Sleep(evictionInterval + 2*time.Second)
 		log.Println("listing all items in the cache the eviction is triggered")
+
 		list, err := cache.List(context.TODO())
 		if err != nil {
 			fmt.Println(err)
+
 			return
 		}
 		// Print the list of items

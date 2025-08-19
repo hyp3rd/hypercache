@@ -1,0 +1,37 @@
+version: "0.2"
+ignorePaths: []
+dictionaryDefinitions: []
+dictionaries: []
+words:
+  - benchmem
+  - cacheerrors
+  - CAWOLFU
+  - Cbor
+  - chans
+  - cmap
+  - codacy
+  - cpuprofile
+  - daixiang
+  - ewrap
+  - excludeonly
+  - Fprintf
+  - Fprintln
+  - gitversion
+  - GITVERSION
+  - GOFILES
+  - gofumpt
+  - GOPATH
+  - honnef
+  - localmodule
+  - memprofile
+  - msgpack
+  - mvdan
+  - Newf
+  - NOVENDOR
+  - Pipeliner
+  - sarif
+  - staticcheck
+  - strfnv
+  - Wrapf
+ignoreWords: []
+import: []

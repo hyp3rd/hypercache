@@ -42,22 +42,28 @@ func (c *ClockAlgorithm) Evict() (string, bool) {
 	c.evictMutex.Lock()
 	defer c.evictMutex.Unlock()
 
-	for i := 0; i < c.capacity; i++ {
+	for range c.capacity {
 		item := c.items[c.hand]
 		if item == nil {
 			c.hand = (c.hand + 1) % c.capacity
+
 			continue
 		}
+
 		if item.AccessCount > 0 {
 			item.AccessCount--
 		} else {
 			delete(c.keys, item.Key)
 			types.ItemPool.Put(item)
+
 			c.items[c.hand] = nil
+
 			return item.Key, true
 		}
+
 		c.hand = (c.hand + 1) % c.capacity
 	}
+
 	return "", false
 }
 
@@ -71,7 +77,13 @@ func (c *ClockAlgorithm) Set(key string, value any) {
 		c.Delete(evictedKey)
 	}
 
-	item := types.ItemPool.Get().(*types.Item)
+	var item *types.Item
+
+	item, ok = types.ItemPool.Get().(*types.Item)
+	if !ok {
+		item = &types.Item{}
+	}
+
 	item.Key = key
 	item.Value = value
 	item.AccessCount = 1
@@ -90,8 +102,10 @@ func (c *ClockAlgorithm) Get(key string) (any, bool) {
 	if !ok {
 		return nil, false
 	}
+
 	item := c.items[index]
 	item.AccessCount++
+
 	return item.Value, true
 }
 
@@ -104,8 +118,10 @@ func (c *ClockAlgorithm) Delete(key string) {
 	if !ok {
 		return
 	}
+
 	item := c.items[index]
 	delete(c.keys, key)
 	c.items[index] = nil
+
 	types.ItemPool.Put(item)
 }

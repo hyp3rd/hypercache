@@ -1,7 +1,7 @@
 package stats
 
 import (
-	"fmt"
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/errors"
 	"github.com/hyp3rd/hypercache/types"
@@ -31,12 +31,12 @@ var StatsCollectorRegistry = make(map[string]func() (ICollector, error))
 func NewCollector(statsCollectorName string) (ICollector, error) {
 	// Check the parameters.
 	if statsCollectorName == "" {
-		return nil, fmt.Errorf("%s: %s", errors.ErrParamCannotBeEmpty, "statsCollectorName")
+		return nil, ewrap.Wrap(errors.ErrParamCannotBeEmpty, "statsCollectorName")
 	}
 
 	createFunc, ok := StatsCollectorRegistry[statsCollectorName]
 	if !ok {
-		return nil, fmt.Errorf("%s: %s", errors.ErrStatsCollectorNotFound, statsCollectorName)
+		return nil, ewrap.Wrap(errors.ErrStatsCollectorNotFound, statsCollectorName)
 	}
 
 	return createFunc()
@@ -51,10 +51,12 @@ func init() {
 	// Register the default stats collector.
 	RegisterCollector("default", func() (ICollector, error) {
 		var err error
+
 		collector := NewHistogramStatsCollector()
 		if collector == nil {
-			err = fmt.Errorf("%s: %s", errors.ErrStatsCollectorNotFound, "default")
+			err = ewrap.Wrap(errors.ErrStatsCollectorNotFound, "default")
 		}
+
 		return NewHistogramStatsCollector(), err
 	})
 }
