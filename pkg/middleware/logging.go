@@ -1,3 +1,6 @@
+// Package middleware provides various middleware implementations for the hypercache service.
+// This package includes logging middleware that wraps the hypercache service to provide
+// execution time logging and method call tracing for debugging and monitoring purposes.
 package middleware
 
 import (
@@ -5,9 +8,9 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	"github.com/hyp3rd/hypercache/pkg/cache"
-	"github.com/hyp3rd/hypercache/stats"
+	"github.com/hyp3rd/hypercache/pkg/stats"
 )
 
 // Logger describes a logging interface allowing to implement different external, or custom logger.

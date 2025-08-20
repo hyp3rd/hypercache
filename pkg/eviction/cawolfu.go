@@ -1,6 +1,5 @@
+// Package eviction CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
 package eviction
-
-// CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
 
 import (
 	"sync"
@@ -113,7 +112,7 @@ func (c *CAWOLFU) Get(key string) (any, bool) {
 // remove removes the given node from the linked list.
 func (l *CAWOLFULinkedList) remove(node *CAWOLFUNode) {
 	switch {
-	case node == l.head && node == l.tail:
+	case l.head == l.tail: // only one element in the list
 		l.head = nil
 		l.tail = nil
 	case node == l.head:

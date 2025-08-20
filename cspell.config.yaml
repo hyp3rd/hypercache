@@ -27,11 +27,13 @@ words:
   - funlen
   - gitversion
   - GITVERSION
+  - goccy
   - GOFILES
   - gofumpt
   - goimports
   - golines
   - GOPATH
+  - gosec
   - honnef
   - ireturn
   - Itemm

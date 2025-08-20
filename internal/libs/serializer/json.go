@@ -1,3 +1,9 @@
+// Package serializer provides serialization interfaces and implementations for converting
+// Go values to and from byte slices. This package is designed to work with caching systems
+// that need to store and retrieve arbitrary Go values.
+//
+// The package includes a default JSON serializer implementation that uses the goccy/go-json
+// library for efficient JSON marshaling and unmarshaling operations.
 package serializer
 
 import (

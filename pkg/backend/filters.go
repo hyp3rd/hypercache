@@ -5,8 +5,8 @@ import (
 
 	"github.com/hyp3rd/ewrap"
 
+	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/pkg/cache"
-	"github.com/hyp3rd/hypercache/types"
 )
 
 // itemSorter is a custom sorter for the items.
@@ -59,28 +59,28 @@ func (f sortByFilter) ApplyFilter(_ string, items []*cache.Item) ([]*cache.Item,
 	var sorter *itemSorter
 
 	switch f.field {
-	case types.SortByKey.String():
+	case constants.SortByKey.String():
 		sorter = &itemSorter{
 			items: items,
 			less: func(i, j *cache.Item) bool {
 				return i.Key < j.Key
 			},
 		}
-	case types.SortByLastAccess.String():
+	case constants.SortByLastAccess.String():
 		sorter = &itemSorter{
 			items: items,
 			less: func(i, j *cache.Item) bool {
 				return i.LastAccess.UnixNano() < j.LastAccess.UnixNano()
 			},
 		}
-	case types.SortByAccessCount.String():
+	case constants.SortByAccessCount.String():
 		sorter = &itemSorter{
 			items: items,
 			less: func(i, j *cache.Item) bool {
 				return i.AccessCount < j.AccessCount
 			},
 		}
-	case types.SortByExpiration.String():
+	case constants.SortByExpiration.String():
 		sorter = &itemSorter{
 			items: items,
 			less: func(i, j *cache.Item) bool {

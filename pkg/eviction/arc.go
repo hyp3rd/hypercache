@@ -1,10 +1,9 @@
-package eviction
-
-// ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
+// Package eviction ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
 // It has a map of items to store the items in the cache, and a capacity field that limits the number of items that can be stored in the cache.
 // The ARC algorithm uses two lists, t1 and t2, to store the items in the cache.
 // The p field represents the "promotion threshold", which determines how many items should be stored in t1.
 // The c field represents the current number of items in the cache.
+package eviction
 
 import (
 	"sync"

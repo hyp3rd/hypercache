@@ -1,11 +1,21 @@
+// Package hypercache provides a high-performance, generic caching library with configurable backends and eviction algorithms.
+// It supports multiple backend types including in-memory and Redis, with various eviction strategies like LRU, LFU, ARC, and more.
+// The package is designed to be flexible and extensible, allowing users to customize cache behavior through configuration options.
+//
+// Example usage:
+//
+//	config := hypercache.NewConfig[string]("inmemory")
+//	cache := hypercache.NewHyperCache[string](config)
+//	cache.Set("key", "value", time.Hour)
+//	value, found := cache.Get("key")
 package hypercache
 
 import (
 	"strings"
 	"time"
 
-	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/internal/constants"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
 // Config is a struct that wraps all the configuration options to setup `HyperCache` and its backend.

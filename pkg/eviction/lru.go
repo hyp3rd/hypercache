@@ -1,6 +1,4 @@
-package eviction
-
-// The Least Recently Used (LRU) eviction algorithm is a page replacement algorithm that discards the least recently used pages first.
+// Package eviction - The Least Recently Used (LRU) eviction algorithm is a page replacement algorithm that discards the least recently used pages first.
 // It works by maintaining a queue of pages in memory, with the most recently used page at the front of the queue and the least recently used page at the back.
 // When a new page is added to memory and the memory is full, the page at the back of the queue (the least recently used page) is removed to make space for the new page.
 // To implement the LRU eviction algorithm, a data structure called a doubly linked list is often used.
@@ -9,6 +7,7 @@ package eviction
 // This way, the page at the back of the list is always the least recently used page, and can be easily removed when necessary.
 // The LRU eviction algorithm is widely used because it performs well in practice, with a low average page fault rate.
 // However, it can be somewhat expensive to implement, as it requires updating the data structure every time a page is accessed.
+package eviction
 
 import (
 	"sync"

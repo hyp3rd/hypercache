@@ -1,3 +1,5 @@
+// Package middleware provides various middleware implementations for the hypercache service.
+// This package includes stats middleware that collects and reports cache operation statistics.
 package middleware
 
 import (
@@ -5,9 +7,9 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	"github.com/hyp3rd/hypercache/pkg/cache"
-	"github.com/hyp3rd/hypercache/stats"
+	"github.com/hyp3rd/hypercache/pkg/stats"
 )
 
 // StatsCollectorMiddleware is a middleware that collects stats. It can and should re-use the same stats collector as the hypercache.

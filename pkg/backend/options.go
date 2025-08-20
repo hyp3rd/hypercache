@@ -3,7 +3,7 @@ package backend
 import (
 	"github.com/redis/go-redis/v9"
 
-	"github.com/hyp3rd/hypercache/libs/serializer"
+	"github.com/hyp3rd/hypercache/internal/libs/serializer"
 )
 
 // iConfigurableBackend is an interface that defines the methods that a backend should implement to be configurable.

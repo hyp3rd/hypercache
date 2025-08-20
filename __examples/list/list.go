@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/internal/constants"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	"github.com/hyp3rd/hypercache/pkg/cache"
-	"github.com/hyp3rd/hypercache/types"
 )
 
 const (
@@ -53,7 +53,7 @@ func main() {
 		return item.Value != "val8"
 	}
 
-	sortByFilter := backend.WithSortBy(types.SortByExpiration.String())
+	sortByFilter := backend.WithSortBy(constants.SortByExpiration.String())
 
 	sortOrder := backend.WithSortOrderAsc(true)
 

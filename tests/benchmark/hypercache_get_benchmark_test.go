@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/internal/constants"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
 func BenchmarkHyperCache_Get(b *testing.B) {

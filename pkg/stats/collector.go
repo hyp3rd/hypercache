@@ -1,24 +1,48 @@
+// Package stats provides a comprehensive statistics collection system for hypercache.
+// It implements a registry pattern for managing different types of statistics collectors
+// and defines interfaces for collecting various metrics including counters, timers,
+// gauges, and histograms.
+//
+// The package supports pluggable statistics collectors through the CollectorRegistry,
+// allowing for easy extension and customization of metrics collection strategies.
+// A default histogram-based collector is provided out of the box.
+//
+// Example usage:
+//
+//	// Create a collector using the default registry
+//	collector, err := stats.NewCollector("default")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
+//	// Record various metrics
+//	collector.Incr(constants.CacheHits, 1)
+//	collector.Timing(constants.ResponseTime, 150)
+//	collector.Gauge(constants.MemoryUsage, 1024)
+//
+//	// Get collected statistics
+//	stats := collector.GetStats()
 package stats
 
 import (
 	"github.com/hyp3rd/ewrap"
 
+	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	"github.com/hyp3rd/hypercache/types"
 )
 
 // ICollector is an interface that defines the methods that a stats collector should implement.
 type ICollector interface {
 	// Incr increments the count of a statistic by the given value.
-	Incr(stat types.Stat, value int64)
+	Incr(stat constants.Stat, value int64)
 	// Decr decrements the count of a statistic by the given value.
-	Decr(stat types.Stat, value int64)
+	Decr(stat constants.Stat, value int64)
 	// Timing records the time it took for an event to occur.
-	Timing(stat types.Stat, value int64)
+	Timing(stat constants.Stat, value int64)
 	// Gauge records the current value of a statistic.
-	Gauge(stat types.Stat, value int64)
+	Gauge(stat constants.Stat, value int64)
 	// Histogram records the statistical distribution of a set of values.
-	Histogram(stat types.Stat, value int64)
+	Histogram(stat constants.Stat, value int64)
 	// GetStats returns the collected statistics.
 	GetStats() Stats
 }

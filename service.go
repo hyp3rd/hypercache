@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	"github.com/hyp3rd/hypercache/pkg/cache"
-	"github.com/hyp3rd/hypercache/stats"
+	"github.com/hyp3rd/hypercache/pkg/stats"
 )
 
 // Service is the service interface for the HyperCache.

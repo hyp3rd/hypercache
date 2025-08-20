@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/middleware"
+	"github.com/hyp3rd/hypercache/pkg/middleware"
 )
 
 const (

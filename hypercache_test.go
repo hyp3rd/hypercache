@@ -6,8 +6,8 @@ import (
 
 	"github.com/longbridgeapp/assert"
 
-	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/internal/constants"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
 func TestHyperCache_New(t *testing.T) {

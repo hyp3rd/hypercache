@@ -8,9 +8,8 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/internal/constants"
-	"github.com/hyp3rd/hypercache/types"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
 const cacheCapacity = 10
@@ -68,7 +67,7 @@ func executeExample(evictionInterval time.Duration) {
 	log.Println("listing all items in the cache")
 
 	// Apply filters
-	sortByFilter := backend.WithSortBy(types.SortByKey.String())
+	sortByFilter := backend.WithSortBy(constants.SortByKey.String())
 
 	items, err := cache.List(context.TODO(), sortByFilter)
 	if err != nil {

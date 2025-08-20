@@ -1,9 +1,9 @@
 package hypercache
 
 import (
-	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
 // IBackendConstructor is an interface for backend constructors.

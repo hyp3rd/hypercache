@@ -1,4 +1,4 @@
-package types
+package constants
 
 // SortingField is a type that represents the field to sort the cache items by.
 type SortingField string
