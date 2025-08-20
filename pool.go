@@ -19,9 +19,10 @@ type WorkerPool struct {
 // NewWorkerPool creates a new worker pool with the given number of workers.
 func NewWorkerPool(workers int) *WorkerPool {
 	pool := &WorkerPool{
-		workers:   workers,
-		jobs:      make(chan JobFunc, workers),
-		quit:      make(chan struct{}),
+		workers: workers,
+		jobs:    make(chan JobFunc, workers),
+		// buffer quit to allow multiple resize signals without blocking immediately
+		quit:      make(chan struct{}, workers),
 		errorChan: make(chan error, workers),
 	}
 	pool.start()
@@ -65,18 +66,12 @@ func (pool *WorkerPool) Resize(newSize int) {
 	if diff > 0 {
 		// Increase the number of workers
 		for range diff {
-			go func() {
-				for job := range pool.jobs {
-					err := job()
-					if err != nil {
-						pool.errorChan <- err
-					}
-				}
-			}()
+			go pool.worker()
 		}
 	} else {
 		// Decrease the number of workers
-		for range pool.workers {
+		// Send only the number of quit signals needed to remove workers
+		for range diff {
 			pool.quit <- struct{}{}
 		}
 	}
@@ -85,20 +80,28 @@ func (pool *WorkerPool) Resize(newSize int) {
 // start starts the worker pool.
 func (pool *WorkerPool) start() {
 	for range pool.workers {
-		go func() {
-			for {
-				select {
-				case job := <-pool.jobs:
-					err := job()
-					if err != nil {
-						pool.errorChan <- err
-					}
+		go pool.worker()
+	}
+}
 
-					pool.wg.Done()
-				case <-pool.quit:
-					return
-				}
+// worker is the main loop executed by each worker goroutine.
+func (pool *WorkerPool) worker() {
+	for {
+		select {
+		case job := <-pool.jobs:
+			if job == nil {
+				// jobs channel closed
+				return
 			}
-		}()
+
+			err := job()
+			if err != nil {
+				pool.errorChan <- err
+			}
+
+			pool.wg.Done()
+		case <-pool.quit:
+			return
+		}
 	}
 }

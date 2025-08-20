@@ -210,7 +210,9 @@ func (hyperCache *HyperCache[T]) startBackgroundJobs() {
 					// trigger eviction
 					hyperCache.evictionLoop(ctx)
 				case <-hyperCache.stop:
-					// stop the loops
+					// stop the loops and ticker to avoid leaks
+					tick.Stop()
+
 					return
 				}
 			}
@@ -228,6 +230,9 @@ func (hyperCache *HyperCache[T]) startBackgroundJobs() {
 					case <-tick.C:
 						hyperCache.evictionLoop(ctx)
 					case <-hyperCache.stop:
+						// stop ticker to avoid leaks
+						tick.Stop()
+
 						return
 					}
 				}
