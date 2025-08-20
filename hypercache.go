@@ -399,11 +399,13 @@ func (hyperCache *HyperCache[T]) Get(ctx context.Context, key string) (any, bool
 
 	// Check if the item has expired, if so, trigger the expiration loop
 	if item.Expired() {
-		go func() {
-			hyperCache.itemPoolManager.Put(item)
+		// Return the item to the pool and non-blocking trigger of expiration loop
+		hyperCache.itemPoolManager.Put(item)
 
-			hyperCache.expirationTriggerCh <- true
-		}()
+		select {
+		case hyperCache.expirationTriggerCh <- true:
+		default:
+		}
 
 		return nil, false
 	}
@@ -424,11 +426,13 @@ func (hyperCache *HyperCache[T]) GetWithInfo(ctx context.Context, key string) (*
 
 	// Check if the item has expired, if so, trigger the expiration loop
 	if item.Expired() {
-		go func() {
-			hyperCache.itemPoolManager.Put(item)
+		// Return the item to the pool and non-blocking trigger of expiration loop
+		hyperCache.itemPoolManager.Put(item)
 
-			hyperCache.expirationTriggerCh <- true
-		}()
+		select {
+		case hyperCache.expirationTriggerCh <- true:
+		default:
+		}
 
 		return nil, false
 	}
@@ -446,11 +450,13 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 	if item, ok := hyperCache.backend.Get(ctx, key); ok {
 		// Check if the item has expired
 		if item.Expired() {
-			go func() {
-				hyperCache.itemPoolManager.Put(item)
+			// Return the item to the pool and non-blocking trigger of expiration loop
+			hyperCache.itemPoolManager.Put(item)
 
-				hyperCache.expirationTriggerCh <- true
-			}()
+			select {
+			case hyperCache.expirationTriggerCh <- true:
+			default:
+			}
 
 			return nil, sentinel.ErrKeyExpired
 		}
@@ -530,8 +536,11 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 			hyperCache.itemPoolManager.Put(item)
 			// Treat expired items as not found per API semantics
 			failed[key] = sentinel.ErrKeyNotFound
-			// Trigger the expiration loop
-			go hyperCache.expirationLoop(ctx)
+			// Non-blocking trigger of the expiration loop via channel
+			select {
+			case hyperCache.expirationTriggerCh <- true:
+			default:
+			}
 		} else {
 			item.Touch() // Update the last access time and access count
 			// Add the item to the result map
