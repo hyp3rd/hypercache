@@ -8,7 +8,7 @@ import (
 	"github.com/longbridgeapp/assert"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/sentinel"
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
 
 func TestHyperCache_Get(t *testing.T) {

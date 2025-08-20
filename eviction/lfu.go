@@ -6,7 +6,7 @@ import (
 	"container/heap"
 	"sync"
 
-	"github.com/hyp3rd/hypercache/sentinel"
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
 
 // LFUAlgorithm is an eviction algorithm that uses the Least Frequently Used (LFU) policy to select items for eviction.

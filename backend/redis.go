@@ -10,8 +10,8 @@ import (
 	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/libs/serializer"
-	"github.com/hyp3rd/hypercache/sentinel"
 	"github.com/hyp3rd/hypercache/types"
 )
 

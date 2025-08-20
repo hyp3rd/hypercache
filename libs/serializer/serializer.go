@@ -3,7 +3,7 @@ package serializer
 import (
 	"github.com/hyp3rd/ewrap"
 
-	"github.com/hyp3rd/hypercache/sentinel"
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
 
 // ISerializer is the interface that wraps the basic serializer methods.

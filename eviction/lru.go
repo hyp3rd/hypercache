@@ -13,7 +13,7 @@ package eviction
 import (
 	"sync"
 
-	"github.com/hyp3rd/hypercache/sentinel"
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
 
 // lruCacheItem represents an item in the LRU cache.

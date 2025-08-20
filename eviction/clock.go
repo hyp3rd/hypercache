@@ -9,7 +9,7 @@ package eviction
 import (
 	"sync"
 
-	"github.com/hyp3rd/hypercache/sentinel"
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/types"
 )
 

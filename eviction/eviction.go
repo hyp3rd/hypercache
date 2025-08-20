@@ -5,7 +5,7 @@ import (
 
 	"github.com/hyp3rd/ewrap"
 
-	"github.com/hyp3rd/hypercache/sentinel"
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
 
 // IAlgorithm is the interface that must be implemented by eviction algorithms.
