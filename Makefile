@@ -16,7 +16,7 @@ bench:
 
 # run-example runs the example specified in the example variable with the optional arguments specified in the ARGS variable.
 run-example:
-	go run ./__examples/$(example)/*.go $(ARGS)
+	go run ./__examples/$(group)/*.go $(ARGS)
 
 update-deps:
 	go get -v -u ./...
