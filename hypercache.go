@@ -528,8 +528,8 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 		if item.Expired() {
 			// Put the item back in the pool
 			hyperCache.itemPoolManager.Put(item)
-			// Add the key to the errors map
-			failed[key] = sentinel.ErrKeyExpired
+			// Treat expired items as not found per API semantics
+			failed[key] = sentinel.ErrKeyNotFound
 			// Trigger the expiration loop
 			go hyperCache.expirationLoop(ctx)
 		} else {
