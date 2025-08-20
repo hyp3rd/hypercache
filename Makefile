@@ -14,10 +14,9 @@ test:
 bench:
 	cd tests/benchmark && go test -bench=. -benchmem -benchtime=4s . -timeout 30m
 
-benchmark:
-	go test -bench=. -benchmem ./pkg/ewrap
-	go test -bench=Benchmark -benchmem ./test
-	# go test -run=TestProfile -cpuprofile=cpu.prof -memprofile=mem.prof ./test
+# run-example runs the example specified in the example variable with the optional arguments specified in the ARGS variable.
+run-example:
+	go run __examples/$(example)/*.go $(ARGS)
 
 update-deps:
 	go get -v -u ./...
@@ -91,4 +90,4 @@ help:
 	@echo
 	@echo "For more information, see the project README."
 
-.PHONY: prepare-toolchain test bench update-deps lint help
+.PHONY: prepare-toolchain test bench run-example update-deps lint help

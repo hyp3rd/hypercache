@@ -64,10 +64,10 @@ ok      github.com/hyp3rd/hypercache/tests/benchmark    30.031s
 To run the examples, use the following command:
 
 ```bash
-make run example=eviction  # or any other example
+make run-example example=eviction  # or any other example
 ```
 
-For a complete list of examples, refer to the [examples](./examples/README.md) directory.
+For a complete list of examples, refer to the [examples](./__examples/README.md) directory.
 
 ## API
 
@@ -113,7 +113,7 @@ if err != nil {
 
 ## Usage
 
-Examples can be too broad for a readme, refer to the [examples](./examples/README.md) directory for a more comprehensive overview.
+Examples can be too broad for a readme, refer to the [examples](./__examples/README.md) directory for a more comprehensive overview.
 
 ## License
 
@@ -121,7 +121,9 @@ The code and documentation in this project are released under Mozilla Public Lic
 
 ## Author
 
-I'm a surfer, a crypto trader, and a software architect with 15 years of experience designing highly available distributed production environments and developing cloud-native apps in public and private clouds. Feel free to hook me up on [LinkedIn](https://www.linkedin.com/in/francesco-cosentino/).
+I'm a surfer, and a software architect with 15 years of experience designing highly available distributed production systems and developing cloud-native apps in public and private clouds. Feel free to connect with me on LinkedIn.
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/francesco-cosentino/)
 
 [build-link]: https://github.com/hyp3rd/hypercache/actions/workflows/go.yml
 [codeql-link]:https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml
