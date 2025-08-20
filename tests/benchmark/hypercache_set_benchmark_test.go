@@ -27,7 +27,7 @@ func BenchmarkHyperCache_Set_Proactive_Eviction(b *testing.B) {
 	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](0),
-		hypercache.WithEvictionAlgorithm[backend.InMemory]("cawolfu"),
+		hypercache.WithEvictionAlgorithm[backend.InMemory]("lru"),
 	}
 
 	config.InMemoryOptions = []backend.Option[backend.InMemory]{
@@ -37,8 +37,7 @@ func BenchmarkHyperCache_Set_Proactive_Eviction(b *testing.B) {
 	// Create a new HyperCache with a capacity of 10
 	cache, _ := hypercache.New(hypercache.GetDefaultManager(), config)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		// Store a value in the cache with a key and expiration duration
 		cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), "value", time.Hour)
 	}

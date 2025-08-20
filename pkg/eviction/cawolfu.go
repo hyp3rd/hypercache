@@ -10,6 +10,7 @@ import (
 
 // CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
 type CAWOLFU struct {
+	mutex    sync.Mutex                                // protects all CAWOLFU operations
 	items    cache.ConcurrentMap[string, *CAWOLFUNode] // concurrent map to store the items in the cache
 	list     *CAWOLFULinkedList                        // linked list to store the items in the cache, with the most frequently used items at the front
 	length   int                                       // number of items in the cache
@@ -52,45 +53,87 @@ func NewCAWOLFU(capacity int) (*CAWOLFU, error) {
 
 // Evict returns the next item to be evicted from the cache.
 func (c *CAWOLFU) Evict() (string, bool) {
-	// if the cache is empty, return an error
-	if c.length == 0 {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if c.cap == 0 || c.length == 0 || c.list.tail == nil {
 		return "", false
 	}
 
-	// remove the least frequently used item from the cache
 	node := c.list.tail
 	c.list.remove(node)
 
 	err := c.items.Remove(node.key)
-	if err != nil {
-		return "", false
+	if err == nil {
+		c.length--
+
+		resetCAWOLFUNode(node)
+		c.nodePool.Put(node)
+
+		return node.key, true
 	}
-
-	c.length--
-
+	// If map/list out of sync, forcibly clean up
+	resetCAWOLFUNode(node)
 	c.nodePool.Put(node)
 
-	return node.key, true
+	return "", false
 }
 
 // Set adds a new item to the cache with the given key.
 func (c *CAWOLFU) Set(key string, value any) {
-	// if the cache is full, evict an item
-	if c.length == c.cap {
-		_, _ = c.Evict() // evict an item
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if c.cap == 0 {
+		// Zero-capacity CAWOLFU is a no-op
+		return
 	}
 
-	var node *CAWOLFUNode
+	// If key exists, update value and count, move to front
+	if node, ok := c.items.Get(key); ok {
+		node.value = value
+		node.count++
+		c.moveToFront(node)
+
+		return
+	}
+
+	// Inline eviction logic to avoid deadlock
+	//nolint:nestif
+	if c.length == c.cap {
+		if c.list.tail != nil {
+			node := c.list.tail
+			c.list.remove(node)
+
+			err := c.items.Remove(node.key)
+			if err == nil {
+				c.length--
+
+				resetCAWOLFUNode(node)
+				c.nodePool.Put(node)
+			} else {
+				// If map/list out of sync, forcibly clean up
+				resetCAWOLFUNode(node)
+				c.nodePool.Put(node)
+			}
+			// Defensive: if evicted node is the same as key, do not reuse
+			if node.key == key {
+				return
+			}
+		} else {
+			// No node to evict, do not insert
+			return
+		}
+	}
 
 	node, ok := c.nodePool.Get().(*CAWOLFUNode)
 	if !ok {
 		node = &CAWOLFUNode{}
 	}
-	// add the new item to the cache
+
 	node.key = key
 	node.value = value
 	node.count = 1
-
 	c.items.Set(key, node)
 	c.addToFront(node)
 	c.length++
@@ -98,6 +141,9 @@ func (c *CAWOLFU) Set(key string, value any) {
 
 // Get returns the value for the given key from the cache. If the key is not in the cache, it returns false.
 func (c *CAWOLFU) Get(key string) (any, bool) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	node, ok := c.items.Get(key)
 	if !ok {
 		return nil, false
@@ -132,6 +178,9 @@ func (l *CAWOLFULinkedList) remove(node *CAWOLFUNode) {
 
 // Delete removes the given key from the cache.
 func (c *CAWOLFU) Delete(key string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	node, ok := c.items.Get(key)
 	if !ok {
 		return
@@ -146,7 +195,17 @@ func (c *CAWOLFU) Delete(key string) {
 
 	c.length--
 
+	resetCAWOLFUNode(node)
 	c.nodePool.Put(node)
+}
+
+// resetCAWOLFUNode clears all fields of a CAWOLFUNode before returning to pool.
+func resetCAWOLFUNode(node *CAWOLFUNode) {
+	node.key = ""
+	node.value = nil
+	node.count = 0
+	node.prev = nil
+	node.next = nil
 }
 
 // addToFront adds the given node to the front of the linked list.
@@ -166,10 +225,10 @@ func (c *CAWOLFU) addToFront(node *CAWOLFUNode) {
 
 // moveToFront moves the given node to the front of the linked list.
 func (c *CAWOLFU) moveToFront(node *CAWOLFUNode) {
-	if node == c.list.head {
+	if node == nil || node == c.list.head {
 		return
 	}
-
+	// Remove node from its current position
 	if node == c.list.tail {
 		c.list.tail = node.prev
 	}
@@ -183,7 +242,14 @@ func (c *CAWOLFU) moveToFront(node *CAWOLFUNode) {
 	}
 
 	node.prev = nil
+
 	node.next = c.list.head
-	c.list.head.prev = node
+	if c.list.head != nil {
+		c.list.head.prev = node
+	}
+
 	c.list.head = node
+	if c.list.tail == nil {
+		c.list.tail = node
+	}
 }

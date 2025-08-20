@@ -18,7 +18,6 @@ type ClockAlgorithm struct {
 	itemPoolManager *cache.ItemPoolManager
 	keys            map[string]int
 	mutex           sync.RWMutex
-	evictMutex      sync.Mutex
 	capacity        int
 	hand            int
 }
@@ -40,8 +39,12 @@ func NewClockAlgorithm(capacity int) (*ClockAlgorithm, error) {
 
 // Evict evicts an item from the cache based on the Clock algorithm.
 func (c *ClockAlgorithm) Evict() (string, bool) {
-	c.evictMutex.Lock()
-	defer c.evictMutex.Unlock()
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if c.capacity == 0 {
+		return "", false
+	}
 
 	for range c.capacity {
 		item := c.items[c.hand]
@@ -56,7 +59,6 @@ func (c *ClockAlgorithm) Evict() (string, bool) {
 		} else {
 			delete(c.keys, item.Key)
 			c.itemPoolManager.Put(item)
-
 			c.items[c.hand] = nil
 
 			return item.Key, true
@@ -73,20 +75,76 @@ func (c *ClockAlgorithm) Set(key string, value any) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	evictedKey, ok := c.Evict()
-	if ok {
-		c.Delete(evictedKey)
+	if c.capacity == 0 {
+		// Zero-capacity Clock is a no-op
+		return
 	}
 
-	item := c.itemPoolManager.Get()
+	// If key exists, update value and access count
+	if idx, ok := c.keys[key]; ok {
+		item := c.items[idx]
+		item.Value = value
+		item.AccessCount++
 
-	item.Key = key
-	item.Value = value
-	item.AccessCount = 1
+		return
+	}
 
-	c.keys[key] = c.hand
-	c.items[c.hand] = item
-	c.hand = (c.hand + 1) % c.capacity
+	// Find next available slot or evict if full (inline logic)
+	start := c.hand
+	inserted := false
+
+	for {
+		if c.items[c.hand] == nil {
+			item := c.itemPoolManager.Get()
+			item.Key = key
+			item.Value = value
+			item.AccessCount = 1
+			c.items[c.hand] = item
+			c.keys[key] = c.hand
+			inserted = true
+
+			break
+		}
+
+		c.hand = (c.hand + 1) % c.capacity
+		if c.hand == start {
+			break // full
+		}
+	}
+
+	if !inserted {
+		// All slots full, evict one (inline)
+		for range c.capacity {
+			item := c.items[c.hand]
+			if item == nil {
+				c.hand = (c.hand + 1) % c.capacity
+
+				continue
+			}
+
+			if item.AccessCount > 0 {
+				item.AccessCount--
+			} else {
+				delete(c.keys, item.Key)
+				c.itemPoolManager.Put(item)
+				c.items[c.hand] = nil
+				// After eviction, insert at current hand
+				newItem := c.itemPoolManager.Get()
+				newItem.Key = key
+				newItem.Value = value
+				newItem.AccessCount = 1
+				c.items[c.hand] = newItem
+				c.keys[key] = c.hand
+				c.hand = (c.hand + 1) % c.capacity
+
+				return
+			}
+
+			c.hand = (c.hand + 1) % c.capacity
+		}
+	} else {
+		c.hand = (c.hand + 1) % c.capacity
+	}
 }
 
 // Get retrieves the item with the given key from the cache.
@@ -107,8 +165,8 @@ func (c *ClockAlgorithm) Get(key string) (any, bool) {
 
 // Delete deletes the item with the given key from the cache.
 func (c *ClockAlgorithm) Delete(key string) {
-	c.evictMutex.Lock()
-	defer c.evictMutex.Unlock()
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
 	index, ok := c.keys[key]
 	if !ok {
@@ -118,6 +176,5 @@ func (c *ClockAlgorithm) Delete(key string) {
 	item := c.items[index]
 	delete(c.keys, key)
 	c.items[index] = nil
-
 	c.itemPoolManager.Put(item)
 }

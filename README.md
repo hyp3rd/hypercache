@@ -6,29 +6,29 @@
 
 HyperCache is a **thread-safe** **high-performance** cache implementation in `Go` that supports multiple backends with an optional size limit, expiration, and eviction of items with custom algorithms alongside the defaults. It can be used as a standalone cache, distributed environents, or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept and decorate the cache methods with middleware (default or custom).
 It is optimized for performance and flexibility, allowing to specify of the expiration and eviction intervals and providing and registering new eviction algorithms, stats collectors, and middleware(s).
-It ships with a default [historigram stats collector](./stats/stats.go) and several eviction algorithms. However, you can develop and register your own if it implements the [Eviction Algorithm interface](./eviction/eviction.go).:
+It ships with a default [historigram stats collector](./pkg/stats/stats.go) and several eviction algorithms. However, you can develop and register your own if it implements the [Eviction Algorithm interface](./pkg/eviction/eviction.go).:
 
-- [Recently Used (LRU) eviction algorithm](./eviction/lru.go)
-- [The Least Frequently Used (LFU) algorithm](./eviction/lfu.go)
-- [Cache-Aware Write-Optimized LFU (CAWOLFU)](./eviction/cawolfu.go)
-- [The Adaptive Replacement Cache (ARC) algorithm](./eviction/arc.go)
-- [The clock eviction algorithm](./eviction/clock.go)
+- [Recently Used (LRU) eviction algorithm](./pkg/eviction/lru.go)
+- [The Least Frequently Used (LFU) algorithm](./pkg/eviction/lfu.go)
+- [Cache-Aware Write-Optimized LFU (CAWOLFU)](./pkg/eviction/cawolfu.go)
+- [The Adaptive Replacement Cache (ARC) algorithm](./pkg/eviction/arc.go)
+- [The clock eviction algorithm](./pkg/eviction/clock.go)
 
 ### Features
 
 - Thread-safe
 - High-performance
 - Supports multiple, custom backends. Default backends are:
-    1. [In-memory](./backend/inmemory.go)
-    2. [Redis](./backend/redis.go)
+    1. [In-memory](./pkg/backend/inmemory.go)
+    2. [Redis](./pkg/backend/redis.go)
 - Store items in the cache with a key and expiration duration
 - Retrieve items from the cache by their key
 - Delete items from the cache by their key
 - Clear the cache of all items
 - Evitc items in the background based on the cache capacity and items access leveraging several custom eviction algorithms
 - Expire items in the background based on their duration
-- [Eviction Algorithm interface](./eviction/eviction.go) to implement custom eviction algorithms.
-- Stats collection with a default [stats collector](./stats/stats.go) or a custom one that implements the StatsCollector interface.
+- [Eviction Algorithm interface](./pkg/eviction/eviction.go) to implement custom eviction algorithms.
+- Stats collection with a default [stats collector](./pkg/stats/stats.go) or a custom one that implements the StatsCollector interface.
 - [Service interface implementation](./service.go) to allow intercepting cache methods and decorate them with custom or default middleware(s).
 
 ## Installation
@@ -64,7 +64,7 @@ ok      github.com/hyp3rd/hypercache/tests/benchmark    30.031s
 To run the examples, use the following command:
 
 ```bash
-make run-example example=eviction  # or any other example
+make run-example group=eviction  # or any other example
 ```
 
 For a complete list of examples, refer to the [examples](./__examples/README.md) directory.

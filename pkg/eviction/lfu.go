@@ -90,6 +90,10 @@ func (l *LFUAlgorithm) Evict() (string, bool) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
+	if l.cap == 0 {
+		return "", false
+	}
+
 	return l.internalEvict()
 }
 
@@ -97,6 +101,20 @@ func (l *LFUAlgorithm) Evict() (string, bool) {
 func (l *LFUAlgorithm) Set(key string, value any) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
+
+	if l.cap == 0 {
+		// Zero-capacity LFU is a no-op
+		return
+	}
+
+	if node, ok := l.items[key]; ok {
+		// Key exists: update value and increment frequency
+		node.value = value
+		node.count++
+		heap.Fix(l.freqs, node.index)
+
+		return
+	}
 
 	if l.length == l.cap {
 		_, _ = l.internalEvict()
@@ -138,12 +156,8 @@ func (l *LFUAlgorithm) Delete(key string) {
 		return
 	}
 
+	// heap.Remove will maintain heap invariants and update indices
 	heap.Remove(l.freqs, node.index)
-
-	for i := node.index; i < len(*l.freqs); i++ {
-		(*l.freqs)[i].index--
-	}
-
 	delete(l.items, key)
 	l.length--
 }

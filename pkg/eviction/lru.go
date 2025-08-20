@@ -53,8 +53,9 @@ func NewLRUAlgorithm(capacity int) (*LRU, error) {
 
 // Get retrieves the value for the given key from the cache. If the key is not.
 func (lru *LRU) Get(key string) (any, bool) {
-	lru.RLock()
-	defer lru.RUnlock()
+	// LRU Get: must use Lock, not RLock, because moveToFront mutates the list.
+	lru.Lock()
+	defer lru.Unlock()
 
 	item, ok := lru.items[key]
 	if !ok {
@@ -72,8 +73,13 @@ func (lru *LRU) Set(key string, value any) {
 	lru.Lock()
 	defer lru.Unlock()
 
-	item, ok := lru.items[key]
-	if ok {
+	if lru.capacity == 0 {
+		// Zero-capacity LRU is a no-op
+		return
+	}
+
+	if item, ok := lru.items[key]; ok {
+		// Update value and move to front
 		item.Value = value
 		lru.moveToFront(item)
 
@@ -81,20 +87,26 @@ func (lru *LRU) Set(key string, value any) {
 	}
 
 	if len(lru.items) == lru.capacity {
+		// Evict least recently used
 		tailItem := lru.tail
-		delete(lru.items, tailItem.Key)
-		lru.removeFromList(tailItem)
-		lru.itemPool.Put(tailItem)
+		if tailItem != nil {
+			delete(lru.items, tailItem.Key)
+			lru.removeFromList(tailItem)
+			resetLRUItem(tailItem)
+			lru.itemPool.Put(tailItem)
+		}
 	}
 
-	// get a new item from the pool
-	item, ok = lru.itemPool.Get().(*lruCacheItem)
+	// Get a new item from the pool
+	item, ok := lru.itemPool.Get().(*lruCacheItem)
 	if !ok {
 		item = &lruCacheItem{}
 	}
 
 	item.Key = key
 	item.Value = value
+	item.prev = nil
+	item.next = nil
 
 	lru.items[key] = item
 	lru.addToFront(item)
@@ -105,14 +117,16 @@ func (lru *LRU) Evict() (string, bool) {
 	lru.Lock()
 	defer lru.Unlock()
 
-	if lru.tail == nil {
+	if lru.capacity == 0 || lru.tail == nil {
 		return "", false
 	}
 
 	key := lru.tail.Key
-	lru.itemPool.Put(lru.tail)
-	lru.removeFromList(lru.tail)
+	tailItem := lru.tail
+	lru.removeFromList(tailItem)
 	delete(lru.items, key)
+	resetLRUItem(tailItem)
+	lru.itemPool.Put(tailItem)
 
 	return key, true
 }
@@ -129,6 +143,7 @@ func (lru *LRU) Delete(key string) {
 
 	lru.removeFromList(item)
 	delete(lru.items, key)
+	resetLRUItem(item)
 	lru.itemPool.Put(item)
 }
 
@@ -152,18 +167,27 @@ func (lru *LRU) moveToFront(item *lruCacheItem) {
 
 // removeFromList removes the given item from the list.
 func (lru *LRU) removeFromList(item *lruCacheItem) {
+	// Remove item from doubly linked list
 	if item == lru.head {
 		lru.head = item.next
-	} else {
+	} else if item.prev != nil {
 		item.prev.next = item.next
 	}
 
 	if item == lru.tail {
 		lru.tail = item.prev
-	} else {
+	} else if item.next != nil {
 		item.next.prev = item.prev
 	}
 
+	item.prev = nil
+	item.next = nil
+}
+
+// resetLRUItem clears all fields of an lruCacheItem before returning to pool.
+func resetLRUItem(item *lruCacheItem) {
+	item.Key = ""
+	item.Value = nil
 	item.prev = nil
 	item.next = nil
 }

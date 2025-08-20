@@ -39,24 +39,28 @@ import (
 // The cache also has a mutex that is used to protect the eviction algorithm from concurrent access.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
 type HyperCache[T backend.IBackendConstrain] struct {
-	backend               backend.IBackend[T]               // `backend`` holds the backend that the cache uses to store the items. It must implement the IBackend interface.
-	cacheBackendChecker   introspect.CacheBackendChecker[T] // `cacheBackendChecker` holds an instance of the CacheBackendChecker interface. It helps to determine the type of the backend.
-	itemPoolManager       *cache.ItemPoolManager            // `itemPoolManager` manages the item pool for the cache.
-	stop                  chan bool                         // `stop` channel to signal the expiration and eviction loops to stop
-	workerPool            *WorkerPool                       // `workerPool` holds a pointer to the worker pool that the cache uses to run the expiration and eviction loops.
-	expirationTriggerCh   chan bool                         // `expirationTriggerCh` channel to signal the expiration trigger loop to start
-	evictCh               chan bool                         // `evictCh` channel to signal the eviction loop to start
-	evictionAlgorithmName string                            // `evictionAlgorithmName` name of the eviction algorithm to use when evicting items
-	evictionAlgorithm     eviction.IAlgorithm               // `evictionAlgorithm` eviction algorithm to use when evicting items
-	expirationInterval    time.Duration                     // `expirationInterval` interval at which the expiration loop should run
-	evictionInterval      time.Duration                     // interval at which the eviction loop should run
-	shouldEvict           atomic.Bool                       // `shouldEvict` indicates whether the cache should evict items or not
-	maxEvictionCount      uint                              // `evictionInterval` maximum number of items that can be evicted in a single eviction loop iteration
-	maxCacheSize          int64                             // maxCacheSize instructs the cache not allocate more memory than this limit, value in MB, 0 means no limit
-	memoryAllocation      atomic.Int64                      // memoryAllocation is the current memory allocation of the cache, value in bytes
-	mutex                 sync.RWMutex                      // `mutex` holds a RWMutex (Read-Write Mutex) that is used to protect the eviction algorithm from concurrent access
-	once                  sync.Once                         // `once` holds a Once struct that is used to ensure that the expiration and eviction loops are only started once
-	statsCollectorName    string                            // `statsCollectorName` holds the name of the stats collector that the cache should use when collecting cache statistics
+	backend                    backend.IBackend[T]               // `backend`` holds the backend that the cache uses to store the items. It must implement the IBackend interface.
+	cacheBackendChecker        introspect.CacheBackendChecker[T] // `cacheBackendChecker` holds an instance of the CacheBackendChecker interface. It helps to determine the type of the backend.
+	itemPoolManager            *cache.ItemPoolManager            // `itemPoolManager` manages the item pool for the cache.
+	stop                       chan bool                         // `stop` channel to signal the expiration and eviction loops to stop
+	workerPool                 *WorkerPool                       // `workerPool` holds a pointer to the worker pool that the cache uses to run the expiration and eviction loops.
+	expirationTriggerCh        chan bool                         // `expirationTriggerCh` channel to signal the expiration trigger loop to start
+	expirationTriggerBufSize   int                               // optional override for expiration trigger channel buffer size (default: capacity/2)
+	expirationSignalPending    atomic.Bool                       // coalesces multiple expiration trigger requests
+	expirationDebounceInterval time.Duration                     // optional debounce interval between accepted triggers
+	lastExpirationTrigger      atomic.Int64                      // unix nano timestamp of last accepted trigger
+	evictCh                    chan bool                         // `evictCh` channel to signal the eviction loop to start
+	evictionAlgorithmName      string                            // `evictionAlgorithmName` name of the eviction algorithm to use when evicting items
+	evictionAlgorithm          eviction.IAlgorithm               // `evictionAlgorithm` eviction algorithm to use when evicting items
+	expirationInterval         time.Duration                     // `expirationInterval` interval at which the expiration loop should run
+	evictionInterval           time.Duration                     // interval at which the eviction loop should run
+	shouldEvict                atomic.Bool                       // `shouldEvict` indicates whether the cache should evict items or not
+	maxEvictionCount           uint                              // `evictionInterval` maximum number of items that can be evicted in a single eviction loop iteration
+	maxCacheSize               int64                             // maxCacheSize instructs the cache not allocate more memory than this limit, value in MB, 0 means no limit
+	memoryAllocation           atomic.Int64                      // memoryAllocation is the current memory allocation of the cache, value in bytes
+	mutex                      sync.RWMutex                      // `mutex` holds a RWMutex (Read-Write Mutex) that is used to protect the eviction algorithm from concurrent access
+	once                       sync.Once                         // `once` holds a Once struct that is used to ensure that the expiration and eviction loops are only started once
+	statsCollectorName         string                            // `statsCollectorName` holds the name of the stats collector that the cache should use when collecting cache statistics
 	// StatsCollector to collect cache statistics
 	StatsCollector stats.ICollector
 }
@@ -100,6 +104,8 @@ func NewInMemoryWithDefaults(capacity int) (*HyperCache[backend.InMemory], error
 //   - The eviction algorithm is set to LRU.
 //   - The expiration interval is set to 30 minutes.
 //   - The stats collector is set to the HistogramStatsCollector stats collector.
+//
+//nolint:cyclop
 func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (*HyperCache[T], error) {
 	// Get the backend constructor from the registry
 	constructor, exists := bm.backendRegistry[config.BackendType]
@@ -179,8 +185,17 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (*H
 		return nil, sentinel.ErrInvalidCapacity
 	}
 
-	// Initialize the expiration trigger channel with the buffer size set to half the capacity
-	hyperCache.expirationTriggerCh = make(chan bool, hyperCache.backend.Capacity()/2)
+	// Initialize the expiration trigger channel with configurable buffer size (default: half capacity)
+	buf := hyperCache.backend.Capacity() / 2
+	if hyperCache.expirationTriggerBufSize > 0 {
+		buf = hyperCache.expirationTriggerBufSize
+	}
+
+	if buf < 1 {
+		buf = 1
+	}
+
+	hyperCache.expirationTriggerCh = make(chan bool, buf)
 
 	hyperCache.startBackgroundJobs()
 
@@ -188,6 +203,8 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (*H
 }
 
 // startBackgroundJobs starts the background jobs for the hyper cache.
+//
+//nolint:cyclop
 func (hyperCache *HyperCache[T]) startBackgroundJobs() {
 	// Initialize the eviction channel with the buffer size set to half the capacity
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -206,6 +223,17 @@ func (hyperCache *HyperCache[T]) startBackgroundJobs() {
 				case <-hyperCache.expirationTriggerCh:
 					// trigger expiration
 					hyperCache.expirationLoop(ctx)
+					// clear pending flag and drain any coalesced triggers quickly
+					hyperCache.expirationSignalPending.Store(false)
+
+					drained := true
+					for drained {
+						select {
+						case <-hyperCache.expirationTriggerCh:
+						default:
+							drained = false
+						}
+					}
 				case <-hyperCache.evictCh:
 					// trigger eviction
 					hyperCache.evictionLoop(ctx)
@@ -239,6 +267,35 @@ func (hyperCache *HyperCache[T]) startBackgroundJobs() {
 			}()
 		}
 	})
+}
+
+// triggerExpiration coalesces and optionally debounces expiration triggers to avoid flooding the channel.
+func (hyperCache *HyperCache[T]) triggerExpiration() {
+	// Optional debounce: if configured, drop triggers that arrive within the interval.
+	if d := hyperCache.expirationDebounceInterval; d > 0 {
+		last := time.Unix(0, hyperCache.lastExpirationTrigger.Load())
+		if time.Since(last) < d {
+			// record backpressure metric
+			hyperCache.StatsCollector.Incr(constants.StatIncr, 1)
+
+			return
+		}
+	}
+
+	// Coalesce: if a signal is already pending, skip enqueueing another.
+	if hyperCache.expirationSignalPending.Swap(true) {
+		hyperCache.StatsCollector.Incr(constants.StatIncr, 1)
+
+		return
+	}
+
+	select {
+	case hyperCache.expirationTriggerCh <- true:
+		hyperCache.lastExpirationTrigger.Store(time.Now().UnixNano())
+	default:
+		// channel full; keep pending flag set and record metric
+		hyperCache.StatsCollector.Incr(constants.StatIncr, 1)
+	}
 }
 
 // expirationLoop is a function that runs in a separate goroutine and expires items in the cache based on their expiration duration.
@@ -401,11 +458,8 @@ func (hyperCache *HyperCache[T]) Get(ctx context.Context, key string) (any, bool
 	if item.Expired() {
 		// Return the item to the pool and non-blocking trigger of expiration loop
 		hyperCache.itemPoolManager.Put(item)
-
-		select {
-		case hyperCache.expirationTriggerCh <- true:
-		default:
-		}
+		// Coalesced/debounced trigger
+		hyperCache.triggerExpiration()
 
 		return nil, false
 	}
@@ -428,11 +482,8 @@ func (hyperCache *HyperCache[T]) GetWithInfo(ctx context.Context, key string) (*
 	if item.Expired() {
 		// Return the item to the pool and non-blocking trigger of expiration loop
 		hyperCache.itemPoolManager.Put(item)
-
-		select {
-		case hyperCache.expirationTriggerCh <- true:
-		default:
-		}
+		// Coalesced/debounced trigger
+		hyperCache.triggerExpiration()
 
 		return nil, false
 	}
@@ -452,11 +503,8 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 		if item.Expired() {
 			// Return the item to the pool and non-blocking trigger of expiration loop
 			hyperCache.itemPoolManager.Put(item)
-
-			select {
-			case hyperCache.expirationTriggerCh <- true:
-			default:
-			}
+			// Coalesced/debounced trigger
+			hyperCache.triggerExpiration()
 
 			return nil, sentinel.ErrKeyExpired
 		}
@@ -536,11 +584,8 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 			hyperCache.itemPoolManager.Put(item)
 			// Treat expired items as not found per API semantics
 			failed[key] = sentinel.ErrKeyNotFound
-			// Non-blocking trigger of the expiration loop via channel
-			select {
-			case hyperCache.expirationTriggerCh <- true:
-			default:
-			}
+			// Coalesced/debounced trigger of the expiration loop via channel
+			hyperCache.triggerExpiration()
 		} else {
 			item.Touch() // Update the last access time and access count
 			// Add the item to the result map

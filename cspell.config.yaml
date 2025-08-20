@@ -43,6 +43,7 @@ words:
   - memprofile
   - msgpack
   - mvdan
+  - nestif
   - Newf
   - nolint
   - NOVENDOR

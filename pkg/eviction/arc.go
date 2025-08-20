@@ -47,12 +47,12 @@ func NewARCAlgorithm(capacity int) (*ARC, error) {
 // Get retrieves the item with the given key from the cache.
 // If the key is not found in the cache, it returns nil.
 func (arc *ARC) Get(key string) (any, bool) {
-	arc.mutex.RLock()
+	arc.mutex.Lock()
+	defer arc.mutex.Unlock()
 
 	// Check t1
 	item, ok := arc.t1[key]
 	if ok {
-		arc.mutex.RUnlock()
 		arc.promote(key)
 
 		return item.Value, true
@@ -60,24 +60,34 @@ func (arc *ARC) Get(key string) (any, bool) {
 	// Check t2
 	item, ok = arc.t2[key]
 	if ok {
-		arc.mutex.RUnlock()
 		arc.demote(key)
 
 		return item.Value, true
 	}
-
-	arc.mutex.RUnlock()
 
 	return nil, false
 }
 
 // Set adds a new item to the cache with the given key.
 func (arc *ARC) Set(key string, value any) {
-	arc.mutex.RLock()
-	defer arc.mutex.RUnlock()
-	// Check if key is already in cache
-	_, ok := arc.Get(key)
-	if ok {
+	arc.mutex.Lock()
+	defer arc.mutex.Unlock()
+
+	if arc.capacity == 0 {
+		// Zero-capacity ARC is a no-op
+		return
+	}
+
+	// If key exists in t1 or t2, update value only
+	if item, ok := arc.t1[key]; ok {
+		item.Value = value
+
+		return
+	}
+
+	if item, ok := arc.t2[key]; ok {
+		item.Value = value
+
 		return
 	}
 
@@ -93,9 +103,7 @@ func (arc *ARC) Set(key string, value any) {
 	}
 
 	item := arc.itemPoolManager.Get()
-
 	item.Value = value
-
 	arc.t1[key] = item
 	arc.c++
 
@@ -135,11 +143,13 @@ func (arc *ARC) Delete(key string) {
 // Evict removes an item from the cache and returns the key of the evicted item.
 // If no item can be evicted, it returns an error.
 func (arc *ARC) Evict() (string, bool) {
+	if arc.capacity == 0 {
+		return "", false
+	}
 	// Check t1
 	for key, val := range arc.t1 {
 		delete(arc.t1, key)
 		arc.c--
-
 		arc.itemPoolManager.Put(val)
 
 		return key, true
@@ -148,7 +158,6 @@ func (arc *ARC) Evict() (string, bool) {
 	for key, val := range arc.t2 {
 		delete(arc.t2, key)
 		arc.c--
-
 		arc.itemPoolManager.Put(val)
 
 		return key, true

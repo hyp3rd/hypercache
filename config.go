@@ -124,6 +124,22 @@ func WithEvictionInterval[T backend.IBackendConstrain](evictionInterval time.Dur
 	}
 }
 
+// WithExpirationTriggerBuffer sets the buffer size of the expiration trigger channel.
+// If set to <= 0, the default (capacity/2, minimum 1) is used.
+func WithExpirationTriggerBuffer[T backend.IBackendConstrain](size int) Option[T] {
+	return func(cache *HyperCache[T]) {
+		cache.expirationTriggerBufSize = size
+	}
+}
+
+// WithExpirationTriggerDebounce sets an optional debounce interval for coalescing expiration triggers.
+// Triggers arriving within this interval after the last accepted trigger may be dropped.
+func WithExpirationTriggerDebounce[T backend.IBackendConstrain](interval time.Duration) Option[T] {
+	return func(cache *HyperCache[T]) {
+		cache.expirationDebounceInterval = interval
+	}
+}
+
 // WithMaxEvictionCount is an option that sets the max eviction count field of the `HyperCache` struct.
 // The max eviction count determines the maximum number of items that can be removed during a single eviction run.
 func WithMaxEvictionCount[T backend.IBackendConstrain](maxEvictionCount uint) Option[T] {
