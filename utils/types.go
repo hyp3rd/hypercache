@@ -8,13 +8,13 @@ import (
 )
 
 // TypeName returns the type and inferred type name of the object passed in.
-func TypeName(object any) (typeName string, inferredType string) {
+func TypeName(object any) (string, string) {
 	typeString := fmt.Sprintf("%T", object)
 	parts := strings.Split(typeString, "[")
 
-	typeName = strings.TrimPrefix(parts[0], "*")
+	typeName := strings.TrimPrefix(parts[0], "*")
 
-	inferredType = ""
+	inferredType := ""
 	if len(parts) > 1 {
 		inferredType = strings.TrimSuffix(parts[1], "]")
 	}
@@ -35,7 +35,7 @@ func (c *CacheBackendChecker[T]) IsInMemory() bool {
 	return ok
 }
 
-// IsRedisBackend returns true if the backend is a Redis.
+// IsRedis returns true if the backend is a Redis.
 func (c *CacheBackendChecker[T]) IsRedis() bool {
 	_, ok := c.Backend.(*backend.Redis)
 

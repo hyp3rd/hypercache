@@ -3,23 +3,64 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
+	"os"
 	"time"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/internal/constants"
 )
 
+const (
+	numUsers      = 100
+	maxCacheSize  = 37326
+	cacheCapacity = 100000
+)
+
+type user struct {
+	Name       string
+	Age        int
+	LastAccess time.Time
+	Pass       string
+	Email      string
+	Phone      string
+	IsAdmin    bool
+	IsGuest    bool
+	IsBanned   bool
+}
+
+func generateRandomUsers() []user {
+	users := make([]user, 0, numUsers)
+
+	for i := range numUsers {
+		users = append(users, user{
+			Name:       fmt.Sprintf("User%d", i),
+			Age:        rand.IntN(numUsers),
+			LastAccess: time.Now(),
+			Pass:       fmt.Sprintf("Pass%d", i),
+			Email:      fmt.Sprintf("user%d@example.com", i),
+			Phone:      fmt.Sprintf("123456789%d", i),
+			IsAdmin:    rand.IntN(2) == 0,
+			IsGuest:    rand.IntN(2) == 0,
+			IsBanned:   rand.IntN(2) == 0,
+		})
+	}
+
+	return users
+}
+
 func main() {
-	config := hypercache.NewConfig[backend.InMemory]("in-memory")
+	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
 
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](0),
 		hypercache.WithEvictionAlgorithm[backend.InMemory]("cawolfu"),
-		hypercache.WithMaxCacheSize[backend.InMemory](37326),
+		hypercache.WithMaxCacheSize[backend.InMemory](maxCacheSize),
 	}
 
 	config.InMemoryOptions = []backend.Option[backend.InMemory]{
-		backend.WithCapacity[backend.InMemory](100000),
+		backend.WithCapacity[backend.InMemory](cacheCapacity),
 	}
 
 	// Create a new HyperCache with a capacity of 10
@@ -28,576 +69,22 @@ func main() {
 		panic(err)
 	}
 
-	type User struct {
-		Name       string
-		Age        int
-		LastAccess time.Time
-		Pass       string
-		Email      string
-		Phone      string
-		IsAdmin    bool
-		IsGuest    bool
-		IsBanned   bool
-	}
-
-	users := []User{
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John",
-			Age:        30,
-			LastAccess: time.Now(),
-			Pass:       "123456",
-			Email:      "jhon@example.com",
-			Phone:      "123456789",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John1",
-			Age:        31,
-			LastAccess: time.Now(),
-			Pass:       "1234567",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891011",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2John2John2John2John2John2John2John2John2John2John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-		{
-			Name:       "John2",
-			Age:        32,
-			LastAccess: time.Now(),
-			Pass:       "12345678",
-			Email:      "jhon1@example.com",
-			Phone:      "1234567891012",
-			IsAdmin:    bool(true),
-			IsGuest:    bool(false),
-			IsBanned:   bool(false),
-		},
-	}
-
 	for i := range 3 {
-		err = cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), users, 0)
+		err = cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), generateRandomUsers(), 0)
 		if err != nil {
-			fmt.Println(err, "set", i)
+			fmt.Fprintln(os.Stdout, err, "set", i)
 		}
 	}
 
-	key, ok := cache.GetWithInfo("key-1")
+	key, ok := cache.GetWithInfo(context.TODO(), "key-1")
 
 	if ok {
-		fmt.Println("value", key.Value)
-		fmt.Println("size", key.Size)
+		fmt.Fprintln(os.Stdout, "value", key.Value)
+		fmt.Fprintln(os.Stdout, "size", key.Size)
 	} else {
-		fmt.Println("key not found")
+		fmt.Fprintln(os.Stdout, "key not found")
 	}
 
-	fmt.Println(cache.Count())
-	fmt.Println(cache.Allocation())
+	fmt.Fprintln(os.Stdout, cache.Count(context.TODO()))
+	fmt.Fprintln(os.Stdout, cache.Allocation())
 }

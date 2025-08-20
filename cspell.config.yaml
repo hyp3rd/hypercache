@@ -4,6 +4,7 @@ dictionaryDefinitions: []
 dictionaries: []
 words:
   - benchmem
+  - benchtime
   - cacheerrors
   - CAWOLFU
   - Cbor
@@ -11,27 +12,46 @@ words:
   - cmap
   - codacy
   - cpuprofile
+  - cyclop
   - daixiang
+  - Decr
+  - depguard
+  - errcheck
   - ewrap
   - excludeonly
+  - exhaustruct
   - Fprintf
   - Fprintln
+  - freqs
+  - funlen
   - gitversion
   - GITVERSION
   - GOFILES
   - gofumpt
+  - goimports
+  - golines
   - GOPATH
   - honnef
+  - ireturn
+  - Itemm
+  - LFUDA
   - localmodule
+  - logrus
   - memprofile
   - msgpack
   - mvdan
   - Newf
+  - nolint
   - NOVENDOR
   - Pipeliner
+  - recvcheck
   - sarif
+  - SLRU
   - staticcheck
+  - stdlib
   - strfnv
+  - varnamelen
+  - wrapcheck
   - Wrapf
 ignoreWords: []
 import: []

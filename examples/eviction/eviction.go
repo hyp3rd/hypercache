@@ -4,17 +4,21 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/types"
 )
+
+const cacheCapacity = 10
 
 // This example demonstrates how to setup eviction of items from the cache.
 func main() {
 	log.Println("running an example of eviction with a background 3 seconds interval")
-	executeExample(3 * time.Second)
+	executeExample(constants.DefaultEvictionInterval)
 
 	log.Println("running an example with background eviction disabled and proactive eviction enabled")
 	executeExample(0)
@@ -23,19 +27,19 @@ func main() {
 // executeExample runs the example.
 func executeExample(evictionInterval time.Duration) {
 	// Create a new HyperCache with a capacity of 10
-	config := hypercache.NewConfig[backend.InMemory]("in-memory")
+	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](evictionInterval),
 	}
 
 	config.InMemoryOptions = []backend.Option[backend.InMemory]{
-		backend.WithCapacity[backend.InMemory](10),
+		backend.WithCapacity[backend.InMemory](cacheCapacity),
 	}
 
 	// Create a new HyperCache with a capacity of 10
 	cache, err := hypercache.New(hypercache.GetDefaultManager(), config)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
@@ -53,7 +57,7 @@ func executeExample(evictionInterval time.Duration) {
 
 		err = cache.Set(context.TODO(), key, val, time.Minute)
 		if err != nil {
-			fmt.Printf("unexpected error: %v\n", err)
+			fmt.Fprintf(os.Stdout, "unexpected error: %v\n", err)
 
 			return
 		}
@@ -68,35 +72,29 @@ func executeExample(evictionInterval time.Duration) {
 
 	items, err := cache.List(context.TODO(), sortByFilter)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 
 	for _, item := range items {
-		fmt.Println(item.Key, item.Value)
-	}
-
-	if err != nil {
-		fmt.Println(err)
-
-		return
+		fmt.Fprintln(os.Stdout, item.Key, item.Value)
 	}
 
 	if evictionInterval > 0 {
-		fmt.Println("sleeping to allow the evition loop to complete", evictionInterval+2*time.Second)
+		fmt.Fprintln(os.Stdout, "sleeping to allow the eviction loop to complete", evictionInterval+2*time.Second)
 		time.Sleep(evictionInterval + 2*time.Second)
 		log.Println("listing all items in the cache the eviction is triggered")
 
 		list, err := cache.List(context.TODO())
 		if err != nil {
-			fmt.Println(err)
+			fmt.Fprintln(os.Stderr, err)
 
 			return
 		}
 		// Print the list of items
 		for i, ci := range list {
-			fmt.Println(i, ci.Value)
+			fmt.Fprintln(os.Stdout, i, ci.Value)
 		}
 	}
 }

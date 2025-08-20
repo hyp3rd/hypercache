@@ -4,31 +4,30 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/middleware"
 )
 
+const (
+	cacheCapacity = 10
+)
+
 func main() {
 	var svc hypercache.Service
 
-	hyperCache, err := hypercache.NewInMemoryWithDefaults(10)
+	hyperCache, err := hypercache.NewInMemoryWithDefaults(cacheCapacity)
 	defer hyperCache.Stop()
 
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 	// assign statsCollector of the backend to use it in middleware
 	statsCollector := hyperCache.StatsCollector
 	svc = hyperCache
-
-	if err != nil {
-		fmt.Println(err)
-
-		return
-	}
 
 	// Example of using zap logger from uber
 	logger := log.Default()
@@ -47,41 +46,47 @@ func main() {
 
 	err = svc.Set(context.TODO(), "key string", "value any", 0)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 
-	key, ok := svc.Get("key string")
+	key, ok := svc.Get(context.TODO(), "key string")
 	if !ok {
-		fmt.Println("key not found")
+		fmt.Fprintln(os.Stdout, "key not found")
 
 		return
 	}
 
-	fmt.Println(key)
+	fmt.Fprintln(os.Stdout, key)
 
 	for i := range 10 {
-		svc.Set(context.TODO(), fmt.Sprintf("key%v", i), fmt.Sprintf("val%v", i), 0)
+		err := svc.Set(context.TODO(), fmt.Sprintf("key%v", i), fmt.Sprintf("val%v", i), 0)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 	}
 
 	items, errs := svc.GetMultiple(context.TODO(), "key1", "key7", "key9", "key9999")
 	for k, e := range errs {
-		fmt.Printf("error fetching item %s: %s\n", k, e)
+		fmt.Fprintf(os.Stderr, "error fetching item %s: %s\n", k, e)
 	}
 
 	for k, v := range items {
-		fmt.Println(k, v)
+		fmt.Fprintln(os.Stdout, k, v)
 	}
 
 	val, err := svc.GetOrSet(context.TODO(), "key9999", "val9999", 0)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 
-	fmt.Println(val)
+	fmt.Fprintln(os.Stdout, val)
 
-	svc.Remove(context.TODO(), "key9999", "key1")
+	err = svc.Remove(context.TODO(), "key9999", "key1")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
 }

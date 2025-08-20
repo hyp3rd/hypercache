@@ -30,14 +30,14 @@ func NewLoggingMiddleware(next hypercache.Service, logger Logger) hypercache.Ser
 }
 
 // Get logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) Get(key string) (value any, ok bool) {
+func (mw LoggingMiddleware) Get(ctx context.Context, key string) (any, bool) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method Get took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("Get method called with key: %s", key)
 
-	return mw.next.Get(key)
+	return mw.next.Get(ctx, key)
 }
 
 // Set logs the time it takes to execute the next middleware.
@@ -63,18 +63,18 @@ func (mw LoggingMiddleware) GetOrSet(ctx context.Context, key string, value any,
 }
 
 // GetWithInfo logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) GetWithInfo(key string) (item *types.Item, ok bool) {
+func (mw LoggingMiddleware) GetWithInfo(ctx context.Context, key string) (*types.Item, bool) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method GetWithInfo took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("GetWithInfo method invoked with key: %s", key)
 
-	return mw.next.GetWithInfo(key)
+	return mw.next.GetWithInfo(ctx, key)
 }
 
 // GetMultiple logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) GetMultiple(ctx context.Context, keys ...string) (result map[string]any, failed map[string]error) {
+func (mw LoggingMiddleware) GetMultiple(ctx context.Context, keys ...string) (map[string]any, map[string]error) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method GetMultiple took: %s", time.Since(begin))
 	}(time.Now())
@@ -128,8 +128,8 @@ func (mw LoggingMiddleware) Allocation() int64 {
 }
 
 // Count takes to execute the next middleware.
-func (mw LoggingMiddleware) Count() int {
-	return mw.next.Count()
+func (mw LoggingMiddleware) Count(ctx context.Context) int {
+	return mw.next.Count(ctx)
 }
 
 // TriggerEviction logs the time it takes to execute the next middleware.

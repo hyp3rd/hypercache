@@ -3,45 +3,56 @@ package backend
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/hyp3rd/ewrap"
 
-	cacheerrors "github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/libs/serializer"
+	"github.com/hyp3rd/hypercache/sentinel"
 	"github.com/hyp3rd/hypercache/types"
+)
+
+const (
+	maxRetries   = 3
+	retriesDelay = 100 * time.Millisecond
 )
 
 // Redis is a cache backend that stores the items in a redis implementation.
 type Redis struct {
-	rdb         *redis.Client          // redis client to interact with the redis server
-	capacity    int                    // capacity of the cache, limits the number of items that can be stored in the cache
-	keysSetName string                 // keysSetName is the name of the set that holds the keys of the items in the cache
-	Serializer  serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
+	rdb             *redis.Client          // redis client to interact with the redis server
+	capacity        int                    // capacity of the cache, limits the number of items that can be stored in the cache
+	itemPoolManager *types.ItemPoolManager // itemPoolManager is used to manage the item pool for memory efficiency
+	keysSetName     string                 // keysSetName is the name of the set that holds the keys of the items in the cache
+	Serializer      serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
 }
 
 // NewRedis creates a new redis cache with the given options.
-func NewRedis(redisOptions ...Option[Redis]) (backend IBackend[Redis], err error) {
-	rb := &Redis{}
+func NewRedis(redisOptions ...Option[Redis]) (IBackend[Redis], error) {
+	rb := &Redis{
+		itemPoolManager: types.NewItemPoolManager(),
+	}
 	// Apply the backend options
 	ApplyOptions(rb, redisOptions...)
 
 	// Check if the client is nil
 	if rb.rdb == nil {
-		return nil, cacheerrors.ErrNilClient
+		return nil, sentinel.ErrNilClient
 	}
 	// Check if the `capacity` is valid
 	if rb.capacity < 0 {
-		return nil, cacheerrors.ErrInvalidCapacity
+		return nil, sentinel.ErrInvalidCapacity
 	}
 	// Check if the `keysSetName` is empty
 	if rb.keysSetName == "" {
-		rb.keysSetName = "hypercache"
+		rb.keysSetName = constants.RedisBackend
 	}
 
 	// Check if the serializer is nil
 	if rb.Serializer == nil {
+		var err error
 		// Set a the serializer to default to `msgpack`
 		rb.Serializer, err = serializer.New("msgpack")
 		if err != nil {
@@ -68,8 +79,8 @@ func (cacheBackend *Redis) Capacity() int {
 }
 
 // Count returns the number of items in the cache.
-func (cacheBackend *Redis) Count() int {
-	count, err := cacheBackend.rdb.DBSize(context.Background()).Result()
+func (cacheBackend *Redis) Count(ctx context.Context) int {
+	count, err := cacheBackend.rdb.DBSize(ctx).Result()
 	if err != nil {
 		return 0
 	}
@@ -78,9 +89,9 @@ func (cacheBackend *Redis) Count() int {
 }
 
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
-func (cacheBackend *Redis) Get(key string) (*types.Item, bool) {
+func (cacheBackend *Redis) Get(ctx context.Context, key string) (*types.Item, bool) {
 	// Check if the key is in the set of keys
-	isMember, err := cacheBackend.rdb.SIsMember(context.Background(), cacheBackend.keysSetName, key).Result()
+	isMember, err := cacheBackend.rdb.SIsMember(ctx, cacheBackend.keysSetName, key).Result()
 	if err != nil {
 		return nil, false
 	}
@@ -88,20 +99,13 @@ func (cacheBackend *Redis) Get(key string) (*types.Item, bool) {
 	if !isMember {
 		return nil, false
 	}
-
-	var (
-		item *types.Item
-		ok   bool
-	)
 	// Get the item from the cacheBackend
-	item, ok = types.ItemPool.Get().(*types.Item)
-	if !ok {
-		item = &types.Item{}
-	}
-	// Return the item to the pool
-	defer types.ItemPool.Put(item)
+	item := cacheBackend.itemPoolManager.Get()
 
-	data, err := cacheBackend.rdb.HGet(context.Background(), key, "data").Bytes()
+	// Return the item to the pool
+	defer cacheBackend.itemPoolManager.Put(item)
+
+	data, err := cacheBackend.rdb.HGet(ctx, key, "data").Bytes()
 	if err != nil {
 		// Check if the item is not found
 		if errors.Is(err, redis.Nil) {
@@ -120,11 +124,12 @@ func (cacheBackend *Redis) Get(key string) (*types.Item, bool) {
 }
 
 // Set stores the Item in the cacheBackend.
-func (cacheBackend *Redis) Set(item *types.Item) error {
+func (cacheBackend *Redis) Set(ctx context.Context, item *types.Item) error {
 	pipe := cacheBackend.rdb.TxPipeline()
 
 	// Check if the item is valid
-	if err := item.Valid(); err != nil {
+	err := item.Valid()
+	if err != nil {
 		// Return the item to the pool
 		return err
 	}
@@ -139,34 +144,34 @@ func (cacheBackend *Redis) Set(item *types.Item) error {
 	expiration := item.Expiration.String()
 
 	// Store the item in the cacheBackend
-	err = pipe.HSet(context.Background(), item.Key, map[string]any{
+	err = pipe.HSet(ctx, item.Key, map[string]any{
 		"data":       data,
 		"expiration": expiration,
 	}).Err()
 	if err != nil {
-		return err
+		return ewrap.Wrap(err, "failed to set item in redis")
 	}
 	// Add the key to the set of keys associated with the cache prefix
-	pipe.SAdd(context.Background(), cacheBackend.keysSetName, item.Key)
+	pipe.SAdd(ctx, cacheBackend.keysSetName, item.Key)
 	// Set the expiration if it is not zero
 	if item.Expiration > 0 {
-		pipe.Expire(context.Background(), item.Key, item.Expiration)
+		pipe.Expire(ctx, item.Key, item.Expiration)
 	}
 
-	_, err = pipe.Exec(context.Background())
+	_, err = pipe.Exec(ctx)
 	if err != nil {
-		return err
+		return ewrap.Wrap(err, "failed to execute redis pipeline")
 	}
 
 	return nil
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) (items []*types.Item, err error) {
+func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*types.Item, error) {
 	// Get the set of keys held in the cacheBackend with the given `keysSetName`
 	keys, err := cacheBackend.rdb.SMembers(ctx, cacheBackend.keysSetName).Result()
 	if err != nil {
-		return nil, err
+		return nil, ewrap.Wrap(err, "failed to get keys from redis")
 	}
 
 	// Execute the Redis commands in a pipeline transaction to improve performance and reduce the number of round trips
@@ -179,27 +184,27 @@ func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) (items 
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, ewrap.Wrap(err, "failed to execute redis pipeline while listing")
 	}
 
 	// Create a slice to hold the items
-	items = make([]*types.Item, 0, len(keys))
+	items := make([]*types.Item, 0, len(keys))
 
 	// Deserialize the items and add them to the slice of items to return
 	for _, cmd := range cmds {
-		data, err := cmd.(*redis.MapStringStringCmd).Result() // Change the type assertion to match HGetAll
-		if err != nil {
-			return nil, err
-		}
-
-		var item *types.Item
-
-		item, ok := types.ItemPool.Get().(*types.Item)
+		command, ok := cmd.(*redis.MapStringStringCmd)
 		if !ok {
-			item = &types.Item{}
+			continue
 		}
+
+		data, err := command.Result() // Change the type assertion to match HGetAll
+		if err != nil {
+			return nil, ewrap.Wrap(err, "failed to get item data from redis")
+		}
+
+		item := cacheBackend.itemPoolManager.Get()
 		// Return the item to the pool
-		defer types.ItemPool.Put(item)
+		defer cacheBackend.itemPoolManager.Put(item)
 
 		err = cacheBackend.Serializer.Unmarshal([]byte(data["data"]), item)
 		if err == nil {
@@ -210,7 +215,7 @@ func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) (items 
 	// Apply the filters
 	if len(filters) > 0 {
 		for _, filter := range filters {
-			items, err = filter.ApplyFilter("redis", items)
+			items, err = filter.ApplyFilter(constants.RedisBackend, items)
 		}
 	}
 
@@ -240,5 +245,5 @@ func (cacheBackend *Redis) Remove(ctx context.Context, keys ...string) error {
 func (cacheBackend *Redis) Clear(ctx context.Context) error {
 	_, err := cacheBackend.rdb.FlushDB(ctx).Result()
 
-	return err
+	return ewrap.Wrap(err, "flushing database", ewrap.WithRetry(maxRetries, retriesDelay))
 }

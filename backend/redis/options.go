@@ -1,3 +1,6 @@
+// Package redis provides configuration options and utilities for Redis backend implementation.
+// It includes functional options for configuring redis.Options and helper functions
+// to apply these configurations in a flexible and composable manner.
 package redis
 
 import (

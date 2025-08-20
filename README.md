@@ -103,7 +103,7 @@ config.InMemoryOptions = []backend.Option[backend.InMemory]{
 // Create a new HyperCache with a capacity of 10
 cache, err := hypercache.New(config)
 if err != nil {
-    fmt.Println(err)
+    fmt.Fprintln(os.Stderr, err)
     return
 }
 ```

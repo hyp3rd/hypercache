@@ -23,7 +23,7 @@ func NewStatsCollectorMiddleware(next hypercache.Service, statsCollector stats.I
 }
 
 // Get collects stats for the Get method.
-func (mw StatsCollectorMiddleware) Get(key string) (any, bool) {
+func (mw StatsCollectorMiddleware) Get(ctx context.Context, key string) (any, bool) {
 	start := time.Now()
 
 	defer func() {
@@ -31,7 +31,7 @@ func (mw StatsCollectorMiddleware) Get(key string) (any, bool) {
 		mw.statsCollector.Incr("hypercache_get_count", 1)
 	}()
 
-	return mw.next.Get(key)
+	return mw.next.Get(ctx, key)
 }
 
 // Set collects stats for the Set method.
@@ -59,7 +59,7 @@ func (mw StatsCollectorMiddleware) GetOrSet(ctx context.Context, key string, val
 }
 
 // GetWithInfo collects stats for the GetWithInfo method.
-func (mw StatsCollectorMiddleware) GetWithInfo(key string) (*types.Item, bool) {
+func (mw StatsCollectorMiddleware) GetWithInfo(ctx context.Context, key string) (*types.Item, bool) {
 	start := time.Now()
 
 	defer func() {
@@ -67,11 +67,11 @@ func (mw StatsCollectorMiddleware) GetWithInfo(key string) (*types.Item, bool) {
 		mw.statsCollector.Incr("hypercache_get_with_info_count", 1)
 	}()
 
-	return mw.next.GetWithInfo(key)
+	return mw.next.GetWithInfo(ctx, key)
 }
 
 // GetMultiple collects stats for the GetMultiple method.
-func (mw StatsCollectorMiddleware) GetMultiple(ctx context.Context, keys ...string) (result map[string]any, failed map[string]error) {
+func (mw StatsCollectorMiddleware) GetMultiple(ctx context.Context, keys ...string) (map[string]any, map[string]error) {
 	start := time.Now()
 
 	defer func() {
@@ -141,8 +141,8 @@ func (mw StatsCollectorMiddleware) Allocation() int64 {
 }
 
 // Count returns the count of the items in the cache.
-func (mw StatsCollectorMiddleware) Count() int {
-	return mw.next.Count()
+func (mw StatsCollectorMiddleware) Count(ctx context.Context) int {
+	return mw.next.Count(ctx)
 }
 
 // Stop collects the stats for Stop methods and stops the cache and all its goroutines (if any).

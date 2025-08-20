@@ -54,7 +54,7 @@ func WithFilterFunc(fn func(item *types.Item) bool) IFilter {
 }
 
 // ApplyFilter applies the sort by filter to the given list of items.
-func (f sortByFilter) ApplyFilter(backendType string, items []*types.Item) ([]*types.Item, error) {
+func (f sortByFilter) ApplyFilter(_ string, items []*types.Item) ([]*types.Item, error) {
 	var sorter *itemSorter
 
 	switch f.field {
@@ -96,7 +96,7 @@ func (f sortByFilter) ApplyFilter(backendType string, items []*types.Item) ([]*t
 }
 
 // ApplyFilter applies the sort order filter to the given list of items.
-func (f SortOrderFilter) ApplyFilter(backendType string, items []*types.Item) ([]*types.Item, error) {
+func (f SortOrderFilter) ApplyFilter(_ string, items []*types.Item) ([]*types.Item, error) {
 	if !f.ascending {
 		for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
 			items[i], items[j] = items[j], items[i]
@@ -107,7 +107,7 @@ func (f SortOrderFilter) ApplyFilter(backendType string, items []*types.Item) ([
 }
 
 // ApplyFilter applies the filter function to the given list of items.
-func (f filterFunc) ApplyFilter(backendType string, items []*types.Item) ([]*types.Item, error) {
+func (f filterFunc) ApplyFilter(_ string, items []*types.Item) ([]*types.Item, error) {
 	filteredItems := make([]*types.Item, 0)
 
 	for _, item := range items {

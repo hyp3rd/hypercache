@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 
@@ -11,12 +12,18 @@ import (
 	"github.com/hyp3rd/hypercache/types"
 )
 
+const (
+	cacheCapacity = 400
+	items         = 100
+	delay         = time.Millisecond * 350
+)
+
 // This example demonstrates how to list items from the cache.
 func main() {
 	// Create a new HyperCache with a capacity of 400
-	hyperCache, err := hypercache.NewInMemoryWithDefaults(400)
+	hyperCache, err := hypercache.NewInMemoryWithDefaults(cacheCapacity)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
@@ -24,15 +31,15 @@ func main() {
 	defer hyperCache.Stop()
 
 	// Add 100 items to the cache
-	for i := range 10 {
+	for i := range items {
 		key := strconv.Itoa(i)
 		val := fmt.Sprintf("val%d", i)
 
 		err = hyperCache.Set(context.TODO(), key, val, time.Minute)
-		time.Sleep(time.Millisecond * 350)
+		time.Sleep(delay)
 
 		if err != nil {
-			fmt.Printf("unexpected error: %v\n", err)
+			fmt.Fprintf(os.Stdout, "unexpected error: %v\n", err)
 
 			return
 		}
@@ -55,12 +62,12 @@ func main() {
 	// Retrieve the list of items from the cache
 	items, err := hyperCache.List(context.TODO(), sortByFilter, sortOrder, filter)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 
 	for _, item := range items {
-		fmt.Println(item.Key, item.Value)
+		fmt.Fprintln(os.Stdout, item.Key, item.Value)
 	}
 }

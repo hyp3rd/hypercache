@@ -8,7 +8,7 @@ import (
 	"github.com/longbridgeapp/assert"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/sentinel"
 )
 
 func TestHyperCache_Set(t *testing.T) {
@@ -42,7 +42,7 @@ func TestHyperCache_Set(t *testing.T) {
 			value:         "value3",
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   errors.ErrInvalidKey,
+			expectedErr:   sentinel.ErrInvalidKey,
 		},
 		{
 			name:          "set with nil value",
@@ -50,7 +50,7 @@ func TestHyperCache_Set(t *testing.T) {
 			value:         nil,
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   errors.ErrNilValue,
+			expectedErr:   sentinel.ErrNilValue,
 		},
 		{
 			name:          "overwrite existing key",
@@ -78,7 +78,7 @@ func TestHyperCache_Set(t *testing.T) {
 			err = cache.Set(context.TODO(), test.key, test.value, test.expiry)
 			assert.Equal(t, test.expectedErr, err)
 			if err == nil {
-				val, ok := cache.Get(test.key)
+				val, ok := cache.Get(context.TODO(), test.key)
 				assert.True(t, ok)
 				assert.Equal(t, test.expectedValue, val)
 			}

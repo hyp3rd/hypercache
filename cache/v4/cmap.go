@@ -1,9 +1,32 @@
+// Package v4 provides a high-performance concurrent map implementation optimized for cache operations.
+// The implementation uses sharding to minimize lock contention by dividing the map into multiple
+// independent shards, each protected by its own read-write mutex.
+//
+// The concurrent map stores string keys mapped to *types.Item values and is designed to be
+// thread-safe for concurrent read and write operations across multiple goroutines.
+//
+// Key features:
+//   - Sharded design with 32 shards to reduce lock contention
+//   - FNV-1a hash function for efficient key distribution
+//   - Thread-safe operations with optimized read/write locking
+//   - Buffered iteration support for safe concurrent traversal
+//   - Standard map operations: Set, Get, Has, Remove, Pop, Clear, Count
+//
+// Example usage:
+//
+//	cm := v4.New()
+//	cm.Set("key", &types.Item{...})
+//	if item, ok := cm.Get("key"); ok {
+//	    // Process item
+//	}
 package v4
 
 import (
 	"hash"
 	"hash/fnv"
 	"sync"
+
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/types"
 )
@@ -50,32 +73,39 @@ func create() []*ConcurrentMapShard {
 }
 
 // GetShard returns shard under given key.
-func (m *ConcurrentMap) GetShard(key string) *ConcurrentMapShard {
-	shardIndex := getShardIndex(m, key)
+func (cm *ConcurrentMap) GetShard(key string) *ConcurrentMapShard {
+	shardIndex, err := getShardIndex(key)
+	if err != nil {
+		return nil
+	}
 
-	return m.shards[shardIndex]
+	return cm.shards[shardIndex]
 }
 
 // getShardIndex calculates the shard index for the given key.
-func getShardIndex(m *ConcurrentMap, key string) uint32 {
+func getShardIndex(key string) (uint32, error) {
 	hasher := fnv.New32a()
-	hasher.Write([]byte(key))
+
+	_, err := hasher.Write([]byte(key))
+	if err != nil {
+		return 0, ewrap.Wrap(err, "failed to write key to hasher")
+	}
 	// Calculate the shard index using a bitwise AND operation.
-	return hasher.Sum32() & (ShardCount32 - 1)
+	return hasher.Sum32() & (ShardCount32 - 1), nil
 }
 
 // Set sets the given value under the specified key.
-func (m *ConcurrentMap) Set(key string, value *types.Item) {
-	shard := m.GetShard(key)
+func (cm *ConcurrentMap) Set(key string, value *types.Item) {
+	shard := cm.GetShard(key)
 	shard.Lock()
 	shard.items[key] = value
 	shard.Unlock()
 }
 
 // Get retrieves an element from map under given key.
-func (m *ConcurrentMap) Get(key string) (*types.Item, bool) {
+func (cm *ConcurrentMap) Get(key string) (*types.Item, bool) {
 	// Get shard
-	shard := m.GetShard(key)
+	shard := cm.GetShard(key)
 	shard.RLock()
 	// Get item from shard.
 	item, ok := shard.items[key]
@@ -85,9 +115,9 @@ func (m *ConcurrentMap) Get(key string) (*types.Item, bool) {
 }
 
 // Has checks if key is present in the map.
-func (m *ConcurrentMap) Has(key string) bool {
+func (cm *ConcurrentMap) Has(key string) bool {
 	// Get shard
-	shard := m.GetShard(key)
+	shard := cm.GetShard(key)
 	shard.RLock()
 	// Get item from shard.
 	_, ok := shard.items[key]
@@ -97,8 +127,8 @@ func (m *ConcurrentMap) Has(key string) bool {
 }
 
 // Pop removes an element from the map and returns it.
-func (m *ConcurrentMap) Pop(key string) (*types.Item, bool) {
-	shard := m.GetShard(key)
+func (cm *ConcurrentMap) Pop(key string) (*types.Item, bool) {
+	shard := cm.GetShard(key)
 	shard.Lock()
 
 	item, ok := shard.items[key]
@@ -121,8 +151,8 @@ type Tuple struct {
 }
 
 // IterBuffered returns a buffered iterator which could be used in a for range loop.
-func (m ConcurrentMap) IterBuffered() <-chan Tuple {
-	chans := snapshot(m)
+func (cm *ConcurrentMap) IterBuffered() <-chan Tuple {
+	chans := snapshot(cm)
 
 	total := 0
 	for _, c := range chans {
@@ -139,17 +169,17 @@ func (m ConcurrentMap) IterBuffered() <-chan Tuple {
 // which likely takes a snapshot of `m`.
 // It returns once the size of each buffered channel is determined,
 // before all the channels are populated using goroutines.
-func snapshot(m ConcurrentMap) (chans []chan Tuple) {
+func snapshot(cm *ConcurrentMap) []chan Tuple {
 	// When you access map items before initializing.
-	if len(m.shards) == 0 {
+	if len(cm.shards) == 0 {
 		panic(`cmap.ConcurrentMap is not initialized. Should run New() before usage.`)
 	}
 
-	chans = make([]chan Tuple, ShardCount)
+	chans := make([]chan Tuple, ShardCount)
 	wg := sync.WaitGroup{}
 	wg.Add(ShardCount)
 	// Foreach shard.
-	for index, shard := range m.shards {
+	for index, shard := range cm.shards {
 		go func(index int, shard *ConcurrentMapShard) {
 			// Foreach key, value pair.
 			shard.RLock()
@@ -191,26 +221,26 @@ func fanIn(chans []chan Tuple, out chan Tuple) {
 }
 
 // Remove removes the value under the specified key.
-func (m *ConcurrentMap) Remove(key string) {
+func (cm *ConcurrentMap) Remove(key string) {
 	// Get map shard.
-	shard := m.GetShard(key)
+	shard := cm.GetShard(key)
 	shard.Lock()
 	delete(shard.items, key)
 	shard.Unlock()
 }
 
 // Clear removes all items from map.
-func (m ConcurrentMap) Clear() {
-	for item := range m.IterBuffered() {
-		m.Remove(item.Key)
+func (cm *ConcurrentMap) Clear() {
+	for item := range cm.IterBuffered() {
+		cm.Remove(item.Key)
 	}
 }
 
 // Count returns the number of items in the map.
-func (m *ConcurrentMap) Count() int {
+func (cm *ConcurrentMap) Count() int {
 	count := 0
 
-	for _, shard := range m.shards {
+	for _, shard := range cm.shards {
 		shard.RLock()
 		count += len(shard.items)
 		shard.RUnlock()

@@ -67,7 +67,10 @@ func (pool *WorkerPool) Resize(newSize int) {
 		for range diff {
 			go func() {
 				for job := range pool.jobs {
-					job()
+					err := job()
+					if err != nil {
+						pool.errorChan <- err
+					}
 				}
 			}()
 		}

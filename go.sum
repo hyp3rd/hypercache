@@ -8,10 +8,12 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f h1:lO4WD4F/rVNCu3HqELle0jiPLLBs70cWOduZpkS1E78=
 github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f/go.mod h1:cuUVRXasLTGF7a8hSLbxyZXjz+1KgoB3wDUb6vlszIc=
+github.com/goccy/go-json v0.10.5 h1:Fq85nIqj+gXn/S5ahsiTlK3TmC85qgirsdTP/+DeaC4=
+github.com/goccy/go-json v0.10.5/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
-github.com/hyp3rd/ewrap v1.2.0 h1:g0/YTitJ1HemhLMxtfMnDHx/0UW0nrRv43wDnuXGJK8=
-github.com/hyp3rd/ewrap v1.2.0/go.mod h1:Mx75+DNntwGNdzwGcEx6vux87tEh65J477wT08JEGzw=
+github.com/hyp3rd/ewrap v1.3.0 h1:hLCIMHsm+AoK2rMwVCYr5ljVHxj+tKTCP0pMMLiOW3Q=
+github.com/hyp3rd/ewrap v1.3.0/go.mod h1:IIFZD7fz7CjpWYW2bessFaLvUd3ip9E/ALlz0RE/Tpo=
 github.com/longbridgeapp/assert v1.1.0 h1:L+/HISOhuGbNAAmJNXgk3+Tm5QmSB70kwdktJXgjL+I=
 github.com/longbridgeapp/assert v1.1.0/go.mod h1:UOI7O3rzlzlz715lQm0atWs6JbrYGuIJUEeOekutL6o=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

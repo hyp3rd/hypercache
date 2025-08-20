@@ -9,7 +9,8 @@ import (
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/internal/constants"
+	"github.com/hyp3rd/hypercache/sentinel"
 )
 
 func TestGetMultiple(t *testing.T) {
@@ -35,7 +36,7 @@ func TestGetMultiple(t *testing.T) {
 			name:       "get multiple keys with missing values",
 			keys:       []string{"key1", "key2", "key3"},
 			wantValues: map[string]any{"key1": 1, "key3": 3},
-			wantErrs:   map[string]error{"key2": errors.ErrKeyNotFound},
+			wantErrs:   map[string]error{"key2": sentinel.ErrKeyNotFound},
 			setup: func(cache *hypercache.HyperCache[backend.InMemory]) {
 				cache.Set(context.TODO(), "key1", 1, 0)
 				cache.Set(context.TODO(), "key3", 3, 0)
@@ -45,7 +46,7 @@ func TestGetMultiple(t *testing.T) {
 			name:       "get multiple keys with expired values",
 			keys:       []string{"key1", "key2", "key3"},
 			wantValues: map[string]any{"key2": 2, "key3": 3},
-			wantErrs:   map[string]error{"key1": errors.ErrKeyNotFound},
+			wantErrs:   map[string]error{"key1": sentinel.ErrKeyNotFound},
 			setup: func(cache *hypercache.HyperCache[backend.InMemory]) {
 				cache.Set(context.TODO(), "key1", 1, time.Millisecond)
 				time.Sleep(2 * time.Millisecond)
@@ -58,7 +59,7 @@ func TestGetMultiple(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			config := &hypercache.Config[backend.InMemory]{
-				BackendType: "in-memory",
+				BackendType: constants.InMemoryBackend,
 				HyperCacheOptions: []hypercache.Option[backend.InMemory]{
 					hypercache.WithExpirationInterval[backend.InMemory](time.Millisecond),
 				},

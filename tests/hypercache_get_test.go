@@ -8,7 +8,7 @@ import (
 	"github.com/longbridgeapp/assert"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/sentinel"
 )
 
 func TestHyperCache_Get(t *testing.T) {
@@ -61,7 +61,7 @@ func TestHyperCache_Get(t *testing.T) {
 			value:         "value5",
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   errors.ErrKeyNotFound,
+			expectedErr:   sentinel.ErrKeyNotFound,
 			shouldSet:     false,
 		},
 	}
@@ -80,7 +80,7 @@ func TestHyperCache_Get(t *testing.T) {
 				}
 			}
 
-			val, ok := cache.Get(test.key)
+			val, ok := cache.Get(context.TODO(), test.key)
 			if test.expectedErr != nil || !ok {
 				assert.False(t, ok)
 			} else {

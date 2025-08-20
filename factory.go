@@ -2,7 +2,8 @@ package hypercache
 
 import (
 	"github.com/hyp3rd/hypercache/backend"
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/internal/constants"
+	"github.com/hyp3rd/hypercache/sentinel"
 )
 
 // IBackendConstructor is an interface for backend constructors.
@@ -17,7 +18,7 @@ type InMemoryBackendConstructor struct{}
 func (ibc InMemoryBackendConstructor) Create(config any) (any, error) {
 	inMemoryConfig, ok := config.(*Config[backend.InMemory])
 	if !ok {
-		return nil, errors.ErrInvalidBackendType
+		return nil, sentinel.ErrInvalidBackendType
 	}
 
 	return backend.NewInMemory(inMemoryConfig.InMemoryOptions...)
@@ -30,7 +31,7 @@ type RedisBackendConstructor struct{}
 func (rbc RedisBackendConstructor) Create(config any) (any, error) {
 	redisConfig, ok := config.(*Config[backend.Redis])
 	if !ok {
-		return nil, errors.ErrInvalidBackendType
+		return nil, sentinel.ErrInvalidBackendType
 	}
 
 	return backend.NewRedis(redisConfig.RedisOptions...)
@@ -41,8 +42,30 @@ type BackendManager struct {
 	backendRegistry map[string]IBackendConstructor
 }
 
-// NewBackendManager creates a new BackendManager.
+// getDefaultBackends returns the default set of backend constructors.
+func getDefaultBackends() map[string]IBackendConstructor {
+	return map[string]IBackendConstructor{
+		constants.InMemoryBackend: InMemoryBackendConstructor{},
+		constants.RedisBackend:    RedisBackendConstructor{},
+	}
+}
+
+// NewBackendManager creates a new BackendManager with default backends pre-registered.
 func NewBackendManager() *BackendManager {
+	manager := &BackendManager{
+		backendRegistry: make(map[string]IBackendConstructor),
+	}
+	// Register the default backends
+	for name, constructor := range getDefaultBackends() {
+		manager.RegisterBackend(name, constructor)
+	}
+
+	return manager
+}
+
+// NewEmptyBackendManager creates a new BackendManager without default backends.
+// This is useful for testing or when you want to register only specific backends.
+func NewEmptyBackendManager() *BackendManager {
 	return &BackendManager{
 		backendRegistry: make(map[string]IBackendConstructor),
 	}
@@ -53,15 +76,8 @@ func (hcm *BackendManager) RegisterBackend(name string, constructor IBackendCons
 	hcm.backendRegistry[name] = constructor
 }
 
-var defaultManager *BackendManager
-
-// GetDefaultManager returns the default BackendManager.
+// GetDefaultManager returns a new BackendManager with default backends pre-registered.
+// This replaces the previous global instance with a factory function.
 func GetDefaultManager() *BackendManager {
-	return defaultManager
-}
-
-func init() {
-	defaultManager = NewBackendManager()
-	defaultManager.RegisterBackend("in-memory", InMemoryBackendConstructor{})
-	defaultManager.RegisterBackend("redis", RedisBackendConstructor{})
+	return NewBackendManager()
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/longbridgeapp/assert"
 
 	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/internal/constants"
 )
 
 func TestHyperCache_New(t *testing.T) {
@@ -49,7 +50,7 @@ func TestHyperCache_WithExpirationInterval(t *testing.T) {
 	assert.Equal(t, 30*time.Minute, cache.expirationInterval)
 
 	config := &Config[backend.InMemory]{
-		BackendType: "in-memory",
+		BackendType: constants.InMemoryBackend,
 		HyperCacheOptions: []Option[backend.InMemory]{
 			WithExpirationInterval[backend.InMemory](1 * time.Hour),
 		},
@@ -72,7 +73,7 @@ func TestHyperCache_WithEvictionInterval(t *testing.T) {
 
 	// Test with custom eviction interval
 	config := &Config[backend.InMemory]{
-		BackendType: "in-memory",
+		BackendType: constants.InMemoryBackend,
 		HyperCacheOptions: []Option[backend.InMemory]{
 			WithEvictionInterval[backend.InMemory](1 * time.Hour),
 		},
@@ -95,7 +96,7 @@ func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
 
 	// Test with custom max eviction count
 	config := &Config[backend.InMemory]{
-		BackendType: "in-memory",
+		BackendType: constants.InMemoryBackend,
 		HyperCacheOptions: []Option[backend.InMemory]{
 			WithEvictionInterval[backend.InMemory](1 * time.Hour),
 			WithMaxEvictionCount[backend.InMemory](5),

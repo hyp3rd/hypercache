@@ -9,31 +9,33 @@ package eviction
 import (
 	"sync"
 
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/sentinel"
 	"github.com/hyp3rd/hypercache/types"
 )
 
 // ClockAlgorithm is an in-memory cache with the Clock algorithm.
 type ClockAlgorithm struct {
-	items      []*types.Item
-	keys       map[string]int
-	mutex      sync.RWMutex
-	evictMutex sync.Mutex
-	capacity   int
-	hand       int
+	items           []*types.Item
+	itemPoolManager *types.ItemPoolManager
+	keys            map[string]int
+	mutex           sync.RWMutex
+	evictMutex      sync.Mutex
+	capacity        int
+	hand            int
 }
 
 // NewClockAlgorithm creates a new in-memory cache with the given capacity and the Clock algorithm.
 func NewClockAlgorithm(capacity int) (*ClockAlgorithm, error) {
 	if capacity < 0 {
-		return nil, errors.ErrInvalidCapacity
+		return nil, sentinel.ErrInvalidCapacity
 	}
 
 	return &ClockAlgorithm{
-		items:    make([]*types.Item, capacity),
-		keys:     make(map[string]int, capacity),
-		capacity: capacity,
-		hand:     0,
+		items:           make([]*types.Item, capacity),
+		itemPoolManager: types.NewItemPoolManager(),
+		keys:            make(map[string]int, capacity),
+		capacity:        capacity,
+		hand:            0,
 	}, nil
 }
 
@@ -54,7 +56,7 @@ func (c *ClockAlgorithm) Evict() (string, bool) {
 			item.AccessCount--
 		} else {
 			delete(c.keys, item.Key)
-			types.ItemPool.Put(item)
+			c.itemPoolManager.Put(item)
 
 			c.items[c.hand] = nil
 
@@ -77,12 +79,7 @@ func (c *ClockAlgorithm) Set(key string, value any) {
 		c.Delete(evictedKey)
 	}
 
-	var item *types.Item
-
-	item, ok = types.ItemPool.Get().(*types.Item)
-	if !ok {
-		item = &types.Item{}
-	}
+	item := c.itemPoolManager.Get()
 
 	item.Key = key
 	item.Value = value
@@ -123,5 +120,5 @@ func (c *ClockAlgorithm) Delete(key string) {
 	delete(c.keys, key)
 	c.items[index] = nil
 
-	types.ItemPool.Put(item)
+	c.itemPoolManager.Put(item)
 }

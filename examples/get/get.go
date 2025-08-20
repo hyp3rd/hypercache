@@ -4,16 +4,19 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/hyp3rd/hypercache"
 )
 
+const cacheCapacity = 10
+
 func main() {
 	// Create a new HyperCache with a capacity of 10
-	cache, err := hypercache.NewInMemoryWithDefaults(10)
+	cache, err := hypercache.NewInMemoryWithDefaults(cacheCapacity)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
@@ -28,7 +31,7 @@ func main() {
 
 		err = cache.Set(context.TODO(), key, val, time.Minute)
 		if err != nil {
-			fmt.Printf("unexpected error: %v\n", err)
+			fmt.Fprintf(os.Stdout, "unexpected error: %v\n", err)
 
 			return
 		}
@@ -45,7 +48,7 @@ func main() {
 
 	// Print the items
 	for k, v := range items {
-		fmt.Println(k, v)
+		fmt.Fprintln(os.Stdout, k, v)
 	}
 
 	log.Println("fetching items from the cache using the `GetOrSet` method")
@@ -53,21 +56,21 @@ func main() {
 	// If the item is not found, set it and return the value
 	val, err := cache.GetOrSet(context.TODO(), "key11", "val11", time.Minute)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 
-	fmt.Println(val)
+	fmt.Fprintln(os.Stdout, val)
 
 	log.Println("fetching items from the cache using the simple `Get` method")
 
-	item, ok := cache.Get("key7")
+	item, ok := cache.Get(context.TODO(), "key7")
 	if !ok {
-		fmt.Println("item not found")
+		fmt.Fprintln(os.Stdout, "item not found")
 
 		return
 	}
 
-	fmt.Println(item)
+	fmt.Fprintln(os.Stdout, item)
 }

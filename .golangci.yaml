@@ -99,6 +99,12 @@ linters:
       # Default: 1
       tab-width: 1
 
+    mnd:
+      ignored-numbers:
+        - "0666"
+        - "0755"
+        - "2"
+
     ireturn:
       # ireturn does not allow using `allow` and `reject` settings at the same time.
       # Both settings are lists of the keywords and regular expressions matched to interface or package names.
@@ -174,6 +180,7 @@ linters:
         - r *http.Request
         - w http.ResponseWriter
         - T any
+        - T backend.IBackendConstrain
         - m map[string]int
 
   # Enable only fast linters from enabled linters set (first run won't be fast)

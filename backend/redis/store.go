@@ -4,11 +4,12 @@ import (
 	"context"
 	"net"
 	"strings"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/hyp3rd/ewrap"
+
+	"github.com/hyp3rd/hypercache/internal/constants"
 )
 
 // Store is a redis store instance with redis client.
@@ -22,17 +23,21 @@ func New(opts ...Option) (*Store, error) {
 	// Setup redis client
 	opt := &redis.Options{
 		Dialer: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return net.DialTimeout(network, addr, 10*time.Second)
+			dialer := &net.Dialer{
+				Timeout: constants.RedisDialTimeout,
+			}
+
+			return dialer.DialContext(ctx, network, addr)
 		},
 		DB:           0,
-		MaxRetries:   10,
-		DialTimeout:  10 * time.Second,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		MaxRetries:   constants.RedisClientMaxRetries,
+		DialTimeout:  constants.RedisDialTimeout,
+		ReadTimeout:  constants.RedisClientReadTimeout,
+		WriteTimeout: constants.RedisClientWriteTimeout,
 		PoolFIFO:     false,
-		PoolSize:     20,
-		MinIdleConns: 10,
-		PoolTimeout:  30 * time.Second,
+		PoolSize:     constants.RedisClientPoolSize,
+		MinIdleConns: constants.RedisClientMinIdleConns,
+		PoolTimeout:  constants.RedisClientPoolTimeout,
 	}
 
 	ApplyOptions(opt, opts...)

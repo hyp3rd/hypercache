@@ -8,7 +8,7 @@ import (
 	"github.com/longbridgeapp/assert"
 
 	"github.com/hyp3rd/hypercache"
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/sentinel"
 )
 
 func TestHyperCache_GetOrSet(t *testing.T) {
@@ -50,7 +50,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 			value:         nil,
 			expiry:        0,
 			expectedValue: nil,
-			expectedErr:   errors.ErrNilValue,
+			expectedErr:   sentinel.ErrNilValue,
 		},
 		{
 			name:          "get or set with key that has expired",
@@ -58,7 +58,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 			value:         "value5",
 			expiry:        time.Millisecond,
 			expectedValue: nil,
-			expectedErr:   errors.ErrKeyExpired,
+			expectedErr:   sentinel.ErrKeyExpired,
 		},
 		{
 			name:          "get or set with key that already exists",
@@ -78,7 +78,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 				err error
 			)
 
-			shouldExpire := test.expectedErr == errors.ErrKeyExpired
+			shouldExpire := test.expectedErr == sentinel.ErrKeyExpired
 
 			val, err = cache.GetOrSet(context.TODO(), test.key, test.value, test.expiry)
 			if !shouldExpire {
@@ -99,11 +99,11 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 
 			// Check if the value has been set in the cache
 			if err == nil {
-				val, ok := cache.Get(test.key)
+				val, ok := cache.Get(context.TODO(), test.key)
 				assert.True(t, ok)
 				assert.Equal(t, test.expectedValue, val)
 			} else {
-				val, ok := cache.Get(test.key)
+				val, ok := cache.Get(context.TODO(), test.key)
 				assert.False(t, ok)
 				assert.Nil(t, val)
 			}

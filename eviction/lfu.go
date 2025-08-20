@@ -6,7 +6,7 @@ import (
 	"container/heap"
 	"sync"
 
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/sentinel"
 )
 
 // LFUAlgorithm is an eviction algorithm that uses the Least Frequently Used (LFU) policy to select items for eviction.
@@ -27,6 +27,8 @@ type Node struct {
 }
 
 // FrequencyHeap is a heap of Nodes.
+//
+//nolint:recvcheck
 type FrequencyHeap []*Node
 
 // Len returns the length of the heap.
@@ -51,9 +53,12 @@ func (fh FrequencyHeap) Swap(i, j int) {
 // Push adds a node to the heap.
 func (fh *FrequencyHeap) Push(x any) {
 	n := len(*fh)
-	node := x.(*Node)
-	node.index = n
-	*fh = append(*fh, node)
+
+	node, ok := x.(*Node)
+	if ok {
+		node.index = n
+		*fh = append(*fh, node)
+	}
 }
 
 // Pop removes the last node from the heap.
@@ -70,7 +75,7 @@ func (fh *FrequencyHeap) Pop() any {
 // NewLFUAlgorithm creates a new LFUAlgorithm with the given capacity.
 func NewLFUAlgorithm(capacity int) (*LFUAlgorithm, error) {
 	if capacity < 0 {
-		return nil, errors.ErrInvalidCapacity
+		return nil, sentinel.ErrInvalidCapacity
 	}
 
 	return &LFUAlgorithm{
@@ -150,7 +155,11 @@ func (l *LFUAlgorithm) internalEvict() (string, bool) {
 		return "", false
 	}
 
-	node := heap.Pop(l.freqs).(*Node)
+	node, ok := heap.Pop(l.freqs).(*Node)
+	if !ok {
+		return "", false
+	}
+
 	delete(l.items, node.key)
 	l.length--
 

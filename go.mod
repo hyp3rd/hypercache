@@ -3,7 +3,8 @@ module github.com/hyp3rd/hypercache
 go 1.25.0
 
 require (
-	github.com/hyp3rd/ewrap v1.2.0
+	github.com/goccy/go-json v0.10.5
+	github.com/hyp3rd/ewrap v1.3.0
 	github.com/longbridgeapp/assert v1.1.0
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/shamaton/msgpack/v2 v2.3.0

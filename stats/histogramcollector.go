@@ -2,6 +2,7 @@ package stats
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"sync"
 
@@ -94,14 +95,14 @@ func (c *HistogramStatsCollector) Median(stat types.Stat) float64 {
 }
 
 // Percentile returns the pth percentile value of a statistic.
-func (c *HistogramStatsCollector) Percentile(stat types.Stat, p float64) float64 {
+func (c *HistogramStatsCollector) Percentile(stat types.Stat, percentile float64) float64 {
 	values := c.stats[stat.String()]
 	if len(values) == 0 {
 		return 0
 	}
 
-	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
-	index := int(float64(len(values)) * p)
+	slices.Sort(values)
+	index := int(float64(len(values)) * percentile)
 
 	return float64(values[index])
 }
@@ -118,16 +119,16 @@ func (c *HistogramStatsCollector) GetStats() Stats {
 		mean := c.Mean(types.Stat(stat))
 		median := c.Median(types.Stat(stat))
 
-		sort.Slice(values, func(i, j int) bool {
-			return values[i] < values[j]
-		})
-		min := values[0]
-		max := values[len(values)-1]
+		slices.Sort(values)
+
+		minVal := values[0]
+		maxVal := values[len(values)-1]
+
 		stats[stat] = &Stat{
 			Mean:     mean,
 			Median:   median,
-			Min:      min,
-			Max:      max,
+			Min:      minVal,
+			Max:      maxVal,
 			Values:   values,
 			Count:    len(values),
 			Sum:      sum(values),

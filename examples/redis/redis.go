@@ -3,14 +3,23 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/backend"
 	"github.com/hyp3rd/hypercache/backend/redis"
+	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/types"
 )
 
+const (
+	cacheCapacity = 20
+	items         = 50
+	delay         = 5 * time.Second
+)
+
+//nolint:funlen
 func main() {
 	redisStore, err := redis.New(
 		redis.WithAddr("localhost:6379"),
@@ -22,13 +31,13 @@ func main() {
 	}
 
 	conf := &hypercache.Config[backend.Redis]{
-		BackendType: "redis",
+		BackendType: constants.RedisBackend,
 		RedisOptions: []backend.Option[backend.Redis]{
 			backend.WithRedisClient(redisStore.Client),
-			backend.WithCapacity[backend.Redis](20),
+			backend.WithCapacity[backend.Redis](cacheCapacity),
 		},
 		HyperCacheOptions: []hypercache.Option[backend.Redis]{
-			hypercache.WithEvictionInterval[backend.Redis](time.Second * 5),
+			hypercache.WithEvictionInterval[backend.Redis](constants.DefaultEvictionInterval),
 		},
 	}
 
@@ -37,19 +46,19 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println("setting 50 items to the cache")
+	fmt.Fprintln(os.Stdout, "setting 50 items to the cache")
 
-	for i := range 50 {
+	for i := range items {
 		err = hyperCache.Set(context.TODO(), fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i), time.Hour)
 		if err != nil {
 			panic(err)
 		}
 	}
 
-	fmt.Println("count", hyperCache.Count())
-	fmt.Println("capacity", hyperCache.Capacity())
+	fmt.Fprintln(os.Stdout, "count", hyperCache.Count(context.TODO()))
+	fmt.Fprintln(os.Stdout, "capacity", hyperCache.Capacity())
 
-	fmt.Println("fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
+	fmt.Fprintln(os.Stdout, "fetching all items (sorted by key, ascending, filtered by value != 'value-16')")
 
 	// Apply filters
 	// Define a filter function
@@ -67,42 +76,42 @@ func main() {
 	// Retrieve the list of items from the cache
 	allItems, err := hyperCache.List(context.TODO(), sortByFilter, filter)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 
-	fmt.Println("printing all items")
+	fmt.Fprintln(os.Stdout, "printing all items")
 	// Print the list of items
 	for _, item := range allItems {
-		fmt.Println(item.Key, item.Value)
+		fmt.Fprintln(os.Stdout, item.Key, item.Value)
 	}
 
-	fmt.Println("count", hyperCache.Count())
-	fmt.Println("capacity", hyperCache.Capacity())
+	fmt.Fprintln(os.Stdout, "count", hyperCache.Count(context.TODO()))
+	fmt.Fprintln(os.Stdout, "capacity", hyperCache.Capacity())
 
-	fmt.Println("sleep for 5 seconds to trigger eviction")
-	time.Sleep(time.Second * 5)
+	fmt.Fprintln(os.Stdout, "sleep for 5 seconds to trigger eviction")
+	time.Sleep(delay)
 
-	fmt.Println("fetching all items again")
+	fmt.Fprintln(os.Stdout, "fetching all items again")
 
 	allItems, err = hyperCache.List(context.TODO())
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 
-	fmt.Println("printing all items")
+	fmt.Fprintln(os.Stdout, "printing all items")
 	// Print the list of items
 	for _, item := range allItems {
-		fmt.Println(item.Key, item.Value)
+		fmt.Fprintln(os.Stdout, item.Key, item.Value)
 	}
 
-	fmt.Println("count", hyperCache.Count())
+	fmt.Fprintln(os.Stdout, "count", hyperCache.Count(context.TODO()))
 
-	value, ok := hyperCache.Get("key-49")
+	value, ok := hyperCache.Get(context.TODO(), "key-49")
 	if ok {
-		fmt.Println(value)
+		fmt.Fprintln(os.Stdout, value)
 	}
 }

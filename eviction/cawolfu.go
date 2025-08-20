@@ -5,16 +5,17 @@ package eviction
 import (
 	"sync"
 
-	cache "github.com/hyp3rd/hypercache/cache"
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/cache"
+	"github.com/hyp3rd/hypercache/sentinel"
 )
 
 // CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
 type CAWOLFU struct {
-	items  cache.ConcurrentMap[string, *CAWOLFUNode] // concurrent map to store the items in the cache
-	list   *CAWOLFULinkedList                        // linked list to store the items in the cache, with the most frequently used items at the front
-	length int                                       // number of items in the cache
-	cap    int                                       // capacity of the cache
+	items    cache.ConcurrentMap[string, *CAWOLFUNode] // concurrent map to store the items in the cache
+	list     *CAWOLFULinkedList                        // linked list to store the items in the cache, with the most frequently used items at the front
+	length   int                                       // number of items in the cache
+	cap      int                                       // capacity of the cache
+	nodePool sync.Pool                                 // pool of CAWOLFUNode values for memory reuse
 }
 
 // CAWOLFUNode is a struct that represents a node in the linked list. It has a key, value, and access count field.
@@ -26,13 +27,6 @@ type CAWOLFUNode struct {
 	next  *CAWOLFUNode // next node in the linked list
 }
 
-// CAWOLFUNodePool is a pool of CAWOLFUNode values.
-var CAWOLFUNodePool = sync.Pool{
-	New: func() any {
-		return &CAWOLFUNode{}
-	},
-}
-
 // CAWOLFULinkedList is a struct that represents a linked list. It has a head and tail field.
 type CAWOLFULinkedList struct {
 	head *CAWOLFUNode // head of the linked list
@@ -42,13 +36,18 @@ type CAWOLFULinkedList struct {
 // NewCAWOLFU returns a new CAWOLFU with the given capacity.
 func NewCAWOLFU(capacity int) (*CAWOLFU, error) {
 	if capacity < 0 {
-		return nil, errors.ErrInvalidCapacity
+		return nil, sentinel.ErrInvalidCapacity
 	}
 
 	return &CAWOLFU{
 		items: cache.New[*CAWOLFUNode](),
 		list:  &CAWOLFULinkedList{},
 		cap:   capacity,
+		nodePool: sync.Pool{
+			New: func() any {
+				return &CAWOLFUNode{}
+			},
+		},
 	}, nil
 }
 
@@ -70,7 +69,7 @@ func (c *CAWOLFU) Evict() (string, bool) {
 
 	c.length--
 
-	CAWOLFUNodePool.Put(node)
+	c.nodePool.Put(node)
 
 	return node.key, true
 }
@@ -84,7 +83,7 @@ func (c *CAWOLFU) Set(key string, value any) {
 
 	var node *CAWOLFUNode
 
-	node, ok := CAWOLFUNodePool.Get().(*CAWOLFUNode)
+	node, ok := c.nodePool.Get().(*CAWOLFUNode)
 	if !ok {
 		node = &CAWOLFUNode{}
 	}
@@ -112,25 +111,24 @@ func (c *CAWOLFU) Get(key string) (any, bool) {
 }
 
 // remove removes the given node from the linked list.
-// remove removes the given node from the linked list.
 func (l *CAWOLFULinkedList) remove(node *CAWOLFUNode) {
-	if node == l.head && node == l.tail {
+	switch {
+	case node == l.head && node == l.tail:
 		l.head = nil
 		l.tail = nil
-	} else if node == l.head {
+	case node == l.head:
 		l.head = node.next
 		l.head.prev = nil
-	} else if node == l.tail {
+	case node == l.tail:
 		l.tail = node.prev
 		l.tail.next = nil
-	} else {
+	default:
 		node.prev.next = node.next
 		node.next.prev = node.prev
 	}
 
 	node.prev = nil
 	node.next = nil
-	CAWOLFUNodePool.Put(node)
 }
 
 // Delete removes the given key from the cache.
@@ -149,7 +147,7 @@ func (c *CAWOLFU) Delete(key string) {
 
 	c.length--
 
-	CAWOLFUNodePool.Put(node)
+	c.nodePool.Put(node)
 }
 
 // addToFront adds the given node to the front of the linked list.

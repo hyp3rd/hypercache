@@ -10,27 +10,43 @@ import (
 
 	"github.com/ugorji/go/codec"
 
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/sentinel"
 )
 
-var (
-	// ItemPool is a pool of Item values.
-	ItemPool = sync.Pool{
-		New: func() any {
-			return &Item{}
-		},
-	}
-
-	// buf is a buffer used to calculate the size of the item.
-	buf []byte
-
-	// encoderPool is a pool of encoders used to calculate the size of the item.
-	encoderPool = sync.Pool{
-		New: func() any {
-			return codec.NewEncoderBytes(&buf, &codec.CborHandle{})
-		},
-	}
+const (
+	bytesPerKB = 1024
 )
+
+// ItemPoolManager manages Item object pools for memory efficiency.
+type ItemPoolManager struct {
+	pool sync.Pool
+}
+
+// NewItemPoolManager creates a new ItemPoolManager with default configuration.
+func NewItemPoolManager() *ItemPoolManager {
+	return &ItemPoolManager{
+		pool: sync.Pool{
+			New: func() any {
+				return &Item{}
+			},
+		},
+	}
+}
+
+// Get retrieves an Item from the pool.
+func (m *ItemPoolManager) Get() *Item {
+	item, ok := m.pool.Get().(*Item)
+	if !ok {
+		return &Item{}
+	}
+
+	return item
+}
+
+// Put returns an Item to the pool.
+func (m *ItemPoolManager) Put(item *Item) {
+	m.pool.Put(item)
+}
 
 // Item is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
 type Item struct {
@@ -44,34 +60,29 @@ type Item struct {
 
 // SetSize stores the size of the Item in bytes.
 func (item *Item) SetSize() error {
-	var enc *codec.Encoder
+	// Use local buffer for thread safety
+	var buf []byte
 
-	enc, ok := encoderPool.Get().(*codec.Encoder)
-	if !ok {
-		enc = codec.NewEncoderBytes(&buf, &codec.CborHandle{})
-	}
-
-	defer encoderPool.Put(enc)
+	enc := codec.NewEncoderBytes(&buf, &codec.CborHandle{})
 
 	err := enc.Encode(item.Value)
 	if err != nil {
-		return errors.ErrInvalidSize
+		return sentinel.ErrInvalidSize
 	}
 
 	item.Size = int64(len(buf))
-	buf = buf[:0]
 
 	return nil
 }
 
 // SizeMB returns the size of the Item in megabytes.
 func (item *Item) SizeMB() float64 {
-	return float64(item.Size) / (1024 * 1024)
+	return float64(item.Size) / (bytesPerKB * bytesPerKB)
 }
 
 // SizeKB returns the size of the Item in kilobytes.
 func (item *Item) SizeKB() float64 {
-	return float64(item.Size) / 1024
+	return float64(item.Size) / bytesPerKB
 }
 
 // Touch updates the last access time of the item and increments the access count.
@@ -84,19 +95,19 @@ func (item *Item) Touch() {
 func (item *Item) Valid() error {
 	// Check for empty key
 	if strings.TrimSpace(item.Key) == "" {
-		return errors.ErrInvalidKey
+		return sentinel.ErrInvalidKey
 	}
 
 	// Check for nil value
 	if item.Value == nil {
-		return errors.ErrNilValue
+		return sentinel.ErrNilValue
 	}
 
 	// Check for negative expiration
 	if atomic.LoadInt64((*int64)(&item.Expiration)) < 0 {
 		atomic.StoreInt64((*int64)(&item.Expiration), 0)
 
-		return errors.ErrInvalidExpiration
+		return sentinel.ErrInvalidExpiration
 	}
 
 	return nil

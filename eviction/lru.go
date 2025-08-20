@@ -13,7 +13,7 @@ package eviction
 import (
 	"sync"
 
-	"github.com/hyp3rd/hypercache/errors"
+	"github.com/hyp3rd/hypercache/sentinel"
 )
 
 // lruCacheItem represents an item in the LRU cache.
@@ -24,13 +24,6 @@ type lruCacheItem struct {
 	next  *lruCacheItem
 }
 
-// LRUCacheItemmPool is a pool of LRUCacheItemm values.
-var LRUCacheItemmPool = sync.Pool{
-	New: func() any {
-		return &lruCacheItem{}
-	},
-}
-
 // LRU represents a LRU cache.
 type LRU struct {
 	sync.RWMutex // The mutex used to protect the cache
@@ -39,17 +32,23 @@ type LRU struct {
 	items    map[string]*lruCacheItem // The items in the cache
 	head     *lruCacheItem            // The head of the linked list
 	tail     *lruCacheItem            // The tail of the linked list
+	itemPool sync.Pool                // Pool of lruCacheItem values for memory reuse
 }
 
 // NewLRUAlgorithm creates a new LRU cache with the given capacity.
 func NewLRUAlgorithm(capacity int) (*LRU, error) {
 	if capacity < 0 {
-		return nil, errors.ErrInvalidCapacity
+		return nil, sentinel.ErrInvalidCapacity
 	}
 
 	return &LRU{
 		capacity: capacity,
 		items:    make(map[string]*lruCacheItem, capacity),
+		itemPool: sync.Pool{
+			New: func() any {
+				return &lruCacheItem{}
+			},
+		},
 	}, nil
 }
 
@@ -83,12 +82,17 @@ func (lru *LRU) Set(key string, value any) {
 	}
 
 	if len(lru.items) == lru.capacity {
-		delete(lru.items, lru.tail.Key)
-		lru.removeFromList(lru.tail)
+		tailItem := lru.tail
+		delete(lru.items, tailItem.Key)
+		lru.removeFromList(tailItem)
+		lru.itemPool.Put(tailItem)
 	}
 
 	// get a new item from the pool
-	item = LRUCacheItemmPool.Get().(*lruCacheItem)
+	item, ok = lru.itemPool.Get().(*lruCacheItem)
+	if !ok {
+		item = &lruCacheItem{}
+	}
 
 	item.Key = key
 	item.Value = value
@@ -107,7 +111,7 @@ func (lru *LRU) Evict() (string, bool) {
 	}
 
 	key := lru.tail.Key
-	LRUCacheItemmPool.Put(lru.tail)
+	lru.itemPool.Put(lru.tail)
 	lru.removeFromList(lru.tail)
 	delete(lru.items, key)
 
@@ -126,6 +130,7 @@ func (lru *LRU) Delete(key string) {
 
 	lru.removeFromList(item)
 	delete(lru.items, key)
+	lru.itemPool.Put(item)
 }
 
 // Len returns the number of items in the cache.

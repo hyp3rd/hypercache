@@ -10,6 +10,10 @@ GITVERSION_NOT_INSTALLED = "gitversion is not installed: https://github.com/GitT
 test:
 	go test -v -timeout 5m -cover ./...
 
+# bench runs the benchmark tests in the benchmark subpackage of the tests package.
+bench:
+	cd tests/benchmark && go test -bench=. -benchmem -benchtime=4s . -timeout 30m
+
 benchmark:
 	go test -bench=. -benchmem ./pkg/ewrap
 	go test -bench=Benchmark -benchmem ./test
@@ -87,4 +91,4 @@ help:
 	@echo
 	@echo "For more information, see the project README."
 
-.PHONY: prepare-toolchain test benchmark update-deps lint help
+.PHONY: prepare-toolchain test bench update-deps lint help

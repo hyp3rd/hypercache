@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/internal/constants"
 )
 
 // Config is a struct that wraps all the configuration options to setup `HyperCache` and its backend.
@@ -39,9 +40,9 @@ func NewConfig[T backend.IBackendConstrain](backendType string) *Config[T] {
 		InMemoryOptions: []backend.Option[backend.InMemory]{},
 		RedisOptions:    []backend.Option[backend.Redis]{},
 		HyperCacheOptions: []Option[T]{
-			WithExpirationInterval[T](30 * time.Minute),
+			WithExpirationInterval[T](constants.DefaultExpirationInterval),
 			WithEvictionAlgorithm[T]("lfu"),
-			WithEvictionInterval[T](10 * time.Minute),
+			WithEvictionInterval[T](constants.DefaultEvictionInterval),
 		},
 	}
 }

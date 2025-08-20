@@ -15,15 +15,15 @@ type IBackendConstrain interface {
 type IBackend[T IBackendConstrain] interface {
 	// Get retrieves the item with the given key from the cache.
 	// If the key is not found in the cache, it returns nil.
-	Get(key string) (item *types.Item, ok bool)
+	Get(ctx context.Context, key string) (item *types.Item, ok bool)
 	// Set adds a new item to the cache.
-	Set(item *types.Item) error
+	Set(ctx context.Context, item *types.Item) error
 	// Capacity returns the maximum number of items that can be stored in the cache.
 	Capacity() int
 	// SetCapacity sets the maximum number of items that can be stored in the cache.
 	SetCapacity(capacity int)
 	// Count returns the number of items currently stored in the cache.
-	Count() int
+	Count(ctx context.Context) int
 	// Remove deletes the item with the given key from the cache.
 	Remove(ctx context.Context, keys ...string) error
 	// List the items in the cache that meet the specified criteria.
