@@ -6,6 +6,7 @@ words:
   - benchmem
   - benchtime
   - cacheerrors
+  - cachev
   - CAWOLFU
   - Cbor
   - chans
@@ -50,6 +51,7 @@ words:
   - staticcheck
   - stdlib
   - strfnv
+  - ugorji
   - varnamelen
   - wrapcheck
   - Wrapf

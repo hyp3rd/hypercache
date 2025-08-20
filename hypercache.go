@@ -20,6 +20,7 @@ import (
 	"github.com/hyp3rd/hypercache/eviction"
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
+	"github.com/hyp3rd/hypercache/pkg/cache"
 	"github.com/hyp3rd/hypercache/stats"
 	"github.com/hyp3rd/hypercache/types"
 	"github.com/hyp3rd/hypercache/utils"
@@ -41,7 +42,7 @@ import (
 type HyperCache[T backend.IBackendConstrain] struct {
 	backend               backend.IBackend[T]          // `backend`` holds the backend that the cache uses to store the items. It must implement the IBackend interface.
 	cacheBackendChecker   utils.CacheBackendChecker[T] // `cacheBackendChecker` holds an instance of the CacheBackendChecker interface. It helps to determine the type of the backend.
-	itemPoolManager       *types.ItemPoolManager       // `itemPoolManager` manages the item pool for the cache.
+	itemPoolManager       *cache.ItemPoolManager       // `itemPoolManager` manages the item pool for the cache.
 	stop                  chan bool                    // `stop` channel to signal the expiration and eviction loops to stop
 	workerPool            *WorkerPool                  // `workerPool` holds a pointer to the worker pool that the cache uses to run the expiration and eviction loops.
 	expirationTriggerCh   chan bool                    // `expirationTriggerCh` channel to signal the expiration trigger loop to start
@@ -122,7 +123,7 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (*H
 	// Initialize the cache
 	hyperCache := &HyperCache[T]{
 		backend:            backend,
-		itemPoolManager:    types.NewItemPoolManager(),
+		itemPoolManager:    cache.NewItemPoolManager(),
 		workerPool:         NewWorkerPool(runtime.NumCPU()),
 		stop:               make(chan bool, 2),
 		expirationInterval: constants.DefaultExpirationInterval,
@@ -236,14 +237,14 @@ func (hyperCache *HyperCache[T]) expirationLoop(ctx context.Context) {
 
 		var (
 			expiredCount int64
-			items        []*types.Item
+			items        []*cache.Item
 			err          error
 		)
 
 		// get all expired items
 		items, err = hyperCache.List(ctx,
 			backend.WithSortBy(types.SortByExpiration.String()),
-			backend.WithFilterFunc(func(item *types.Item) bool {
+			backend.WithFilterFunc(func(item *cache.Item) bool {
 				return item.Expiration > 0 && time.Since(item.LastAccess) > item.Expiration
 			}))
 		if err != nil {
@@ -401,7 +402,7 @@ func (hyperCache *HyperCache[T]) Get(ctx context.Context, key string) (any, bool
 }
 
 // GetWithInfo retrieves the item with the given key from the cache returning the `Item` object and a boolean indicating if the item was found.
-func (hyperCache *HyperCache[T]) GetWithInfo(ctx context.Context, key string) (*types.Item, bool) {
+func (hyperCache *HyperCache[T]) GetWithInfo(ctx context.Context, key string) (*cache.Item, bool) {
 	item, ok := hyperCache.backend.Get(ctx, key)
 	// Check if the item has expired if it exists, if so, trigger the expiration loop
 	if !ok {
@@ -531,7 +532,7 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 // List lists the items in the cache that meet the specified criteria.
 // It takes in a variadic number of any type as filters, it then checks the backend type, and calls the corresponding
 // implementation of the List function for that backend, with the filters passed in as arguments.
-func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error) {
+func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IFilter) ([]*cache.Item, error) {
 	return hyperCache.backend.List(ctx, filters...)
 }
 
@@ -559,7 +560,7 @@ func (hyperCache *HyperCache[T]) Remove(ctx context.Context, keys ...string) err
 // Clear removes all items from the cache.
 func (hyperCache *HyperCache[T]) Clear(ctx context.Context) error {
 	var (
-		items []*types.Item
+		items []*cache.Item
 		err   error
 	)
 

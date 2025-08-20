@@ -1,6 +1,4 @@
-package types
-
-// Item represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
+package cache
 
 import (
 	"strings"
@@ -48,7 +46,8 @@ func (m *ItemPoolManager) Put(item *Item) {
 	m.pool.Put(item)
 }
 
-// Item is a struct that represents an item in the cache. It has a key, value, expiration duration, and a last access time field.
+// Item is a struct that represents an item in the cache.
+// It has a key, value, expiration duration, and a last access time field.
 type Item struct {
 	Key         string        // key of the item
 	Value       any           // Value of the item

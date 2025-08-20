@@ -10,15 +10,15 @@ import (
 	"sync"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	"github.com/hyp3rd/hypercache/types"
+	"github.com/hyp3rd/hypercache/pkg/cache"
 )
 
 // ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
 type ARC struct {
-	itemPoolManager *types.ItemPoolManager // itemPoolManager is used to manage the item pool for memory efficiency
+	itemPoolManager *cache.ItemPoolManager // itemPoolManager is used to manage the item pool for memory efficiency
 	capacity        int                    // capacity is the maximum number of items that can be stored in the cache
-	t1              map[string]*types.Item // t1 is a list of items that have been accessed recently
-	t2              map[string]*types.Item // t2 is a list of items that have been accessed less recently
+	t1              map[string]*cache.Item // t1 is a list of items that have been accessed recently
+	t2              map[string]*cache.Item // t2 is a list of items that have been accessed less recently
 	b1              map[string]bool        // b1 is a list of items that have been evicted from t1
 	b2              map[string]bool        // b2 is a list of items that have been evicted from t2
 	p               int                    // p is the promotion threshold
@@ -34,10 +34,10 @@ func NewARCAlgorithm(capacity int) (*ARC, error) {
 	}
 
 	return &ARC{
-		itemPoolManager: types.NewItemPoolManager(),
+		itemPoolManager: cache.NewItemPoolManager(),
 		capacity:        capacity,
-		t1:              make(map[string]*types.Item, capacity),
-		t2:              make(map[string]*types.Item, capacity),
+		t1:              make(map[string]*cache.Item, capacity),
+		t2:              make(map[string]*cache.Item, capacity),
 		b1:              make(map[string]bool, capacity),
 		b2:              make(map[string]bool, capacity),
 		p:               0,

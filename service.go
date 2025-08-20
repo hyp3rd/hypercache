@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache/backend"
+	"github.com/hyp3rd/hypercache/pkg/cache"
 	"github.com/hyp3rd/hypercache/stats"
-	"github.com/hyp3rd/hypercache/types"
 )
 
 // Service is the service interface for the HyperCache.
@@ -34,12 +34,12 @@ type crud interface {
 	Set(ctx context.Context, key string, value any, expiration time.Duration) error
 	// GetOrSet retrieves a value from the cache using the key, if the key does not exist, it will set the value using the key and expiration duration
 	GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error)
-	// GetWithInfo fetches from the cache using the key, and returns the `types.Item` and a boolean indicating if the key exists
-	GetWithInfo(ctx context.Context, key string) (*types.Item, bool)
+	// GetWithInfo fetches from the cache using the key, and returns the `cache.Item` and a boolean indicating if the key exists
+	GetWithInfo(ctx context.Context, key string) (*cache.Item, bool)
 	// GetMultiple retrieves a list of values from the cache using the keys
 	GetMultiple(ctx context.Context, keys ...string) (result map[string]any, failed map[string]error)
 	// List returns a list of all items in the cache
-	List(ctx context.Context, filters ...backend.IFilter) ([]*types.Item, error)
+	List(ctx context.Context, filters ...backend.IFilter) ([]*cache.Item, error)
 	// Remove removes a value from the cache using the key
 	Remove(ctx context.Context, keys ...string) error
 	// Clear removes all values from the cache

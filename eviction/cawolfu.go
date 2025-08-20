@@ -5,8 +5,8 @@ package eviction
 import (
 	"sync"
 
-	"github.com/hyp3rd/hypercache/cache"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
+	"github.com/hyp3rd/hypercache/pkg/cache"
 )
 
 // CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.

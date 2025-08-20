@@ -4,26 +4,26 @@ import (
 	"context"
 	"sync"
 
-	cache "github.com/hyp3rd/hypercache/cache/v4"
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	"github.com/hyp3rd/hypercache/types"
+	"github.com/hyp3rd/hypercache/pkg/cache"
+	cachev4 "github.com/hyp3rd/hypercache/pkg/cache/v4"
 )
 
 // InMemory is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
 type InMemory struct {
 	sync.RWMutex // mutex to protect the cache from concurrent access
 
-	items           cache.ConcurrentMap    // map to store the items in the cache
-	itemPoolManager *types.ItemPoolManager // item pool manager to manage the item pool
+	items           cachev4.ConcurrentMap  // map to store the items in the cache
+	itemPoolManager *cache.ItemPoolManager // item pool manager to manage the item pool
 	capacity        int                    // capacity of the cache, limits the number of items that can be stored in the cache
 }
 
 // NewInMemory creates a new in-memory cache with the given options.
 func NewInMemory(opts ...Option[InMemory]) (IBackend[InMemory], error) {
 	InMemory := &InMemory{
-		items:           cache.New(),
-		itemPoolManager: types.NewItemPoolManager(),
+		items:           cachev4.New(),
+		itemPoolManager: cache.NewItemPoolManager(),
 	}
 	// Apply the backend options
 	ApplyOptions(InMemory, opts...)
@@ -55,7 +55,7 @@ func (cacheBackend *InMemory) Count(_ context.Context) int {
 }
 
 // Get retrieves the item with the given key from the cacheBackend. If the item is not found, it returns nil.
-func (cacheBackend *InMemory) Get(_ context.Context, key string) (*types.Item, bool) {
+func (cacheBackend *InMemory) Get(_ context.Context, key string) (*cache.Item, bool) {
 	item, ok := cacheBackend.items.Get(key)
 	if !ok {
 		return nil, false
@@ -65,7 +65,7 @@ func (cacheBackend *InMemory) Get(_ context.Context, key string) (*types.Item, b
 }
 
 // Set adds a Item to the cache.
-func (cacheBackend *InMemory) Set(_ context.Context, item *types.Item) error {
+func (cacheBackend *InMemory) Set(_ context.Context, item *cache.Item) error {
 	// Check for invalid key, value, or duration
 	err := item.Valid()
 	if err != nil {
@@ -83,14 +83,14 @@ func (cacheBackend *InMemory) Set(_ context.Context, item *types.Item) error {
 }
 
 // List returns a list of all items in the cache filtered and ordered by the given options.
-func (cacheBackend *InMemory) List(_ context.Context, filters ...IFilter) ([]*types.Item, error) {
+func (cacheBackend *InMemory) List(_ context.Context, filters ...IFilter) ([]*cache.Item, error) {
 	// Apply the filters
 	cacheBackend.RLock()
 	defer cacheBackend.RUnlock()
 
 	var err error
 
-	items := make([]*types.Item, 0, cacheBackend.items.Count())
+	items := make([]*cache.Item, 0, cacheBackend.items.Count())
 
 	for item := range cacheBackend.items.IterBuffered() {
 		cloned := item

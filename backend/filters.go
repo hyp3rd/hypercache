@@ -5,13 +5,14 @@ import (
 
 	"github.com/hyp3rd/ewrap"
 
+	"github.com/hyp3rd/hypercache/pkg/cache"
 	"github.com/hyp3rd/hypercache/types"
 )
 
 // itemSorter is a custom sorter for the items.
 type itemSorter struct {
-	items []*types.Item
-	less  func(i, j *types.Item) bool
+	items []*cache.Item
+	less  func(i, j *cache.Item) bool
 }
 
 func (s *itemSorter) Len() int           { return len(s.items) }
@@ -20,7 +21,7 @@ func (s *itemSorter) Less(i, j int) bool { return s.less(s.items[i], s.items[j])
 
 // IFilter is a backend agnostic interface for a filter that can be applied to a list of items.
 type IFilter interface {
-	ApplyFilter(backendType string, items []*types.Item) ([]*types.Item, error)
+	ApplyFilter(backendType string, items []*cache.Item) ([]*cache.Item, error)
 }
 
 // sortByFilter is a filter that sorts the items by a given field.
@@ -35,7 +36,7 @@ type SortOrderFilter struct {
 
 // filterFunc is a filter that filters the items by a given field's value.
 type filterFunc struct {
-	fn func(item *types.Item) bool
+	fn func(item *cache.Item) bool
 }
 
 // WithSortBy returns a filter that sorts the items by a given field.
@@ -49,40 +50,40 @@ func WithSortOrderAsc(ascending bool) SortOrderFilter {
 }
 
 // WithFilterFunc returns a filter that filters the items by a given field's value.
-func WithFilterFunc(fn func(item *types.Item) bool) IFilter {
+func WithFilterFunc(fn func(item *cache.Item) bool) IFilter {
 	return filterFunc{fn: fn}
 }
 
 // ApplyFilter applies the sort by filter to the given list of items.
-func (f sortByFilter) ApplyFilter(_ string, items []*types.Item) ([]*types.Item, error) {
+func (f sortByFilter) ApplyFilter(_ string, items []*cache.Item) ([]*cache.Item, error) {
 	var sorter *itemSorter
 
 	switch f.field {
 	case types.SortByKey.String():
 		sorter = &itemSorter{
 			items: items,
-			less: func(i, j *types.Item) bool {
+			less: func(i, j *cache.Item) bool {
 				return i.Key < j.Key
 			},
 		}
 	case types.SortByLastAccess.String():
 		sorter = &itemSorter{
 			items: items,
-			less: func(i, j *types.Item) bool {
+			less: func(i, j *cache.Item) bool {
 				return i.LastAccess.UnixNano() < j.LastAccess.UnixNano()
 			},
 		}
 	case types.SortByAccessCount.String():
 		sorter = &itemSorter{
 			items: items,
-			less: func(i, j *types.Item) bool {
+			less: func(i, j *cache.Item) bool {
 				return i.AccessCount < j.AccessCount
 			},
 		}
 	case types.SortByExpiration.String():
 		sorter = &itemSorter{
 			items: items,
-			less: func(i, j *types.Item) bool {
+			less: func(i, j *cache.Item) bool {
 				return i.Expiration < j.Expiration
 			},
 		}
@@ -96,7 +97,7 @@ func (f sortByFilter) ApplyFilter(_ string, items []*types.Item) ([]*types.Item,
 }
 
 // ApplyFilter applies the sort order filter to the given list of items.
-func (f SortOrderFilter) ApplyFilter(_ string, items []*types.Item) ([]*types.Item, error) {
+func (f SortOrderFilter) ApplyFilter(_ string, items []*cache.Item) ([]*cache.Item, error) {
 	if !f.ascending {
 		for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
 			items[i], items[j] = items[j], items[i]
@@ -107,8 +108,8 @@ func (f SortOrderFilter) ApplyFilter(_ string, items []*types.Item) ([]*types.It
 }
 
 // ApplyFilter applies the filter function to the given list of items.
-func (f filterFunc) ApplyFilter(_ string, items []*types.Item) ([]*types.Item, error) {
-	filteredItems := make([]*types.Item, 0)
+func (f filterFunc) ApplyFilter(_ string, items []*cache.Item) ([]*cache.Item, error) {
+	filteredItems := make([]*cache.Item, 0)
 
 	for _, item := range items {
 		if f.fn(item) {

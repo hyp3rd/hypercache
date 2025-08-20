@@ -2,7 +2,7 @@
 // The implementation uses sharding to minimize lock contention by dividing the map into multiple
 // independent shards, each protected by its own read-write mutex.
 //
-// The concurrent map stores string keys mapped to *types.Item values and is designed to be
+// The concurrent map stores string keys mapped to *cache.Item values and is designed to be
 // thread-safe for concurrent read and write operations across multiple goroutines.
 //
 // Key features:
@@ -15,7 +15,7 @@
 // Example usage:
 //
 //	cm := v4.New()
-//	cm.Set("key", &types.Item{...})
+//	cm.Set("key", &cache.Item{...})
 //	if item, ok := cm.Get("key"); ok {
 //	    // Process item
 //	}
@@ -28,7 +28,7 @@ import (
 
 	"github.com/hyp3rd/ewrap"
 
-	"github.com/hyp3rd/hypercache/types"
+	"github.com/hyp3rd/hypercache/pkg/cache"
 )
 
 const (
@@ -38,17 +38,17 @@ const (
 	ShardCount32 uint32 = uint32(ShardCount)
 )
 
-// ConcurrentMap is a "thread" safe map of type string:*types.Item.
+// ConcurrentMap is a "thread" safe map of type string:*cache.Item.
 // To avoid lock bottlenecks this map is divided into several (ShardCount) map shards.
 type ConcurrentMap struct {
 	shards []*ConcurrentMapShard
 }
 
-// ConcurrentMapShard is a "thread" safe string to `*types.Item` map shard.
+// ConcurrentMapShard is a "thread" safe string to `*cache.Item` map shard.
 type ConcurrentMapShard struct {
 	sync.RWMutex
 
-	items  map[string]*types.Item
+	items  map[string]*cache.Item
 	hasher hash.Hash32
 }
 
@@ -64,7 +64,7 @@ func create() []*ConcurrentMapShard {
 	shards := make([]*ConcurrentMapShard, ShardCount)
 	for i := range ShardCount {
 		shards[i] = &ConcurrentMapShard{
-			items:  make(map[string]*types.Item),
+			items:  make(map[string]*cache.Item),
 			hasher: fnv.New32a(),
 		}
 	}
@@ -95,7 +95,7 @@ func getShardIndex(key string) (uint32, error) {
 }
 
 // Set sets the given value under the specified key.
-func (cm *ConcurrentMap) Set(key string, value *types.Item) {
+func (cm *ConcurrentMap) Set(key string, value *cache.Item) {
 	shard := cm.GetShard(key)
 	shard.Lock()
 	shard.items[key] = value
@@ -103,7 +103,7 @@ func (cm *ConcurrentMap) Set(key string, value *types.Item) {
 }
 
 // Get retrieves an element from map under given key.
-func (cm *ConcurrentMap) Get(key string) (*types.Item, bool) {
+func (cm *ConcurrentMap) Get(key string) (*cache.Item, bool) {
 	// Get shard
 	shard := cm.GetShard(key)
 	shard.RLock()
@@ -127,7 +127,7 @@ func (cm *ConcurrentMap) Has(key string) bool {
 }
 
 // Pop removes an element from the map and returns it.
-func (cm *ConcurrentMap) Pop(key string) (*types.Item, bool) {
+func (cm *ConcurrentMap) Pop(key string) (*cache.Item, bool) {
 	shard := cm.GetShard(key)
 	shard.Lock()
 
@@ -147,7 +147,7 @@ func (cm *ConcurrentMap) Pop(key string) (*types.Item, bool) {
 // Tuple is used by the IterBuffered functions to wrap two variables together over a channel,.
 type Tuple struct {
 	Key string
-	Val types.Item
+	Val cache.Item
 }
 
 // IterBuffered returns a buffered iterator which could be used in a for range loop.

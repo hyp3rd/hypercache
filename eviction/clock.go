@@ -10,13 +10,13 @@ import (
 	"sync"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	"github.com/hyp3rd/hypercache/types"
+	"github.com/hyp3rd/hypercache/pkg/cache"
 )
 
 // ClockAlgorithm is an in-memory cache with the Clock algorithm.
 type ClockAlgorithm struct {
-	items           []*types.Item
-	itemPoolManager *types.ItemPoolManager
+	items           []*cache.Item
+	itemPoolManager *cache.ItemPoolManager
 	keys            map[string]int
 	mutex           sync.RWMutex
 	evictMutex      sync.Mutex
@@ -31,8 +31,8 @@ func NewClockAlgorithm(capacity int) (*ClockAlgorithm, error) {
 	}
 
 	return &ClockAlgorithm{
-		items:           make([]*types.Item, capacity),
-		itemPoolManager: types.NewItemPoolManager(),
+		items:           make([]*cache.Item, capacity),
+		itemPoolManager: cache.NewItemPoolManager(),
 		keys:            make(map[string]int, capacity),
 		capacity:        capacity,
 		hand:            0,

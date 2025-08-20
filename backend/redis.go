@@ -12,7 +12,7 @@ import (
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/libs/serializer"
-	"github.com/hyp3rd/hypercache/types"
+	"github.com/hyp3rd/hypercache/pkg/cache"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 type Redis struct {
 	rdb             *redis.Client          // redis client to interact with the redis server
 	capacity        int                    // capacity of the cache, limits the number of items that can be stored in the cache
-	itemPoolManager *types.ItemPoolManager // itemPoolManager is used to manage the item pool for memory efficiency
+	itemPoolManager *cache.ItemPoolManager // itemPoolManager is used to manage the item pool for memory efficiency
 	keysSetName     string                 // keysSetName is the name of the set that holds the keys of the items in the cache
 	Serializer      serializer.ISerializer // Serializer is the serializer used to serialize the items before storing them in the cache
 }
@@ -32,7 +32,7 @@ type Redis struct {
 // NewRedis creates a new redis cache with the given options.
 func NewRedis(redisOptions ...Option[Redis]) (IBackend[Redis], error) {
 	rb := &Redis{
-		itemPoolManager: types.NewItemPoolManager(),
+		itemPoolManager: cache.NewItemPoolManager(),
 	}
 	// Apply the backend options
 	ApplyOptions(rb, redisOptions...)
@@ -89,7 +89,7 @@ func (cacheBackend *Redis) Count(ctx context.Context) int {
 }
 
 // Get retrieves the Item with the given key from the cacheBackend. If the item is not found, it returns nil.
-func (cacheBackend *Redis) Get(ctx context.Context, key string) (*types.Item, bool) {
+func (cacheBackend *Redis) Get(ctx context.Context, key string) (*cache.Item, bool) {
 	// Check if the key is in the set of keys
 	isMember, err := cacheBackend.rdb.SIsMember(ctx, cacheBackend.keysSetName, key).Result()
 	if err != nil {
@@ -124,7 +124,7 @@ func (cacheBackend *Redis) Get(ctx context.Context, key string) (*types.Item, bo
 }
 
 // Set stores the Item in the cacheBackend.
-func (cacheBackend *Redis) Set(ctx context.Context, item *types.Item) error {
+func (cacheBackend *Redis) Set(ctx context.Context, item *cache.Item) error {
 	pipe := cacheBackend.rdb.TxPipeline()
 
 	// Check if the item is valid
@@ -167,7 +167,7 @@ func (cacheBackend *Redis) Set(ctx context.Context, item *types.Item) error {
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
-func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*types.Item, error) {
+func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*cache.Item, error) {
 	// Get the set of keys held in the cacheBackend with the given `keysSetName`
 	keys, err := cacheBackend.rdb.SMembers(ctx, cacheBackend.keysSetName).Result()
 	if err != nil {
@@ -188,7 +188,7 @@ func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*typ
 	}
 
 	// Create a slice to hold the items
-	items := make([]*types.Item, 0, len(keys))
+	items := make([]*cache.Item, 0, len(keys))
 
 	// Deserialize the items and add them to the slice of items to return
 	for _, cmd := range cmds {
