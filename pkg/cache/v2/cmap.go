@@ -19,7 +19,7 @@
 //	if item, ok := cm.Get("key"); ok {
 //	    // Process item
 //	}
-package v4
+package cachev2
 
 import (
 	"hash"
