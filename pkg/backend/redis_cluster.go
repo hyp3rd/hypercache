@@ -12,7 +12,7 @@ import (
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/libs/serializer"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	"github.com/hyp3rd/hypercache/pkg/cache"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 const (

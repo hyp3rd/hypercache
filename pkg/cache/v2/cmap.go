@@ -22,13 +22,7 @@
 package cachev2
 
 import (
-	"hash"
-	"hash/fnv"
 	"sync"
-
-	"github.com/hyp3rd/ewrap"
-
-	"github.com/hyp3rd/hypercache/pkg/cache"
 )
 
 const (
@@ -48,8 +42,7 @@ type ConcurrentMap struct {
 type ConcurrentMapShard struct {
 	sync.RWMutex
 
-	items  map[string]*cache.Item
-	hasher hash.Hash32
+	items map[string]*Item
 }
 
 // New creates a new concurrent map.
@@ -64,8 +57,7 @@ func create() []*ConcurrentMapShard {
 	shards := make([]*ConcurrentMapShard, ShardCount)
 	for i := range ShardCount {
 		shards[i] = &ConcurrentMapShard{
-			items:  make(map[string]*cache.Item),
-			hasher: fnv.New32a(),
+			items: make(map[string]*Item),
 		}
 	}
 
@@ -74,28 +66,31 @@ func create() []*ConcurrentMapShard {
 
 // GetShard returns shard under given key.
 func (cm *ConcurrentMap) GetShard(key string) *ConcurrentMapShard {
-	shardIndex, err := getShardIndex(key)
-	if err != nil {
-		return nil
-	}
+	shardIndex := getShardIndex(key)
 
 	return cm.shards[shardIndex]
 }
 
 // getShardIndex calculates the shard index for the given key.
-func getShardIndex(key string) (uint32, error) {
-	hasher := fnv.New32a()
+func getShardIndex(key string) uint32 {
+	// Inline FNV-1a 32-bit hashing to avoid allocations.
+	const (
+		fnvOffset32 = 2166136261
+		fnvPrime32  = 16777619
+	)
 
-	_, err := hasher.Write([]byte(key))
-	if err != nil {
-		return 0, ewrap.Wrap(err, "failed to write key to hasher")
+	var sum uint32 = fnvOffset32
+	for i := range key { // Go 1.22+ integer range over string indices
+		sum ^= uint32(key[i])
+		sum *= fnvPrime32
 	}
+
 	// Calculate the shard index using a bitwise AND operation.
-	return hasher.Sum32() & (ShardCount32 - 1), nil
+	return sum & (ShardCount32 - 1)
 }
 
 // Set sets the given value under the specified key.
-func (cm *ConcurrentMap) Set(key string, value *cache.Item) {
+func (cm *ConcurrentMap) Set(key string, value *Item) {
 	shard := cm.GetShard(key)
 	shard.Lock()
 	shard.items[key] = value
@@ -103,7 +98,7 @@ func (cm *ConcurrentMap) Set(key string, value *cache.Item) {
 }
 
 // Get retrieves an element from map under given key.
-func (cm *ConcurrentMap) Get(key string) (*cache.Item, bool) {
+func (cm *ConcurrentMap) Get(key string) (*Item, bool) {
 	// Get shard
 	shard := cm.GetShard(key)
 	shard.RLock()
@@ -127,7 +122,7 @@ func (cm *ConcurrentMap) Has(key string) bool {
 }
 
 // Pop removes an element from the map and returns it.
-func (cm *ConcurrentMap) Pop(key string) (*cache.Item, bool) {
+func (cm *ConcurrentMap) Pop(key string) (*Item, bool) {
 	shard := cm.GetShard(key)
 	shard.Lock()
 
@@ -147,7 +142,7 @@ func (cm *ConcurrentMap) Pop(key string) (*cache.Item, bool) {
 // Tuple is used by the IterBuffered functions to wrap two variables together over a channel,.
 type Tuple struct {
 	Key string
-	Val cache.Item
+	Val Item
 }
 
 // IterBuffered returns a buffered iterator which could be used in a for range loop.
@@ -183,15 +178,23 @@ func snapshot(cm *ConcurrentMap) []chan Tuple {
 		go func(index int, shard *ConcurrentMapShard) {
 			// Foreach key, value pair.
 			shard.RLock()
-			chans[index] = make(chan Tuple, len(shard.items))
+			// Determine capacity and copy to a local slice to shorten lock hold time.
+			n := len(shard.items)
+			chans[index] = make(chan Tuple, n)
 
-			wg.Done()
-
+			local := make([]Tuple, 0, n)
 			for key, val := range shard.items {
-				chans[index] <- Tuple{key, *val}
+				local = append(local, Tuple{Key: key, Val: *val})
 			}
 
 			shard.RUnlock()
+
+			wg.Done()
+
+			for _, t := range local {
+				chans[index] <- t
+			}
+
 			close(chans[index])
 		}(index, shard)
 	}
@@ -231,8 +234,11 @@ func (cm *ConcurrentMap) Remove(key string) {
 
 // Clear removes all items from map.
 func (cm *ConcurrentMap) Clear() {
-	for item := range cm.IterBuffered() {
-		cm.Remove(item.Key)
+	// Fast clear: reset each shard's map under lock.
+	for _, shard := range cm.shards {
+		shard.Lock()
+		shard.items = make(map[string]*Item)
+		shard.Unlock()
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/libs/serializer"
-	"github.com/hyp3rd/hypercache/pkg/cache"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // redisCmd abstracts the subset of go-redis client API we need.

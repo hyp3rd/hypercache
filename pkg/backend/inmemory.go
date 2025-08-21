@@ -6,15 +6,14 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	"github.com/hyp3rd/hypercache/pkg/cache"
-	cachev2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // InMemory is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
 type InMemory struct {
 	sync.RWMutex // mutex to protect the cache from concurrent access
 
-	items           cachev2.ConcurrentMap  // map to store the items in the cache
+	items           cache.ConcurrentMap    // map to store the items in the cache
 	itemPoolManager *cache.ItemPoolManager // item pool manager to manage the item pool
 	capacity        int                    // capacity of the cache, limits the number of items that can be stored in the cache
 }
@@ -22,7 +21,7 @@ type InMemory struct {
 // NewInMemory creates a new in-memory cache with the given options.
 func NewInMemory(opts ...Option[InMemory]) (IBackend[InMemory], error) {
 	InMemory := &InMemory{
-		items:           cachev2.New(),
+		items:           cache.New(),
 		itemPoolManager: cache.NewItemPoolManager(),
 	}
 	// Apply the backend options

@@ -45,19 +45,17 @@ go get -u github.com/hyp3rd/hypercache
 Running the benchmarks on a 2019 MacBook Pro with a 2.4 GHz 8-Core Intel Core i9 processor and 32 GB 2400 MHz DDR4 memory, the results are as follows on average, using a pretty busy machine:
 
 ```bash
-make bench
-cd tests/benchmark && go test -bench=. -benchmem -benchtime=4s . -timeout 30m
 goos: darwin
-goarch: amd64
+goarch: arm64
 pkg: github.com/hyp3rd/hypercache/tests/benchmark
-cpu: Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz
-BenchmarkHyperCache_Get-16                          37481116           115.7 ns/op         0 B/op          0 allocs/op
-BenchmarkHyperCache_Get_ProactiveEviction-16        39486261           116.2 ns/op         0 B/op          0 allocs/op
-BenchmarkHyperCache_List-16                         11299632           412.0 ns/op        85 B/op          1 allocs/op
-BenchmarkHyperCache_Set-16                           2765406          1556 ns/op         248 B/op          4 allocs/op
-BenchmarkHyperCache_Set_Proactive_Eviction-16        2947629          1700 ns/op         162 B/op          3 allocs/op
+cpu: Apple M2 Pro
+BenchmarkHyperCache_Get-12                        72005894          66.71 ns/op         0 B/op           0 allocs/op
+BenchmarkHyperCache_Get_ProactiveEviction-12      71068249          67.22 ns/op         0 B/op           0 allocs/op
+BenchmarkHyperCache_List-12                       36435114          129.5 ns/op        80 B/op           1 allocs/op
+BenchmarkHyperCache_Set-12                        10365289          587.4 ns/op       191 B/op           3 allocs/op
+BenchmarkHyperCache_Set_Proactive_Eviction-12      3264818           1521 ns/op       282 B/op           5 allocs/op
 PASS
-ok      github.com/hyp3rd/hypercache/tests/benchmark    30.031s
+ok   github.com/hyp3rd/hypercache/tests/benchmark 26.853s
 ```
 
 ### Examples

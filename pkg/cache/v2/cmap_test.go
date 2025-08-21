@@ -4,8 +4,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/hyp3rd/hypercache/pkg/cache"
 )
 
 func TestNew(t *testing.T) {
@@ -25,11 +23,7 @@ func TestNew(t *testing.T) {
 
 			return
 		}
-		if shard.hasher == nil {
-			t.Errorf("Shard %d hasher is nil", i)
-
-			return
-		}
+		// no hasher field in v2 shards
 	}
 }
 
@@ -45,10 +39,7 @@ func TestGetShardIndex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
-			index, err := getShardIndex(tt.key)
-			if err != nil {
-				t.Errorf("getShardIndex() error = %v", err)
-			}
+			index := getShardIndex(tt.key)
 			if index >= ShardCount32 {
 				t.Errorf("Shard index %d exceeds shard count %d", index, ShardCount32)
 			}
@@ -73,7 +64,7 @@ func TestGetShard(t *testing.T) {
 
 func TestSetAndGet(t *testing.T) {
 	cm := New()
-	item := &cache.Item{
+	item := &Item{
 		Value:      "test_value",
 		Expiration: time.Hour,
 	}
@@ -98,7 +89,7 @@ func TestSetAndGet(t *testing.T) {
 
 func TestHas(t *testing.T) {
 	cm := New()
-	item := &cache.Item{
+	item := &Item{
 		Value:      "test_value",
 		Expiration: time.Hour,
 	}
@@ -117,7 +108,7 @@ func TestHas(t *testing.T) {
 
 func TestPop(t *testing.T) {
 	cm := New()
-	item := &cache.Item{
+	item := &Item{
 		Value:      "test_value",
 		Expiration: time.Hour,
 	}
@@ -143,7 +134,7 @@ func TestPop(t *testing.T) {
 
 func TestRemove(t *testing.T) {
 	cm := New()
-	item := &cache.Item{
+	item := &Item{
 		Value:      "test_value",
 		Expiration: time.Hour,
 	}
@@ -166,7 +157,7 @@ func TestCount(t *testing.T) {
 		t.Error("New map should have count 0")
 	}
 
-	item := &cache.Item{
+	item := &Item{
 		Value:      "test_value",
 		Expiration: time.Hour,
 	}
@@ -189,7 +180,7 @@ func TestCount(t *testing.T) {
 
 func TestIterBuffered(t *testing.T) {
 	cm := New()
-	items := map[string]*cache.Item{
+	items := map[string]*Item{
 		"key1": {Value: "value1", Expiration: time.Hour},
 		"key2": {Value: "value2", Expiration: time.Hour},
 		"key3": {Value: "value3", Expiration: time.Hour},
@@ -201,7 +192,7 @@ func TestIterBuffered(t *testing.T) {
 	}
 
 	// Iterate and verify
-	found := make(map[string]cache.Item)
+	found := make(map[string]Item)
 	for tuple := range cm.IterBuffered() {
 		found[tuple.Key] = tuple.Val
 	}
@@ -221,7 +212,7 @@ func TestIterBuffered(t *testing.T) {
 
 func TestClear(t *testing.T) {
 	cm := New()
-	items := map[string]*cache.Item{
+	items := map[string]*Item{
 		"key1": {Value: "value1", Expiration: time.Hour},
 		"key2": {Value: "value2", Expiration: time.Hour},
 		"key3": {Value: "value3", Expiration: time.Hour},
@@ -252,7 +243,7 @@ func TestConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			item := &cache.Item{
+			item := &Item{
 				Value:      i,
 				Expiration: time.Hour,
 			}
@@ -285,7 +276,7 @@ func TestSnapshotPanic(t *testing.T) {
 
 func BenchmarkSet(b *testing.B) {
 	cm := New()
-	item := &cache.Item{
+	item := &Item{
 		Value:      "benchmark_value",
 		Expiration: time.Hour,
 	}
@@ -298,7 +289,7 @@ func BenchmarkSet(b *testing.B) {
 
 func BenchmarkGet(b *testing.B) {
 	cm := New()
-	item := &cache.Item{
+	item := &Item{
 		Value:      "benchmark_value",
 		Expiration: time.Hour,
 	}
@@ -316,7 +307,7 @@ func BenchmarkGet(b *testing.B) {
 
 func BenchmarkConcurrentSetGet(b *testing.B) {
 	cm := New()
-	item := &cache.Item{
+	item := &Item{
 		Value:      "benchmark_value",
 		Expiration: time.Hour,
 	}

@@ -16,7 +16,7 @@ package backend
 import (
 	"context"
 
-	"github.com/hyp3rd/hypercache/pkg/cache"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // IBackendConstrain defines the type constraint for cache backend implementations.
