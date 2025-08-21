@@ -1,205 +1,432 @@
-// Package eviction ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
-// It has a map of items to store the items in the cache, and a capacity field that limits the number of items that can be stored in the cache.
-// The ARC algorithm uses two lists, t1 and t2, to store the items in the cache.
-// The p field represents the "promotion threshold", which determines how many items should be stored in t1.
-// The c field represents the current number of items in the cache.
+// Package eviction - Adaptive Replacement Cache (ARC) algorithm implementation.
 package eviction
 
 import (
 	"sync"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	"github.com/hyp3rd/hypercache/pkg/cache"
 )
 
-// ARC is an in-memory cache that uses the Adaptive Replacement Cache (ARC) algorithm to manage its items.
-type ARC struct {
-	itemPoolManager *cache.ItemPoolManager // itemPoolManager is used to manage the item pool for memory efficiency
-	capacity        int                    // capacity is the maximum number of items that can be stored in the cache
-	t1              map[string]*cache.Item // t1 is a list of items that have been accessed recently
-	t2              map[string]*cache.Item // t2 is a list of items that have been accessed less recently
-	b1              map[string]bool        // b1 is a list of items that have been evicted from t1
-	b2              map[string]bool        // b2 is a list of items that have been evicted from t2
-	p               int                    // p is the promotion threshold
-	c               int                    // c is the current number of items in the cache
-	mutex           sync.RWMutex           // mutex is a read-write mutex that protects the cache
+type arcNode struct {
+	key   string
+	value any
+	prev  *arcNode
+	next  *arcNode
 }
 
-// NewARCAlgorithm creates a new in-memory cache with the given capacity and the Adaptive Replacement Cache (ARC) algorithm.
-// If the capacity is negative, it returns an error.
+type arcGhostNode struct {
+	key  string
+	prev *arcGhostNode
+	next *arcGhostNode
+}
+
+type arcList struct {
+	head *arcNode
+	tail *arcNode
+	len  int
+}
+
+func (l *arcList) pushFront(node *arcNode) {
+	node.prev = nil
+
+	node.next = l.head
+	if l.head != nil {
+		l.head.prev = node
+	}
+
+	l.head = node
+	if l.tail == nil {
+		l.tail = node
+	}
+
+	l.len++
+}
+
+func (l *arcList) remove(node *arcNode) {
+	switch {
+	case l.head == l.tail:
+		l.head = nil
+		l.tail = nil
+	case node == l.head:
+		l.head = node.next
+		l.head.prev = nil
+	case node == l.tail:
+		l.tail = node.prev
+		l.tail.next = nil
+	default:
+		node.prev.next = node.next
+		node.next.prev = node.prev
+	}
+
+	node.prev = nil
+	node.next = nil
+	l.len--
+}
+
+func (l *arcList) removeTail() *arcNode {
+	if l.tail == nil {
+		return nil
+	}
+
+	t := l.tail
+	l.remove(t)
+
+	return t
+}
+
+type arcGhostList struct {
+	head *arcGhostNode
+	tail *arcGhostNode
+	len  int
+}
+
+func (l *arcGhostList) pushFront(node *arcGhostNode) {
+	node.prev = nil
+
+	node.next = l.head
+	if l.head != nil {
+		l.head.prev = node
+	}
+
+	l.head = node
+	if l.tail == nil {
+		l.tail = node
+	}
+
+	l.len++
+}
+
+func (l *arcGhostList) remove(node *arcGhostNode) {
+	switch {
+	case l.head == l.tail:
+		l.head = nil
+		l.tail = nil
+	case node == l.head:
+		l.head = node.next
+		l.head.prev = nil
+	case node == l.tail:
+		l.tail = node.prev
+		l.tail.next = nil
+	default:
+		node.prev.next = node.next
+		node.next.prev = node.prev
+	}
+
+	node.prev = nil
+	node.next = nil
+	l.len--
+}
+
+func (l *arcGhostList) removeTail() *arcGhostNode {
+	if l.tail == nil {
+		return nil
+	}
+
+	t := l.tail
+	l.remove(t)
+
+	return t
+}
+
+// ARC implements the Adaptive Replacement Cache (resident T1/T2 and ghost B1/B2).
+type ARC struct {
+	mutex    sync.Mutex
+	capacity int
+	p        int // target size for T1
+
+	// resident lists
+	t1 arcList
+	t2 arcList
+
+	// ghost lists
+	b1 arcGhostList
+	b2 arcGhostList
+
+	// indexes
+	t1Idx map[string]*arcNode
+	t2Idx map[string]*arcNode
+	b1Idx map[string]*arcGhostNode
+	b2Idx map[string]*arcGhostNode
+
+	length int // |T1| + |T2|
+}
+
+// NewARCAlgorithm creates a new ARC with capacity.
 func NewARCAlgorithm(capacity int) (*ARC, error) {
 	if capacity < 0 {
 		return nil, sentinel.ErrInvalidCapacity
 	}
 
 	return &ARC{
-		itemPoolManager: cache.NewItemPoolManager(),
-		capacity:        capacity,
-		t1:              make(map[string]*cache.Item, capacity),
-		t2:              make(map[string]*cache.Item, capacity),
-		b1:              make(map[string]bool, capacity),
-		b2:              make(map[string]bool, capacity),
-		p:               0,
-		c:               0,
+		capacity: capacity,
+		p:        0,
+		t1Idx:    make(map[string]*arcNode, capacity),
+		t2Idx:    make(map[string]*arcNode, capacity),
+		b1Idx:    make(map[string]*arcGhostNode, capacity),
+		b2Idx:    make(map[string]*arcGhostNode, capacity),
 	}, nil
 }
 
-// Get retrieves the item with the given key from the cache.
-// If the key is not found in the cache, it returns nil.
-func (arc *ARC) Get(key string) (any, bool) {
-	arc.mutex.Lock()
-	defer arc.mutex.Unlock()
+// Get returns the value and updates ARC state.
+func (a *ARC) Get(key string) (any, bool) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
 
-	// Check t1
-	item, ok := arc.t1[key]
-	if ok {
-		arc.promote(key)
+	if node, ok := a.t1Idx[key]; ok {
+		// move to T2
+		a.t1.remove(node)
+		delete(a.t1Idx, key)
+		a.t2.pushFront(node)
+		a.t2Idx[key] = node
 
-		return item.Value, true
+		return node.value, true
 	}
-	// Check t2
-	item, ok = arc.t2[key]
-	if ok {
-		arc.demote(key)
 
-		return item.Value, true
+	if node, ok := a.t2Idx[key]; ok {
+		// refresh in T2
+		a.t2.remove(node)
+		a.t2.pushFront(node)
+
+		return node.value, true
 	}
 
 	return nil, false
 }
 
-// Set adds a new item to the cache with the given key.
-func (arc *ARC) Set(key string, value any) {
-	arc.mutex.Lock()
-	defer arc.mutex.Unlock()
+// Set inserts or updates a key according to ARC rules.
+func (a *ARC) Set(key string, value any) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
 
-	if arc.capacity == 0 {
-		// Zero-capacity ARC is a no-op
+	if a.capacity == 0 {
 		return
 	}
 
-	// If key exists in t1 or t2, update value only
-	if item, ok := arc.t1[key]; ok {
-		item.Value = value
+	if a.updateIfResident(key, value) {
+		return
+	}
+
+	if a.handleGhostHit(key, value) {
+		return
+	}
+
+	a.insertNew(key, value)
+}
+
+// Delete removes key from ARC (resident or ghost).
+func (a *ARC) Delete(key string) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+
+	if node, ok := a.t1Idx[key]; ok {
+		a.t1.remove(node)
+		delete(a.t1Idx, key)
+		a.length--
 
 		return
 	}
 
-	if item, ok := arc.t2[key]; ok {
-		item.Value = value
+	if node, ok := a.t2Idx[key]; ok {
+		a.t2.remove(node)
+		delete(a.t2Idx, key)
+		a.length--
 
 		return
 	}
 
-	// Check if cache is at capacity
-	if arc.c >= arc.capacity {
-		// Eviction needed
-		evictedKey, ok := arc.Evict()
-		if !ok {
-			return
-		}
+	if ghost, ok := a.b1Idx[key]; ok {
+		a.b1.remove(ghost)
+		delete(a.b1Idx, key)
 
-		arc.Delete(evictedKey)
+		return
 	}
 
-	item := arc.itemPoolManager.Get()
-	item.Value = value
-	arc.t1[key] = item
-	arc.c++
+	if ghost, ok := a.b2Idx[key]; ok {
+		a.b2.remove(ghost)
+		delete(a.b2Idx, key)
 
-	arc.p++
-	if arc.p > arc.capacity {
-		arc.p = arc.capacity
+		return
 	}
 }
 
-// Delete removes the item with the given key from the cache.
-func (arc *ARC) Delete(key string) {
-	// Check t1
-	item, ok := arc.t1[key]
-	if ok {
-		delete(arc.t1, key)
-		arc.c--
+// Evict selects a victim according to ARC policy.
+func (a *ARC) Evict() (string, bool) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
 
-		arc.p--
-		if arc.p < 0 {
-			arc.p = 0
-		}
-
-		arc.itemPoolManager.Put(item)
-
-		return
-	}
-	// Check t2
-	item, ok = arc.t2[key]
-	if ok {
-		delete(arc.t2, key)
-		arc.c--
-
-		arc.itemPoolManager.Put(item)
-	}
-}
-
-// Evict removes an item from the cache and returns the key of the evicted item.
-// If no item can be evicted, it returns an error.
-func (arc *ARC) Evict() (string, bool) {
-	if arc.capacity == 0 {
+	if a.capacity == 0 || a.length == 0 {
 		return "", false
 	}
-	// Check t1
-	for key, val := range arc.t1 {
-		delete(arc.t1, key)
-		arc.c--
-		arc.itemPoolManager.Put(val)
 
-		return key, true
-	}
-	// Check t2
-	for key, val := range arc.t2 {
-		delete(arc.t2, key)
-		arc.c--
-		arc.itemPoolManager.Put(val)
-
-		return key, true
+	key := a.replace("")
+	if key == "" {
+		return "", false
 	}
 
-	return "", false
+	return key, true
 }
 
-// Promote moves the item with the given key from t2 to t1.
-func (arc *ARC) promote(key string) {
-	arc.mutex.Lock()
-	defer arc.mutex.Unlock()
+// replace evicts one resident from T1 or T2 and places its key into B1 or B2.
+// Returns the evicted resident key (if any).
+func (a *ARC) replace(x string) string {
+	fromT1 := a.t1.len > 0 && ((x != "" && a.b2Idx[x] != nil && a.t1.len == a.p) || (a.t1.len > a.p))
+	if fromT1 {
+		if tail := a.t1.removeTail(); tail != nil {
+			delete(a.t1Idx, tail.key)
+			a.b1.pushFront(&arcGhostNode{key: tail.key})
+			a.b1Idx[tail.key] = a.b1.head
+			a.length--
 
-	item, ok := arc.t2[key]
-	if !ok {
+			return tail.key
+		}
+	} else {
+		if tail := a.t2.removeTail(); tail != nil {
+			delete(a.t2Idx, tail.key)
+			a.b2.pushFront(&arcGhostNode{key: tail.key})
+			a.b2Idx[tail.key] = a.b2.head
+			a.length--
+
+			return tail.key
+		}
+	}
+
+	return ""
+}
+
+// updateIfResident updates value and placement for keys already in T1 or T2.
+func (a *ARC) updateIfResident(key string, value any) bool {
+	if node, ok := a.t1Idx[key]; ok {
+		node.value = value
+		a.t1.remove(node)
+		delete(a.t1Idx, key)
+
+		a.t2.pushFront(node)
+		a.t2Idx[key] = node
+
+		return true
+	}
+
+	if node, ok := a.t2Idx[key]; ok {
+		node.value = value
+		a.t2.remove(node)
+		a.t2.pushFront(node)
+
+		return true
+	}
+
+	return false
+}
+
+// handleGhostHit processes B1/B2 hits and moves the key to T2 while adapting p.
+func (a *ARC) handleGhostHit(key string, value any) bool {
+	if ghost, ok := a.b1Idx[key]; ok {
+		increment := a.b2.len / arcIntMax(1, a.b1.len)
+		if increment < 1 {
+			increment = 1
+		}
+
+		a.p += increment
+		if a.p > a.capacity {
+			a.p = a.capacity
+		}
+
+		a.replace(key)
+
+		a.b1.remove(ghost)
+		delete(a.b1Idx, key)
+
+		node := &arcNode{key: key, value: value}
+		a.t2.pushFront(node)
+		a.t2Idx[key] = node
+		a.length++
+
+		return true
+	}
+
+	if ghost, ok := a.b2Idx[key]; ok {
+		decrement := a.b1.len / arcIntMax(1, a.b2.len)
+		if decrement < 1 {
+			decrement = 1
+		}
+
+		a.p -= decrement
+		if a.p < 0 {
+			a.p = 0
+		}
+
+		a.replace(key)
+
+		a.b2.remove(ghost)
+		delete(a.b2Idx, key)
+
+		node := &arcNode{key: key, value: value}
+		a.t2.pushFront(node)
+		a.t2Idx[key] = node
+		a.length++
+
+		return true
+	}
+
+	return false
+}
+
+// insertNew ensures capacity and history bounds, then inserts key into T1.
+func (a *ARC) insertNew(key string, value any) {
+	if a.length >= a.capacity {
+		a.ensureCapacityForNew()
+	}
+
+	node := &arcNode{key: key, value: value}
+	a.t1.pushFront(node)
+	a.t1Idx[key] = node
+	a.length++
+}
+
+// ensureCapacityForNew frees space for a new resident item per ARC rules.
+func (a *ARC) ensureCapacityForNew() {
+	if a.t1.len+a.b1.len >= a.capacity {
+		a.trimForHistoryLimit()
+
 		return
 	}
 
-	delete(arc.t2, key)
-	arc.t1[key] = item
-
-	arc.p++
-	if arc.p > arc.capacity {
-		arc.p = arc.capacity
-	}
+	a.trimForTotalLimit()
 }
 
-// Demote moves the item with the given key from t1 to t2.
-func (arc *ARC) demote(key string) {
-	arc.mutex.Lock()
-	defer arc.mutex.Unlock()
+// trimForHistoryLimit handles the case where |T1| + |B1| >= c.
+func (a *ARC) trimForHistoryLimit() {
+	if a.t1.len < a.capacity {
+		if tail := a.b1.removeTail(); tail != nil {
+			delete(a.b1Idx, tail.key)
+		}
 
-	item, ok := arc.t1[key]
-	if !ok {
 		return
 	}
 
-	delete(arc.t1, key)
-	arc.t2[key] = item
-
-	arc.p--
-	if arc.p < 0 {
-		arc.p = 0
+	if tail := a.t1.removeTail(); tail != nil {
+		delete(a.t1Idx, tail.key)
+		a.b1.pushFront(&arcGhostNode{key: tail.key})
+		a.b1Idx[tail.key] = a.b1.head
+		a.length--
 	}
+}
+
+// trimForTotalLimit handles the case where total lists exceed 2c, then calls replace.
+func (a *ARC) trimForTotalLimit() {
+	total := a.t1.len + a.t2.len + a.b1.len + a.b2.len
+	if total >= 2*a.capacity {
+		if tail := a.b2.removeTail(); tail != nil {
+			delete(a.b2Idx, tail.key)
+		}
+	}
+
+	a.replace("")
+}
+
+func arcIntMax(a, b int) int {
+	if a > b {
+		return a
+	}
+
+	return b
 }
