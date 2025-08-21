@@ -67,10 +67,12 @@ func (c *CAWOLFU) Evict() (string, bool) {
 	if err == nil {
 		c.length--
 
+		// Preserve key before resetting the node for pool reuse
+		evictedKey := node.key
 		resetCAWOLFUNode(node)
 		c.nodePool.Put(node)
 
-		return node.key, true
+		return evictedKey, true
 	}
 	// If map/list out of sync, forcibly clean up
 	resetCAWOLFUNode(node)

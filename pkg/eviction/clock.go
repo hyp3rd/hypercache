@@ -57,11 +57,13 @@ func (c *ClockAlgorithm) Evict() (string, bool) {
 		if item.AccessCount > 0 {
 			item.AccessCount--
 		} else {
-			delete(c.keys, item.Key)
+			// Preserve key before zeroing the item back to the pool
+			evictedKey := item.Key
+			delete(c.keys, evictedKey)
 			c.itemPoolManager.Put(item)
 			c.items[c.hand] = nil
 
-			return item.Key, true
+			return evictedKey, true
 		}
 
 		c.hand = (c.hand + 1) % c.capacity
