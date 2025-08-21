@@ -99,11 +99,8 @@ func (cacheBackend *Redis) Get(ctx context.Context, key string) (*cache.Item, bo
 	if !isMember {
 		return nil, false
 	}
-	// Get the item from the cacheBackend
-	item := cacheBackend.itemPoolManager.Get()
-
-	// Return the item to the pool
-	defer cacheBackend.itemPoolManager.Put(item)
+	// Get a transient item from pool, but clone before returning to caller
+	pooled := cacheBackend.itemPoolManager.Get()
 
 	data, err := cacheBackend.rdb.HGet(ctx, key, "data").Bytes()
 	if err != nil {
@@ -115,12 +112,15 @@ func (cacheBackend *Redis) Get(ctx context.Context, key string) (*cache.Item, bo
 		return nil, false
 	}
 	// Deserialize the item
-	err = cacheBackend.Serializer.Unmarshal(data, item)
+	err = cacheBackend.Serializer.Unmarshal(data, pooled)
 	if err != nil {
 		return nil, false
 	}
+	// Clone into a new heap object to avoid returning a pooled pointer
+	out := *pooled
+	cacheBackend.itemPoolManager.Put(pooled)
 
-	return item, true
+	return &out, true
 }
 
 // Set stores the Item in the cacheBackend.

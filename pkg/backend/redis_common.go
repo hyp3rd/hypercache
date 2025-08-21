@@ -97,13 +97,16 @@ func redisList(ctx context.Context, client redisCmd, keysSetName string, ser ser
 			return nil, ewrap.Wrap(err, "failed to get item data from redis")
 		}
 
-		item := pool.Get()
-		defer pool.Put(item)
+		// Use a pooled item for decoding, then clone to avoid lifetime issues
+		pooled := pool.Get()
 
-		err = ser.Unmarshal([]byte(data["data"]), item)
+		err = ser.Unmarshal([]byte(data["data"]), pooled)
 		if err == nil {
-			items = append(items, item)
+			out := *pooled
+			items = append(items, &out)
 		}
+
+		pool.Put(pooled)
 	}
 
 	if len(filters) > 0 {

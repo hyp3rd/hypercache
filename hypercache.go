@@ -39,28 +39,30 @@ import (
 // The cache also has a mutex that is used to protect the eviction algorithm from concurrent access.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
 type HyperCache[T backend.IBackendConstrain] struct {
-	backend                    backend.IBackend[T]               // `backend`` holds the backend that the cache uses to store the items. It must implement the IBackend interface.
-	cacheBackendChecker        introspect.CacheBackendChecker[T] // `cacheBackendChecker` holds an instance of the CacheBackendChecker interface. It helps to determine the type of the backend.
-	itemPoolManager            *cache.ItemPoolManager            // `itemPoolManager` manages the item pool for the cache.
-	stop                       chan bool                         // `stop` channel to signal the expiration and eviction loops to stop
-	workerPool                 *WorkerPool                       // `workerPool` holds a pointer to the worker pool that the cache uses to run the expiration and eviction loops.
-	expirationTriggerCh        chan bool                         // `expirationTriggerCh` channel to signal the expiration trigger loop to start
-	expirationTriggerBufSize   int                               // optional override for expiration trigger channel buffer size (default: capacity/2)
-	expirationSignalPending    atomic.Bool                       // coalesces multiple expiration trigger requests
-	expirationDebounceInterval time.Duration                     // optional debounce interval between accepted triggers
-	lastExpirationTrigger      atomic.Int64                      // unix nano timestamp of last accepted trigger
-	evictCh                    chan bool                         // `evictCh` channel to signal the eviction loop to start
-	evictionAlgorithmName      string                            // `evictionAlgorithmName` name of the eviction algorithm to use when evicting items
-	evictionAlgorithm          eviction.IAlgorithm               // `evictionAlgorithm` eviction algorithm to use when evicting items
-	expirationInterval         time.Duration                     // `expirationInterval` interval at which the expiration loop should run
-	evictionInterval           time.Duration                     // interval at which the eviction loop should run
-	shouldEvict                atomic.Bool                       // `shouldEvict` indicates whether the cache should evict items or not
-	maxEvictionCount           uint                              // `evictionInterval` maximum number of items that can be evicted in a single eviction loop iteration
-	maxCacheSize               int64                             // maxCacheSize instructs the cache not allocate more memory than this limit, value in MB, 0 means no limit
-	memoryAllocation           atomic.Int64                      // memoryAllocation is the current memory allocation of the cache, value in bytes
-	mutex                      sync.RWMutex                      // `mutex` holds a RWMutex (Read-Write Mutex) that is used to protect the eviction algorithm from concurrent access
-	once                       sync.Once                         // `once` holds a Once struct that is used to ensure that the expiration and eviction loops are only started once
-	statsCollectorName         string                            // `statsCollectorName` holds the name of the stats collector that the cache should use when collecting cache statistics
+	backend             backend.IBackend[T]               // `backend`` holds the backend that the cache uses to store the items. It must implement the IBackend interface.
+	cacheBackendChecker introspect.CacheBackendChecker[T] // `cacheBackendChecker` holds an instance of the CacheBackendChecker interface. It helps to determine the type of the backend.
+	itemPoolManager     *cache.ItemPoolManager            // `itemPoolManager` manages the item pool for the cache.
+	stop                chan bool                         // `stop` channel to signal the expiration and eviction loops to stop
+	// background cancel function for loops (context is created on start, canceled on Stop)
+	bgCancel                   context.CancelFunc
+	workerPool                 *WorkerPool         // `workerPool` holds a pointer to the worker pool that the cache uses to run the expiration and eviction loops.
+	expirationTriggerCh        chan bool           // `expirationTriggerCh` channel to signal the expiration trigger loop to start
+	expirationTriggerBufSize   int                 // optional override for expiration trigger channel buffer size (default: capacity/2)
+	expirationSignalPending    atomic.Bool         // coalesces multiple expiration trigger requests
+	expirationDebounceInterval time.Duration       // optional debounce interval between accepted triggers
+	lastExpirationTrigger      atomic.Int64        // unix nano timestamp of last accepted trigger
+	evictCh                    chan bool           // `evictCh` channel to signal the eviction loop to start
+	evictionAlgorithmName      string              // `evictionAlgorithmName` name of the eviction algorithm to use when evicting items
+	evictionAlgorithm          eviction.IAlgorithm // `evictionAlgorithm` eviction algorithm to use when evicting items
+	expirationInterval         time.Duration       // `expirationInterval` interval at which the expiration loop should run
+	evictionInterval           time.Duration       // interval at which the eviction loop should run
+	shouldEvict                atomic.Bool         // `shouldEvict` indicates whether the cache should evict items or not
+	maxEvictionCount           uint                // `evictionInterval` maximum number of items that can be evicted in a single eviction loop iteration
+	maxCacheSize               int64               // maxCacheSize instructs the cache not allocate more memory than this limit, value in MB, 0 means no limit
+	memoryAllocation           atomic.Int64        // memoryAllocation is the current memory allocation of the cache, value in bytes
+	mutex                      sync.RWMutex        // `mutex` holds a RWMutex (Read-Write Mutex) that is used to protect the eviction algorithm from concurrent access
+	once                       sync.Once           // `once` holds a Once struct that is used to ensure that the expiration and eviction loops are only started once
+	statsCollectorName         string              // `statsCollectorName` holds the name of the stats collector that the cache should use when collecting cache statistics
 	// StatsCollector to collect cache statistics
 	StatsCollector stats.ICollector
 }
@@ -241,6 +243,7 @@ func newHyperCacheBase[T backend.IBackendConstrain](b backend.IBackend[T]) *Hype
 		itemPoolManager:    cache.NewItemPoolManager(),
 		workerPool:         NewWorkerPool(runtime.NumCPU()),
 		stop:               make(chan bool, 2),
+		evictCh:            make(chan bool, 1),
 		expirationInterval: constants.DefaultExpirationInterval,
 		evictionInterval:   constants.DefaultEvictionInterval,
 	}
@@ -311,70 +314,84 @@ func initExpirationTrigger[T backend.IBackendConstrain](hc *HyperCache[T]) {
 }
 
 // startBackgroundJobs starts the background jobs for the hyper cache.
-//
-//nolint:cyclop
 func (hyperCache *HyperCache[T]) startBackgroundJobs() {
-	// Initialize the eviction channel with the buffer size set to half the capacity
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
-	// Start expiration and eviction loops if capacity is greater than zero
+	// Start expiration and eviction loops once
 	hyperCache.once.Do(func() {
-		tick := time.NewTicker(hyperCache.expirationInterval)
+		// Long-lived background context, canceled on Stop
+		ctx, cancel := context.WithCancel(context.Background())
+		hyperCache.bgCancel = cancel
 
-		go func() {
-			for {
-				select {
-				case <-tick.C:
-					// trigger expiration
-					hyperCache.expirationLoop(ctx)
-				case <-hyperCache.expirationTriggerCh:
-					// trigger expiration
-					hyperCache.expirationLoop(ctx)
-					// clear pending flag and drain any coalesced triggers quickly
-					hyperCache.expirationSignalPending.Store(false)
-
-					drained := true
-					for drained {
-						select {
-						case <-hyperCache.expirationTriggerCh:
-						default:
-							drained = false
-						}
-					}
-				case <-hyperCache.evictCh:
-					// trigger eviction
-					hyperCache.evictionLoop(ctx)
-				case <-hyperCache.stop:
-					// stop the loops and ticker to avoid leaks
-					tick.Stop()
-
-					return
-				}
-			}
-		}()
-		// Start eviction loop if eviction interval is greater than zero
-		if hyperCache.evictionInterval > 0 {
-			// Initialize the eviction channel with the buffer size set to half the capacity
-			hyperCache.evictCh = make(chan bool, 1)
-			// Start the eviction loop
-			tick := time.NewTicker(hyperCache.evictionInterval)
-
-			go func() {
-				for {
-					select {
-					case <-tick.C:
-						hyperCache.evictionLoop(ctx)
-					case <-hyperCache.stop:
-						// stop ticker to avoid leaks
-						tick.Stop()
-
-						return
-					}
-				}
-			}()
-		}
+		hyperCache.startExpirationRoutine(ctx)
+		hyperCache.startEvictionRoutine(ctx)
 	})
+}
+
+// startExpirationRoutine launches the expiration loop and listens to manual triggers and stop signals.
+func (hyperCache *HyperCache[T]) startExpirationRoutine(ctx context.Context) {
+	go func() {
+		var tick *time.Ticker
+		if hyperCache.expirationInterval > 0 {
+			tick = time.NewTicker(hyperCache.expirationInterval)
+		}
+
+		for {
+			var tickC <-chan time.Time
+			if tick != nil {
+				tickC = tick.C
+			}
+
+			select {
+			case <-tickC:
+				// trigger expiration on schedule
+				hyperCache.expirationLoop(ctx)
+			case <-hyperCache.expirationTriggerCh:
+				// trigger expiration (coalesced)
+				hyperCache.expirationLoop(ctx)
+				// clear pending flag and drain any coalesced triggers quickly
+				hyperCache.expirationSignalPending.Store(false)
+
+				drained := true
+				for drained {
+					select {
+					case <-hyperCache.expirationTriggerCh:
+					default:
+						drained = false
+					}
+				}
+			case <-hyperCache.evictCh:
+				// manual eviction trigger
+				hyperCache.evictionLoop(ctx)
+			case <-hyperCache.stop:
+				if tick != nil {
+					tick.Stop()
+				}
+
+				return
+			}
+		}
+	}()
+}
+
+// startEvictionRoutine launches the periodic eviction loop if configured.
+func (hyperCache *HyperCache[T]) startEvictionRoutine(ctx context.Context) {
+	if hyperCache.evictionInterval <= 0 {
+		return
+	}
+
+	tick := time.NewTicker(hyperCache.evictionInterval)
+
+	go func() {
+		for {
+			select {
+			case <-tick.C:
+				hyperCache.evictionLoop(ctx)
+			case <-hyperCache.stop:
+				tick.Stop()
+
+				return
+			}
+		}
+	}()
 }
 
 // triggerExpiration coalesces and optionally debounces expiration triggers to avoid flooding the channel.
@@ -463,7 +480,11 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 				break
 			}
 
+			// Protect eviction algorithm access
+			hyperCache.mutex.Lock()
 			key, ok := hyperCache.evictionAlgorithm.Evict()
+			hyperCache.mutex.Unlock()
+
 			if !ok {
 				// no more items to evict
 				break
@@ -491,7 +512,10 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 // evictItem is a helper function that removes an item from the cache and returns the key of the evicted item.
 // If no item can be evicted, it returns a false.
 func (hyperCache *HyperCache[T]) evictItem(ctx context.Context) (string, bool) {
+	hyperCache.mutex.Lock()
 	key, ok := hyperCache.evictionAlgorithm.Evict()
+	hyperCache.mutex.Unlock()
+
 	if !ok {
 		// no more items to evict
 		return "", false
@@ -516,9 +540,6 @@ func (hyperCache *HyperCache[T]) Set(ctx context.Context, key string, value any,
 	item.Value = value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
-
-	hyperCache.mutex.Lock()
-	defer hyperCache.mutex.Unlock()
 
 	// Set the size of the item
 	err := item.SetSize()
@@ -545,7 +566,9 @@ func (hyperCache *HyperCache[T]) Set(ctx context.Context, key string, value any,
 	}
 
 	// Set the item in the eviction algorithm
+	hyperCache.mutex.Lock()
 	hyperCache.evictionAlgorithm.Set(key, item.Value)
+	hyperCache.mutex.Unlock()
 
 	// If the cache is at capacity, evict an item when the eviction interval is zero
 	if hyperCache.shouldEvict.Load() && hyperCache.backend.Count(ctx) > hyperCache.backend.Capacity() {
@@ -628,9 +651,6 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
 
-	hyperCache.mutex.Lock()
-	defer hyperCache.mutex.Unlock()
-
 	// Set the size of the item
 	err := item.SetSize()
 	if err != nil {
@@ -658,10 +678,11 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 
 	go func() {
 		// Set the item in the eviction algorithm
+		hyperCache.mutex.Lock()
 		hyperCache.evictionAlgorithm.Set(key, item.Value)
+		hyperCache.mutex.Unlock()
 		// If the cache is at capacity, evict an item when the eviction interval is zero
 		if hyperCache.shouldEvict.Load() && hyperCache.backend.Count(ctx) > hyperCache.backend.Capacity() {
-			hyperCache.itemPoolManager.Put(item)
 			hyperCache.evictItem(ctx)
 		}
 	}()
@@ -715,7 +736,9 @@ func (hyperCache *HyperCache[T]) Remove(ctx context.Context, keys ...string) err
 		if ok {
 			// remove the item from the cacheBackend and update the memory allocation
 			hyperCache.memoryAllocation.Add(-item.Size)
+			hyperCache.mutex.Lock()
 			hyperCache.evictionAlgorithm.Delete(key)
+			hyperCache.mutex.Unlock()
 		}
 	}
 
@@ -747,7 +770,9 @@ func (hyperCache *HyperCache[T]) Clear(ctx context.Context) error {
 	}
 
 	for _, item := range items {
+		hyperCache.mutex.Lock()
 		hyperCache.evictionAlgorithm.Delete(item.Key)
+		hyperCache.mutex.Unlock()
 	}
 
 	// reset the memory allocation
@@ -791,7 +816,15 @@ func (hyperCache *HyperCache[T]) Count(ctx context.Context) int {
 
 // TriggerEviction sends a signal to the eviction loop to start.
 func (hyperCache *HyperCache[T]) TriggerEviction() {
-	hyperCache.evictCh <- true
+	// Safe, non-blocking trigger; no-op if channel not initialized
+	if hyperCache.evictCh == nil {
+		return
+	}
+
+	select {
+	case hyperCache.evictCh <- true:
+	default:
+	}
 }
 
 // Stop function stops the expiration and eviction loops and closes the stop channel.
@@ -804,6 +837,10 @@ func (hyperCache *HyperCache[T]) Stop() {
 	})
 
 	wg.Wait()
+
+	if hyperCache.bgCancel != nil {
+		hyperCache.bgCancel()
+	}
 
 	hyperCache.once = sync.Once{}
 	hyperCache.workerPool.Shutdown()

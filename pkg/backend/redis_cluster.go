@@ -91,8 +91,7 @@ func (cacheBackend *RedisCluster) Get(ctx context.Context, key string) (*cache.I
 		return nil, false
 	}
 
-	item := cacheBackend.itemPoolManager.Get()
-	defer cacheBackend.itemPoolManager.Put(item)
+	pooled := cacheBackend.itemPoolManager.Get()
 
 	data, err := cacheBackend.rdb.HGet(ctx, key, "data").Bytes()
 	if err != nil {
@@ -103,12 +102,15 @@ func (cacheBackend *RedisCluster) Get(ctx context.Context, key string) (*cache.I
 		return nil, false
 	}
 
-	err = cacheBackend.Serializer.Unmarshal(data, item)
+	err = cacheBackend.Serializer.Unmarshal(data, pooled)
 	if err != nil {
 		return nil, false
 	}
 
-	return item, true
+	out := *pooled
+	cacheBackend.itemPoolManager.Put(pooled)
+
+	return &out, true
 }
 
 // Set stores an item in the cluster.
