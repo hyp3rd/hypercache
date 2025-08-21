@@ -12,12 +12,16 @@ import (
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
-const cacheCapacity = 10
+const (
+	cacheCapacity            = 10
+	evictionInterval         = 10 * time.Second
+	evictionIntervalSlippage = 65 * time.Second
+)
 
 // This example demonstrates how to setup eviction of items from the cache.
 func main() {
 	log.Println("running an example of eviction with a background 3 seconds interval")
-	executeExample(constants.DefaultEvictionInterval)
+	executeExample(evictionInterval)
 
 	log.Println("running an example with background eviction disabled and proactive eviction enabled")
 	executeExample(0)
@@ -81,8 +85,8 @@ func executeExample(evictionInterval time.Duration) {
 	}
 
 	if evictionInterval > 0 {
-		fmt.Fprintln(os.Stdout, "sleeping to allow the eviction loop to complete", evictionInterval+2*time.Second)
-		time.Sleep(evictionInterval + 2*time.Second)
+		fmt.Fprintln(os.Stdout, "sleeping to allow the eviction loop to complete", evictionInterval+evictionIntervalSlippage)
+		time.Sleep(evictionInterval + evictionIntervalSlippage)
 		log.Println("listing all items in the cache the eviction is triggered")
 
 		list, err := cache.List(context.TODO())
