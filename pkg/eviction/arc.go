@@ -320,10 +320,7 @@ func (a *ARC) updateIfResident(key string, value any) bool {
 // handleGhostHit processes B1/B2 hits and moves the key to T2 while adapting p.
 func (a *ARC) handleGhostHit(key string, value any) bool {
 	if ghost, ok := a.b1Idx[key]; ok {
-		increment := a.b2.len / arcIntMax(1, a.b1.len)
-		if increment < 1 {
-			increment = 1
-		}
+		increment := max(a.b2.len/arcIntMax(1, a.b1.len), 1)
 
 		a.p += increment
 		if a.p > a.capacity {
@@ -344,10 +341,7 @@ func (a *ARC) handleGhostHit(key string, value any) bool {
 	}
 
 	if ghost, ok := a.b2Idx[key]; ok {
-		decrement := a.b1.len / arcIntMax(1, a.b2.len)
-		if decrement < 1 {
-			decrement = 1
-		}
+		decrement := max(a.b1.len/arcIntMax(1, a.b2.len), 1)
 
 		a.p -= decrement
 		if a.p < 0 {
