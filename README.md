@@ -11,7 +11,7 @@ It ships with a default [historigram stats collector](./pkg/stats/stats.go) and 
 - [Recently Used (LRU) eviction algorithm](./pkg/eviction/lru.go)
 - [The Least Frequently Used (LFU) algorithm](./pkg/eviction/lfu.go)
 - [Cache-Aware Write-Optimized LFU (CAWOLFU)](./pkg/eviction/cawolfu.go)
-- [The Adaptive Replacement Cache (ARC) algorithm](./pkg/eviction/arc.go)
+- [The Adaptive Replacement Cache (ARC) algorithm](./pkg/eviction/arc.go) — Experimental (not enabled by default)
 - [The clock eviction algorithm](./pkg/eviction/clock.go)
 
 ### Features
@@ -25,7 +25,7 @@ It ships with a default [historigram stats collector](./pkg/stats/stats.go) and 
 - Retrieve items from the cache by their key
 - Delete items from the cache by their key
 - Clear the cache of all items
-- Evitc items in the background based on the cache capacity and items access leveraging several custom eviction algorithms
+- Evict items in the background based on the cache capacity and items access leveraging several custom eviction algorithms
 - Expire items in the background based on their duration
 - [Eviction Algorithm interface](./pkg/eviction/eviction.go) to implement custom eviction algorithms.
 - Stats collection with a default [stats collector](./pkg/stats/stats.go) or a custom one that implements the StatsCollector interface.
@@ -86,6 +86,18 @@ svc := hypercache.ApplyMiddleware(svc,
 ```
 
 Use your preferred OpenTelemetry SDK setup for exporters and processors in production; the example uses no-op providers for simplicity.
+
+### Eviction algorithms
+
+Available algorithm names you can pass to `WithEvictionAlgorithm`:
+
+- "lru" — Least Recently Used (default)
+- "lfu" — Least Frequently Used (with LRU tie-breaker for equal frequencies)
+- "clock" — Second-chance clock
+- "cawolfu" — Cache-Aware Write-Optimized LFU
+- "arc" — Adaptive Replacement Cache (experimental; not registered by default)
+
+Note: ARC is experimental and isn’t included in the default registry. If you choose to use it, register it manually or enable it explicitly in your build.
 
 ## API
 

@@ -15,6 +15,7 @@ type LFUAlgorithm struct {
 	mutex  sync.RWMutex
 	length int
 	cap    int
+	seq    uint64 // monotonic sequence to break frequency ties by recency (LRU on ties)
 }
 
 // Node is a node in the LFUAlgorithm.
@@ -23,6 +24,7 @@ type Node struct {
 	value any
 	count int
 	index int
+	last  uint64 // last access sequence (higher = more recent)
 }
 
 // FrequencyHeap is a heap of Nodes.
@@ -36,7 +38,8 @@ func (fh FrequencyHeap) Len() int { return len(fh) }
 // Less returns true if the node at index i has a lower frequency than the node at index j.
 func (fh FrequencyHeap) Less(i, j int) bool {
 	if fh[i].count == fh[j].count {
-		return fh[i].index < fh[j].index
+		// On ties, evict the least recently used (older last sequence has priority)
+		return fh[i].last < fh[j].last
 	}
 
 	return fh[i].count < fh[j].count
@@ -82,6 +85,7 @@ func NewLFUAlgorithm(capacity int) (*LFUAlgorithm, error) {
 		freqs:  &FrequencyHeap{},
 		length: 0,
 		cap:    capacity,
+		seq:    0,
 	}, nil
 }
 
@@ -111,6 +115,8 @@ func (l *LFUAlgorithm) Set(key string, value any) {
 		// Key exists: update value and increment frequency
 		node.value = value
 		node.count++
+		l.seq++
+		node.last = l.seq
 		heap.Fix(l.freqs, node.index)
 
 		return
@@ -120,10 +126,12 @@ func (l *LFUAlgorithm) Set(key string, value any) {
 		_, _ = l.internalEvict()
 	}
 
+	l.seq++
 	node := &Node{
 		key:   key,
 		value: value,
 		count: 1,
+		last:  l.seq,
 	}
 	l.items[key] = node
 	heap.Push(l.freqs, node)
@@ -141,6 +149,8 @@ func (l *LFUAlgorithm) Get(key string) (any, bool) {
 	}
 
 	node.count++
+	l.seq++
+	node.last = l.seq
 	heap.Fix(l.freqs, node.index)
 
 	return node.value, true

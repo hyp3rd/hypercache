@@ -28,9 +28,6 @@ type AlgorithmRegistry struct {
 // getDefaultAlgorithms returns the default set of eviction algorithms.
 func getDefaultAlgorithms() map[string]func(capacity int) (IAlgorithm, error) {
 	return map[string]func(capacity int) (IAlgorithm, error){
-		"arc": func(capacity int) (IAlgorithm, error) {
-			return NewARCAlgorithm(capacity)
-		},
 		"lru": func(capacity int) (IAlgorithm, error) {
 			return NewLRUAlgorithm(capacity)
 		},
