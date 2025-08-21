@@ -1,5 +1,5 @@
 ---
-version: 2
+version: "2"
 # Options for analysis running.
 run:
   # Number of operating system threads (`GOMAXPROCS`) that can execute golangci-lint simultaneously.
@@ -43,13 +43,6 @@ run:
   # Mainly related to generics support since go1.18.
   # Default: use Go version from the go.mod file, fallback on the env var `GOVERSION`, fallback on 1.17
   go: "1.25.0"
-
-exclusions:
-  # Which file paths to exclude: they will be analyzed, but issues from them won't be reported.
-  # "/" will be replaced by the current OS file path separator to properly work on Windows.
-  # Default: []
-  paths:
-    - "cmd/*/test-*"
 
 linters:
   # Enable specific linter
@@ -183,10 +176,6 @@ linters:
         - T backend.IBackendConstrain
         - m map[string]int
 
-  # Enable only fast linters from enabled linters set (first run won't be fast)
-  # Default: false
-  fast: false
-
 formatters:
   enable:
     # - gci
@@ -217,35 +206,8 @@ formatters:
   #   # Default: false
   #   no-lex-order: false
 
-  goimports:
-    # A comma-separated list of prefixes, which, if set, checks import paths
-    # with the given prefixes are grouped after 3rd-party packages.
-    # Default: ""
-    local-prefixes: github.com/hyp3rd/ewrap
-
-  gofmt:
-  gofumpt:
-    # Module path which contains the source code being formatted.
-    # Default: ""
-    module-path: github.com/hyp3rd/ewrap
-    # Choose whether to use the extra rules.
-    # Default: false
-    extra-rules: true
-
 # output configuration options
 output:
-  # Print lines of code with issue.
-  # Default: true
-  print-issued-lines: true
-  # Print linter name in the end of issue text.
-  # Default: true
-  print-linter-name: true
-  # Add a prefix to the output file references.
-  # Default: ""
-  path-prefix: ""
-  # Sort results by the order defined in `sort-order`.
-  # Default: false
-  sort-results: true
   # Order to use when sorting results.
   # Require `sort-results` to `true`.
   # Possible values: `file`, `linter`, and `severity`.
