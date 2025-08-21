@@ -104,36 +104,15 @@ func NewInMemoryWithDefaults(capacity int) (*HyperCache[backend.InMemory], error
 //   - The eviction algorithm is set to LRU.
 //   - The expiration interval is set to 30 minutes.
 //   - The stats collector is set to the HistogramStatsCollector stats collector.
-//
-//nolint:cyclop
 func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (*HyperCache[T], error) {
-	// Get the backend constructor from the registry
-	constructor, exists := bm.backendRegistry[config.BackendType]
-	if !exists {
-		return nil, ewrap.Newf("unknown backend type: %s", config.BackendType)
-	}
-
-	// Create the backend
-	backendInstance, err := constructor.Create(config)
+	// Resolve typed backend from registry
+	backendTyped, err := resolveBackend[T](bm, config)
 	if err != nil {
 		return nil, err
 	}
 
-	// Check if the backend implements the IBackend interface
-	backend, ok := backendInstance.(backend.IBackend[T])
-	if !ok {
-		return nil, sentinel.ErrInvalidBackendType
-	}
-
-	// Initialize the cache
-	hyperCache := &HyperCache[T]{
-		backend:            backend,
-		itemPoolManager:    cache.NewItemPoolManager(),
-		workerPool:         NewWorkerPool(runtime.NumCPU()),
-		stop:               make(chan bool, 2),
-		expirationInterval: constants.DefaultExpirationInterval,
-		evictionInterval:   constants.DefaultEvictionInterval,
-	}
+	// Initialize base cache struct
+	hyperCache := newHyperCacheBase[T](backendTyped)
 
 	// Initialize the cache backend type checker
 	hyperCache.cacheBackendChecker = introspect.CacheBackendChecker[T]{
@@ -141,65 +120,165 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (*H
 		BackendType: config.BackendType,
 	}
 
-	// Apply options
+	// Apply options and configure eviction-related settings
 	ApplyHyperCacheOptions(hyperCache, config.HyperCacheOptions...)
+	configureEvictionSettings(hyperCache)
 
-	// evaluate if the cache should evict items proactively
-	hyperCache.shouldEvict.Store(hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0)
-
-	// Set the max eviction count to the capacity if it is not set or is zero
-	if hyperCache.maxEvictionCount == 0 {
-		//nolint:gosec
-		hyperCache.maxEvictionCount = uint(hyperCache.backend.Capacity())
-	}
-
-	// Initialize the eviction algorithm
-	if hyperCache.evictionAlgorithmName == "" {
-		// Use the default eviction algorithm if none is specified
-		//nolint:gosec
-		hyperCache.evictionAlgorithm, err = eviction.NewLRUAlgorithm(int(hyperCache.maxEvictionCount))
-	} else {
-		// Use the specified eviction algorithm
-		//nolint:gosec
-		hyperCache.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hyperCache.evictionAlgorithmName, int(hyperCache.maxEvictionCount))
-	}
-
+	// Initialize eviction algorithm
+	err = initEvictionAlgorithm(hyperCache)
 	if err != nil {
 		return hyperCache, err
 	}
 
-	// Initialize the stats collector
-	if hyperCache.statsCollectorName == "" {
-		// Use the default stats collector if none is specified
-		hyperCache.StatsCollector = stats.NewHistogramStatsCollector()
-	} else {
-		// Use the specified stats collector
-		hyperCache.StatsCollector, err = stats.NewCollector(hyperCache.statsCollectorName)
-		if err != nil {
-			return hyperCache, err
+	// Stats collector
+	err = configureStats(hyperCache)
+	if err != nil {
+		return hyperCache, err
+	}
+
+	// Capacity check (fatal)
+	err = checkCapacity(hyperCache)
+	if err != nil {
+		return nil, err
+	}
+
+	// Initialize expiration trigger channel and start background jobs
+	initExpirationTrigger(hyperCache)
+	hyperCache.startBackgroundJobs()
+
+	return hyperCache, nil
+}
+
+// resolveBackend constructs a typed backend instance based on the config.BackendType.
+func resolveBackend[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (backend.IBackend[T], error) {
+	constructor, exists := bm.backendRegistry[config.BackendType]
+	if !exists {
+		return nil, ewrap.Newf("unknown backend type: %s", config.BackendType)
+	}
+
+	switch config.BackendType {
+	case constants.InMemoryBackend:
+		inMemoryConstructor, ok := constructor.(InMemoryBackendConstructor)
+		if !ok {
+			return nil, sentinel.ErrInvalidBackendType
 		}
+
+		cfg, ok := any(config).(*Config[backend.InMemory])
+		if !ok {
+			return nil, sentinel.ErrInvalidBackendType
+		}
+
+		bi, err := inMemoryConstructor.Create(cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		if b, ok := any(bi).(backend.IBackend[T]); ok {
+			return b, nil
+		}
+
+		return nil, sentinel.ErrInvalidBackendType
+
+	case constants.RedisBackend:
+		redisConstructor, ok := constructor.(RedisBackendConstructor)
+		if !ok {
+			return nil, sentinel.ErrInvalidBackendType
+		}
+
+		cfg, ok := any(config).(*Config[backend.Redis])
+		if !ok {
+			return nil, sentinel.ErrInvalidBackendType
+		}
+
+		bi, err := redisConstructor.Create(cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		if b, ok := any(bi).(backend.IBackend[T]); ok {
+			return b, nil
+		}
+
+		return nil, sentinel.ErrInvalidBackendType
 	}
 
-	// If the capacity is less than zero, we return
-	if hyperCache.backend.Capacity() < 0 {
-		return nil, sentinel.ErrInvalidCapacity
+	return nil, ewrap.Newf("unknown backend type: %s", config.BackendType)
+}
+
+// newHyperCacheBase builds the base HyperCache instance with default timings and internals.
+func newHyperCacheBase[T backend.IBackendConstrain](b backend.IBackend[T]) *HyperCache[T] {
+	return &HyperCache[T]{
+		backend:            b,
+		itemPoolManager:    cache.NewItemPoolManager(),
+		workerPool:         NewWorkerPool(runtime.NumCPU()),
+		stop:               make(chan bool, 2),
+		expirationInterval: constants.DefaultExpirationInterval,
+		evictionInterval:   constants.DefaultEvictionInterval,
+	}
+}
+
+// configureEvictionSettings computes derived eviction settings like shouldEvict and default maxEvictionCount.
+func configureEvictionSettings[T backend.IBackendConstrain](hc *HyperCache[T]) {
+	hc.shouldEvict.Store(hc.evictionInterval == 0 && hc.backend.Capacity() > 0)
+
+	if hc.maxEvictionCount == 0 {
+		//nolint:gosec
+		hc.maxEvictionCount = uint(hc.backend.Capacity())
+	}
+}
+
+// initEvictionAlgorithm initializes the eviction algorithm for the cache.
+func initEvictionAlgorithm[T backend.IBackendConstrain](hc *HyperCache[T]) error {
+	var err error
+	if hc.evictionAlgorithmName == "" {
+		// Use the default eviction algorithm if none is specified
+		//nolint:gosec
+		hc.evictionAlgorithm, err = eviction.NewLRUAlgorithm(int(hc.maxEvictionCount))
+	} else {
+		// Use the specified eviction algorithm
+		//nolint:gosec
+		hc.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hc.evictionAlgorithmName, int(hc.maxEvictionCount))
 	}
 
-	// Initialize the expiration trigger channel with configurable buffer size (default: half capacity)
-	buf := hyperCache.backend.Capacity() / 2
-	if hyperCache.expirationTriggerBufSize > 0 {
-		buf = hyperCache.expirationTriggerBufSize
+	return err
+}
+
+// configureStats sets the stats collector, using default if none specified.
+func configureStats[T backend.IBackendConstrain](hc *HyperCache[T]) error {
+	if hc.statsCollectorName == "" {
+		hc.StatsCollector = stats.NewHistogramStatsCollector()
+
+		return nil
+	}
+
+	var err error
+
+	hc.StatsCollector, err = stats.NewCollector(hc.statsCollectorName)
+
+	return err
+}
+
+// checkCapacity validates the backend capacity and returns an error if invalid.
+func checkCapacity[T backend.IBackendConstrain](hc *HyperCache[T]) error {
+	if hc.backend.Capacity() < 0 {
+		return sentinel.ErrInvalidCapacity
+	}
+
+	return nil
+}
+
+// initExpirationTrigger initializes the expiration trigger channel with optional buffer override.
+func initExpirationTrigger[T backend.IBackendConstrain](hc *HyperCache[T]) {
+	buf := hc.backend.Capacity() / 2
+	if hc.expirationTriggerBufSize > 0 {
+		buf = hc.expirationTriggerBufSize
 	}
 
 	if buf < 1 {
 		buf = 1
 	}
 
-	hyperCache.expirationTriggerCh = make(chan bool, buf)
-
-	hyperCache.startBackgroundJobs()
-
-	return hyperCache, err
+	hc.expirationTriggerCh = make(chan bool, buf)
 }
 
 // startBackgroundJobs starts the background jobs for the hyper cache.

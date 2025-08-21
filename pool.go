@@ -39,9 +39,13 @@ func (pool *WorkerPool) Enqueue(job JobFunc) {
 
 // Shutdown shuts down the worker pool. It waits for all jobs to finish.
 func (pool *WorkerPool) Shutdown() {
-	close(pool.quit)
-	pool.wg.Wait()
+	// Stop accepting new jobs and let workers drain the queue
 	close(pool.jobs)
+	// Wait for all enqueued jobs to complete
+	pool.wg.Wait()
+	// Now signal any lingering workers to exit select loop
+	close(pool.quit)
+	// It's now safe to close the error channel (no more sends after wg completes)
 	close(pool.errorChan)
 }
 
@@ -71,7 +75,7 @@ func (pool *WorkerPool) Resize(newSize int) {
 	} else {
 		// Decrease the number of workers
 		// Send only the number of quit signals needed to remove workers
-		for range diff {
+		for range -diff {
 			pool.quit <- struct{}{}
 		}
 	}
@@ -88,9 +92,9 @@ func (pool *WorkerPool) start() {
 func (pool *WorkerPool) worker() {
 	for {
 		select {
-		case job := <-pool.jobs:
-			if job == nil {
-				// jobs channel closed
+		case job, ok := <-pool.jobs:
+			if !ok {
+				// jobs channel closed and drained
 				return
 			}
 

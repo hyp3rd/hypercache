@@ -2,49 +2,41 @@ package hypercache
 
 import (
 	"github.com/hyp3rd/hypercache/internal/constants"
-	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
-// IBackendConstructor is an interface for backend constructors.
-type IBackendConstructor interface {
-	Create(config any) (any, error)
+// IBackendConstructor is an interface for backend constructors with type safety.
+// It returns a typed backend.IBackend[T] instead of any.
+type IBackendConstructor[T backend.IBackendConstrain] interface {
+	Create(cfg *Config[T]) (backend.IBackend[T], error)
 }
 
-// InMemoryBackendConstructor is a backend constructor for InMemory.
+// InMemoryBackendConstructor constructs InMemory backends.
 type InMemoryBackendConstructor struct{}
 
 // Create creates a new InMemory backend.
-func (ibc InMemoryBackendConstructor) Create(config any) (any, error) {
-	inMemoryConfig, ok := config.(*Config[backend.InMemory])
-	if !ok {
-		return nil, sentinel.ErrInvalidBackendType
-	}
-
-	return backend.NewInMemory(inMemoryConfig.InMemoryOptions...)
+func (InMemoryBackendConstructor) Create(cfg *Config[backend.InMemory]) (backend.IBackend[backend.InMemory], error) {
+	return backend.NewInMemory(cfg.InMemoryOptions...)
 }
 
-// RedisBackendConstructor is a backend constructor for Redis.
+// RedisBackendConstructor constructs Redis backends.
 type RedisBackendConstructor struct{}
 
 // Create creates a new Redis backend.
-func (rbc RedisBackendConstructor) Create(config any) (any, error) {
-	redisConfig, ok := config.(*Config[backend.Redis])
-	if !ok {
-		return nil, sentinel.ErrInvalidBackendType
-	}
-
-	return backend.NewRedis(redisConfig.RedisOptions...)
+func (RedisBackendConstructor) Create(cfg *Config[backend.Redis]) (backend.IBackend[backend.Redis], error) {
+	return backend.NewRedis(cfg.RedisOptions...)
 }
 
 // BackendManager is a factory for creating HyperCache backend instances.
+// It maintains a registry of backend constructors. We store them as any internally,
+// and cast to the typed constructor at use site based on T.
 type BackendManager struct {
-	backendRegistry map[string]IBackendConstructor
+	backendRegistry map[string]any
 }
 
 // getDefaultBackends returns the default set of backend constructors.
-func getDefaultBackends() map[string]IBackendConstructor {
-	return map[string]IBackendConstructor{
+func getDefaultBackends() map[string]any {
+	return map[string]any{
 		constants.InMemoryBackend: InMemoryBackendConstructor{},
 		constants.RedisBackend:    RedisBackendConstructor{},
 	}
@@ -53,7 +45,7 @@ func getDefaultBackends() map[string]IBackendConstructor {
 // NewBackendManager creates a new BackendManager with default backends pre-registered.
 func NewBackendManager() *BackendManager {
 	manager := &BackendManager{
-		backendRegistry: make(map[string]IBackendConstructor),
+		backendRegistry: make(map[string]any),
 	}
 	// Register the default backends
 	for name, constructor := range getDefaultBackends() {
@@ -67,17 +59,16 @@ func NewBackendManager() *BackendManager {
 // This is useful for testing or when you want to register only specific backends.
 func NewEmptyBackendManager() *BackendManager {
 	return &BackendManager{
-		backendRegistry: make(map[string]IBackendConstructor),
+		backendRegistry: make(map[string]any),
 	}
 }
 
-// RegisterBackend registers a new backend constructor.
-func (hcm *BackendManager) RegisterBackend(name string, constructor IBackendConstructor) {
+// RegisterBackend registers a new backend constructor. The constructor should be
+// a value implementing IBackendConstructor[T] for some T; stored as any.
+func (hcm *BackendManager) RegisterBackend(name string, constructor any) {
 	hcm.backendRegistry[name] = constructor
 }
 
 // GetDefaultManager returns a new BackendManager with default backends pre-registered.
 // This replaces the previous global instance with a factory function.
-func GetDefaultManager() *BackendManager {
-	return NewBackendManager()
-}
+func GetDefaultManager() *BackendManager { return NewBackendManager() }
