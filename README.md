@@ -69,6 +69,24 @@ make run-example group=eviction  # or any other example
 
 For a complete list of examples, refer to the [examples](./__examples/README.md) directory.
 
+### Observability (OpenTelemetry)
+
+HyperCache provides optional OpenTelemetry middleware for tracing and metrics.
+
+- Tracing: wrap the service with `middleware.NewOTelTracingMiddleware` using a `trace.Tracer`.
+- Metrics: wrap with `middleware.NewOTelMetricsMiddleware` using a `metric.Meter`.
+
+Example wiring (see `__examples/observability/otel.go`):
+
+```go
+svc := hypercache.ApplyMiddleware(svc,
+    func(next hypercache.Service) hypercache.Service { return middleware.NewOTelTracingMiddleware(next, tracer) },
+    func(next hypercache.Service) hypercache.Service { mw, _ := middleware.NewOTelMetricsMiddleware(next, meter); return mw },
+)
+```
+
+Use your preferred OpenTelemetry SDK setup for exporters and processors in production; the example uses no-op providers for simplicity.
+
 ## API
 
 The `NewInMemoryWithDefaults` function creates a new `HyperCache` instance with the defaults:
