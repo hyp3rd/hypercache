@@ -106,7 +106,7 @@ func NewInMemoryWithDefaults(capacity int) (*HyperCache[backend.InMemory], error
 //   - The stats collector is set to the HistogramStatsCollector stats collector.
 func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (*HyperCache[T], error) {
 	// Resolve typed backend from registry
-	backendTyped, err := resolveBackend[T](bm, config)
+	backendTyped, err := resolveBackend(bm, config)
 	if err != nil {
 		return nil, err
 	}
@@ -535,8 +535,7 @@ func (hyperCache *HyperCache[T]) Get(ctx context.Context, key string) (any, bool
 
 	// Check if the item has expired, if so, trigger the expiration loop
 	if item.Expired() {
-		// Return the item to the pool and non-blocking trigger of expiration loop
-		hyperCache.itemPoolManager.Put(item)
+		// Non-blocking trigger of expiration loop (do not return to pool yet; backend still holds it)
 		// Coalesced/debounced trigger
 		hyperCache.triggerExpiration()
 
@@ -559,8 +558,7 @@ func (hyperCache *HyperCache[T]) GetWithInfo(ctx context.Context, key string) (*
 
 	// Check if the item has expired, if so, trigger the expiration loop
 	if item.Expired() {
-		// Return the item to the pool and non-blocking trigger of expiration loop
-		hyperCache.itemPoolManager.Put(item)
+		// Non-blocking trigger of expiration loop; don't return to pool here
 		// Coalesced/debounced trigger
 		hyperCache.triggerExpiration()
 
@@ -580,8 +578,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 	if item, ok := hyperCache.backend.Get(ctx, key); ok {
 		// Check if the item has expired
 		if item.Expired() {
-			// Return the item to the pool and non-blocking trigger of expiration loop
-			hyperCache.itemPoolManager.Put(item)
+			// Non-blocking trigger of expiration loop; don't pool here to avoid zeroing live refs
 			// Coalesced/debounced trigger
 			hyperCache.triggerExpiration()
 
@@ -659,9 +656,7 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 
 		// Check if the item has expired
 		if item.Expired() {
-			// Put the item back in the pool
-			hyperCache.itemPoolManager.Put(item)
-			// Treat expired items as not found per API semantics
+			// Treat expired items as not found per API semantics; don't pool here to avoid zeroing live refs
 			failed[key] = sentinel.ErrKeyNotFound
 			// Coalesced/debounced trigger of the expiration loop via channel
 			hyperCache.triggerExpiration()
