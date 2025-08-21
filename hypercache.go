@@ -541,8 +541,8 @@ func (hyperCache *HyperCache[T]) Set(ctx context.Context, key string, value any,
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
 
-	// Set the size of the item
-	err := item.SetSize()
+	// Set the size of the item (aligned with backend serializer when available)
+	err := hyperCache.setItemSize(item)
 	if err != nil {
 		return err
 	}
@@ -651,8 +651,8 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 	item.Expiration = expiration
 	item.LastAccess = time.Now()
 
-	// Set the size of the item
-	err := item.SetSize()
+	// Set the size of the item (aligned with backend serializer when available)
+	err := hyperCache.setItemSize(item)
 	if err != nil {
 		return nil, err
 	}
@@ -725,6 +725,38 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 // implementation of the List function for that backend, with the filters passed in as arguments.
 func (hyperCache *HyperCache[T]) List(ctx context.Context, filters ...backend.IFilter) ([]*cache.Item, error) {
 	return hyperCache.backend.List(ctx, filters...)
+}
+
+// setItemSize computes item.Size using the backend serializer when available for accuracy.
+// Falls back to the Item's internal SetSize when no serializer is present.
+func (hyperCache *HyperCache[T]) setItemSize(item *cache.Item) error {
+	// Prefer backend-specific serialization for accurate size accounting.
+	switch backendImpl := any(hyperCache.backend).(type) {
+	case *backend.Redis:
+		if backendImpl.Serializer != nil {
+			data, err := backendImpl.Serializer.Marshal(item.Value)
+			if err != nil {
+				return err
+			}
+
+			item.Size = int64(len(data))
+
+			return nil
+		}
+	case *backend.RedisCluster:
+		if backendImpl.Serializer != nil {
+			data, err := backendImpl.Serializer.Marshal(item.Value)
+			if err != nil {
+				return err
+			}
+
+			item.Size = int64(len(data))
+
+			return nil
+		}
+	}
+
+	return item.SetSize()
 }
 
 // Remove removes items with the given key from the cache. If an item is not found, it does nothing.
