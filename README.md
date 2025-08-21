@@ -1,6 +1,6 @@
 # HyperCache
 
-[![Go](https://github.com/hyp3rd/hypercache/actions/workflows/go.yml/badge.svg)][build-link] [![CodeQL](https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml/badge.svg)][codeql-link]
+[![Go](https://github.com/hyp3rd/hypercache/actions/workflows/go.yml/badge.svg)][build-link] [![CodeQL](https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml/badge.svg)][codeql-link] [![golangci-lint](https://github.com/hyp3rd/hypercache/actions/workflows/golangci-lint.yml/badge.svg)][golangci-lint-link]
 
 ## Synopsis
 
@@ -157,3 +157,4 @@ I'm a surfer, and a software architect with 15 years of experience designing hig
 
 [build-link]: https://github.com/hyp3rd/hypercache/actions/workflows/go.yml
 [codeql-link]:https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml
+[golangci-lint-link]:https://github.com/hyp3rd/hypercache/actions/workflows/golangci-lint.yml
