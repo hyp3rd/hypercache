@@ -136,7 +136,6 @@ func (mw *OTelMetricsMiddleware) Stop() { mw.next.Stop() }
 func (mw *OTelMetricsMiddleware) GetStats() stats.Stats { return mw.next.GetStats() }
 
 // rec records call count and duration with attributes.
-// Moved to the end to satisfy funcorder linters.
 func (mw *OTelMetricsMiddleware) rec(ctx context.Context, method string, start time.Time, attrs ...attribute.KeyValue) {
 	base := []attribute.KeyValue{attribute.String("method", method)}
 	if len(attrs) > 0 {
@@ -146,5 +145,3 @@ func (mw *OTelMetricsMiddleware) rec(ctx context.Context, method string, start t
 	mw.calls.Add(ctx, 1, metric.WithAttributes(base...))
 	mw.durations.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(base...))
 }
-
-// keep helpers at end of file

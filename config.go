@@ -1,5 +1,5 @@
 // Package hypercache provides a high-performance, generic caching library with configurable backends and eviction algorithms.
-// It supports multiple backend types including in-memory and Redis, with various eviction strategies like LRU, LFU, ARC, and more.
+// It supports multiple backend types including in-memory and Redis, with various eviction strategies like LRU, LFU, and more.
 // The package is designed to be flexible and extensible, allowing users to customize cache behavior through configuration options.
 //
 // Example usage:
@@ -90,7 +90,7 @@ func WithMaxCacheSize[T backend.IBackendConstrain](maxCacheSize int64) Option[T]
 //   - "FIFO" (First In First Out)
 //   - "RANDOM" (Random)
 //   - "CLOCK" (Clock) - Implemented in the `eviction/clock.go` file
-//   - "ARC" (Adaptive Replacement Cache) - Implemented in the `eviction/arc.go` file
+//   - "ARC" (Adaptive Replacement Cache) - Experimental (not enabled by default)
 //   - "TTL" (Time To Live)
 //   - "LFUDA" (Least Frequently Used with Dynamic Aging)
 //   - "SLRU" (Segmented Least Recently Used)
