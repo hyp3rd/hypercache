@@ -22,6 +22,11 @@ func (rb *Redis) setCapacity(capacity int) {
 	rb.capacity = capacity
 }
 
+// setCapacity sets the `Capacity` field of the `RedisCluster` backend.
+func (rc *RedisCluster) setCapacity(capacity int) {
+	rc.capacity = capacity
+}
+
 // Option is a function type that can be used to configure the `HyperCache` struct.
 type Option[T IBackendConstrain] func(*T)
 
@@ -62,5 +67,26 @@ func WithKeysSetName[T Redis](keysSetName string) Option[Redis] {
 func WithSerializer[T Redis](serializer serializer.ISerializer) Option[Redis] {
 	return func(backend *Redis) {
 		backend.Serializer = serializer
+	}
+}
+
+// WithRedisClusterClient sets the redis cluster client to use.
+func WithRedisClusterClient[T RedisCluster](client *redis.ClusterClient) Option[RedisCluster] {
+	return func(backend *RedisCluster) {
+		backend.rdb = client
+	}
+}
+
+// WithClusterKeysSetName sets the name of the set for cluster backend keys.
+func WithClusterKeysSetName[T RedisCluster](keysSetName string) Option[RedisCluster] {
+	return func(backend *RedisCluster) {
+		backend.keysSetName = keysSetName
+	}
+}
+
+// WithClusterSerializer sets the serializer for the cluster backend.
+func WithClusterSerializer[T RedisCluster](ser serializer.ISerializer) Option[RedisCluster] {
+	return func(backend *RedisCluster) {
+		backend.Serializer = ser
 	}
 }

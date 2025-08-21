@@ -125,120 +125,17 @@ func (cacheBackend *Redis) Get(ctx context.Context, key string) (*cache.Item, bo
 
 // Set stores the Item in the cacheBackend.
 func (cacheBackend *Redis) Set(ctx context.Context, item *cache.Item) error {
-	pipe := cacheBackend.rdb.TxPipeline()
-
-	// Check if the item is valid
-	err := item.Valid()
-	if err != nil {
-		// Return the item to the pool
-		return err
-	}
-
-	// Serialize the item
-	data, err := cacheBackend.Serializer.Marshal(item)
-	if err != nil {
-		// Return the item to the pool
-		return err
-	}
-
-	expiration := item.Expiration.String()
-
-	// Store the item in the cacheBackend
-	err = pipe.HSet(ctx, item.Key, map[string]any{
-		"data":       data,
-		"expiration": expiration,
-	}).Err()
-	if err != nil {
-		return ewrap.Wrap(err, "failed to set item in redis")
-	}
-	// Add the key to the set of keys associated with the cache prefix
-	pipe.SAdd(ctx, cacheBackend.keysSetName, item.Key)
-	// Set the expiration if it is not zero
-	if item.Expiration > 0 {
-		pipe.Expire(ctx, item.Key, item.Expiration)
-	}
-
-	_, err = pipe.Exec(ctx)
-	if err != nil {
-		return ewrap.Wrap(err, "failed to execute redis pipeline")
-	}
-
-	return nil
+	return redisSet(ctx, cacheBackend.rdb, cacheBackend.keysSetName, item, cacheBackend.Serializer)
 }
 
 // List returns a list of all the items in the cacheBackend that match the given filter options.
 func (cacheBackend *Redis) List(ctx context.Context, filters ...IFilter) ([]*cache.Item, error) {
-	// Get the set of keys held in the cacheBackend with the given `keysSetName`
-	keys, err := cacheBackend.rdb.SMembers(ctx, cacheBackend.keysSetName).Result()
-	if err != nil {
-		return nil, ewrap.Wrap(err, "failed to get keys from redis")
-	}
-
-	// Execute the Redis commands in a pipeline transaction to improve performance and reduce the number of round trips
-	cmds, err := cacheBackend.rdb.Pipelined(ctx, func(pipe redis.Pipeliner) error {
-		// Get the items from the cacheBackend
-		for _, key := range keys {
-			pipe.HGetAll(ctx, key)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, ewrap.Wrap(err, "failed to execute redis pipeline while listing")
-	}
-
-	// Create a slice to hold the items
-	items := make([]*cache.Item, 0, len(keys))
-
-	// Deserialize the items and add them to the slice of items to return
-	for _, cmd := range cmds {
-		command, ok := cmd.(*redis.MapStringStringCmd)
-		if !ok {
-			continue
-		}
-
-		data, err := command.Result() // Change the type assertion to match HGetAll
-		if err != nil {
-			return nil, ewrap.Wrap(err, "failed to get item data from redis")
-		}
-
-		item := cacheBackend.itemPoolManager.Get()
-		// Return the item to the pool
-		defer cacheBackend.itemPoolManager.Put(item)
-
-		err = cacheBackend.Serializer.Unmarshal([]byte(data["data"]), item)
-		if err == nil {
-			items = append(items, item)
-		}
-	}
-
-	// Apply the filters
-	if len(filters) > 0 {
-		for _, filter := range filters {
-			items, err = filter.ApplyFilter(constants.RedisBackend, items)
-		}
-	}
-
-	return items, err
+	return redisList(ctx, cacheBackend.rdb, cacheBackend.keysSetName, cacheBackend.Serializer, cacheBackend.itemPoolManager, filters...)
 }
 
 // Remove removes an item from the cache with the given key.
 func (cacheBackend *Redis) Remove(ctx context.Context, keys ...string) error {
-	pipe := cacheBackend.rdb.TxPipeline()
-
-	_, err := pipe.SRem(ctx, cacheBackend.keysSetName, keys).Result()
-	if err != nil {
-		return ewrap.Wrap(err, "removing keys from set")
-	}
-
-	_, err = pipe.Del(ctx, keys...).Result()
-	if err != nil {
-		return ewrap.Wrap(err, "removing keys")
-	}
-
-	_, err = pipe.Exec(ctx)
-
-	return ewrap.Wrap(err, "executing pipeline")
+	return redisRemove(ctx, cacheBackend.rdb, cacheBackend.keysSetName, keys...)
 }
 
 // Clear removes all items from the cache.
