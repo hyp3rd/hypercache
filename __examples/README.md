@@ -21,3 +21,5 @@ All the code in this directory is for demonstration purposes only.
 8. [`Middleware`](./middleware/middleware.go) - An example of implementing a custom middleware and register it with the `HyperCacheService`.
 
 9. [`Size`](./size/size.go) - An example of using the HyperCache package to store a list of items and limit the cache based on size.
+
+10. [`Observability (OpenTelemetry)`](./observability/otel.go) - Demonstrates wrapping the service with tracing and metrics middleware using OpenTelemetry.
