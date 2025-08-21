@@ -46,3 +46,39 @@ func TestCAWOLFU_EvictMethodOrder(t *testing.T) {
 		t.Fatalf("expected to evict 'b' second, got %q ok=%v", key, ok)
 	}
 }
+
+func TestCAWOLFU_ZeroCapacity_NoOp(t *testing.T) {
+	c, err := NewCAWOLFU(0)
+	if err != nil {
+		t.Fatalf("NewCAWOLFU error: %v", err)
+	}
+
+	c.Set("a", 1)
+	if _, ok := c.Get("a"); ok {
+		t.Fatalf("expected Get to miss on zero-capacity cache")
+	}
+
+	if key, ok := c.Evict(); ok || key != "" {
+		t.Fatalf("expected no eviction on zero-capacity, got %q ok=%v", key, ok)
+	}
+}
+
+func TestCAWOLFU_Delete_RemovesItem(t *testing.T) {
+	c, err := NewCAWOLFU(2)
+	if err != nil {
+		t.Fatalf("NewCAWOLFU error: %v", err)
+	}
+
+	c.Set("a", 1)
+	c.Set("b", 2)
+	c.Delete("a")
+
+	if _, ok := c.Get("a"); ok {
+		t.Fatalf("expected 'a' to be deleted")
+	}
+
+	key, ok := c.Evict()
+	if !ok || key != "b" {
+		t.Fatalf("expected to evict 'b' as remaining item, got %q ok=%v", key, ok)
+	}
+}

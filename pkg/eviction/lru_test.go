@@ -48,3 +48,40 @@ func TestLRU_EvictMethodOrder(t *testing.T) {
 		t.Fatalf("expected to evict 'b' second, got %q ok=%v", key, ok)
 	}
 }
+
+func TestLRU_ZeroCapacity_NoOp(t *testing.T) {
+	lru, err := NewLRUAlgorithm(0)
+	if err != nil {
+		t.Fatalf("NewLRUAlgorithm error: %v", err)
+	}
+
+	lru.Set("a", 1)
+	if _, ok := lru.Get("a"); ok {
+		t.Fatalf("expected Get to miss on zero-capacity cache")
+	}
+
+	if key, ok := lru.Evict(); ok || key != "" {
+		t.Fatalf("expected no eviction on zero-capacity, got %q ok=%v", key, ok)
+	}
+}
+
+func TestLRU_Delete_RemovesItem(t *testing.T) {
+	lru, err := NewLRUAlgorithm(2)
+	if err != nil {
+		t.Fatalf("NewLRUAlgorithm error: %v", err)
+	}
+
+	lru.Set("a", 1)
+	lru.Set("b", 2)
+	lru.Delete("a")
+
+	if _, ok := lru.Get("a"); ok {
+		t.Fatalf("expected 'a' to be deleted")
+	}
+
+	// Evict should not return deleted key
+	key, ok := lru.Evict()
+	if !ok || key != "b" {
+		t.Fatalf("expected to evict 'b' as remaining item, got %q ok=%v", key, ok)
+	}
+}

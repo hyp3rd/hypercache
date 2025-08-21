@@ -59,3 +59,40 @@ func TestLFU_EvictsOldestOnTie_AccessOrder(t *testing.T) {
 		t.Fatalf("expected 'b' to be evicted first on tie after accesses, got %q", key)
 	}
 }
+
+func TestLFU_ZeroCapacity_NoOp(t *testing.T) {
+	lfu, err := NewLFUAlgorithm(0)
+	if err != nil {
+		t.Fatalf("NewLFUAlgorithm error: %v", err)
+	}
+
+	lfu.Set("a", 1)
+	if _, ok := lfu.Get("a"); ok {
+		t.Fatalf("expected Get to miss on zero-capacity cache")
+	}
+
+	if key, ok := lfu.Evict(); ok || key != "" {
+		t.Fatalf("expected no eviction on zero-capacity, got %q ok=%v", key, ok)
+	}
+}
+
+func TestLFU_Delete_RemovesItem(t *testing.T) {
+	lfu, err := NewLFUAlgorithm(2)
+	if err != nil {
+		t.Fatalf("NewLFUAlgorithm error: %v", err)
+	}
+
+	lfu.Set("a", 1)
+	lfu.Set("b", 2)
+	lfu.Delete("a")
+
+	if _, ok := lfu.Get("a"); ok {
+		t.Fatalf("expected 'a' to be deleted")
+	}
+
+	// Evict should not return deleted key
+	key, ok := lfu.Evict()
+	if !ok || key != "b" {
+		t.Fatalf("expected to evict 'b' as remaining item, got %q ok=%v", key, ok)
+	}
+}
