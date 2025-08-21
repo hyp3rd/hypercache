@@ -4,33 +4,41 @@
 
 ## Synopsis
 
-HyperCache is a **thread-safe** **high-performance** cache implementation in `Go` that supports multiple backends with an optional size limit, expiration, and eviction of items with custom algorithms alongside the defaults. It can be used as a standalone cache, distributed environents, or as a cache middleware for a service. It can implement a [service interface](./service.go) to intercept and decorate the cache methods with middleware (default or custom).
-It is optimized for performance and flexibility, allowing to specify of the expiration and eviction intervals and providing and registering new eviction algorithms, stats collectors, and middleware(s).
-It ships with a default [historigram stats collector](./pkg/stats/stats.go) and several eviction algorithms. However, you can develop and register your own if it implements the [Eviction Algorithm interface](./pkg/eviction/eviction.go).:
+HyperCache is a **thread-safe** **high-performance** cache implementation in `Go` that supports multiple backends with optional size limits, item expiration, and pluggable eviction algorithms. It can be used as a standalone cache (single process or distributed via Redis / Redis Cluster) or wrapped by the [service interface](./service.go) to decorate operations with middleware (logging, metrics, tracing, etc.).
 
-- [Recently Used (LRU) eviction algorithm](./pkg/eviction/lru.go)
-- [The Least Frequently Used (LFU) algorithm](./pkg/eviction/lfu.go)
-- [Cache-Aware Write-Optimized LFU (CAWOLFU)](./pkg/eviction/cawolfu.go)
-- [The Adaptive Replacement Cache (ARC) algorithm](./pkg/eviction/arc.go) — Experimental (not enabled by default)
-- [The clock eviction algorithm](./pkg/eviction/clock.go)
+It is optimized for performance and flexibility:
+
+- Tunable expiration and eviction intervals (or fully proactive eviction when the eviction interval is set to `0`).
+- Debounced & coalesced expiration trigger channel to avoid thrashing.
+- Non-blocking manual `TriggerEviction()` signal.
+- Serializer‑aware memory accounting (item size reflects the backend serialization format when available).
+- Multiple eviction algorithms with the ability to register custom ones.
+- Multiple stats collectors (default histogram) and middleware hooks.
+
+It ships with a default [histogram stats collector](./stats/stats.go) and several eviction algorithms. You can register new ones by implementing the [Eviction Algorithm interface](./eviction/eviction.go):
+
+- [Recently Used (LRU) eviction algorithm](./eviction/lru.go)
+- [The Least Frequently Used (LFU) algorithm](./eviction/lfu.go)
+- [Cache-Aware Write-Optimized LFU (CAWOLFU)](./eviction/cawolfu.go)
+- [The Adaptive Replacement Cache (ARC) algorithm](./eviction/arc.go) — Experimental (not enabled by default)
+- [The clock eviction algorithm](./eviction/clock.go)
 
 ### Features
 
-- Thread-safe
-- High-performance
-- Supports multiple, custom backends. Default backends are:
+- Thread-safe & lock‑optimized (sharded map + worker pool)
+- High-performance (low allocations on hot paths, pooled items, serializer‑aware sizing)
+- Multiple backends (extensible):
     1. [In-memory](./pkg/backend/inmemory.go)
     2. [Redis](./pkg/backend/redis.go)
     3. [Redis Cluster](./pkg/backend/redis_cluster.go)
-- Store items in the cache with a key and expiration duration
-- Retrieve items from the cache by their key
-- Delete items from the cache by their key
-- Clear the cache of all items
-- Evict items in the background based on the cache capacity and items access leveraging several custom eviction algorithms
-- Expire items in the background based on their duration
-- [Eviction Algorithm interface](./pkg/eviction/eviction.go) to implement custom eviction algorithms.
-- Stats collection with a default [stats collector](./pkg/stats/stats.go) or a custom one that implements the StatsCollector interface.
-- [Service interface implementation](./service.go) to allow intercepting cache methods and decorate them with custom or default middleware(s).
+- Item expiration & proactive expiration triggering (debounced/coalesced)
+- Background or proactive (interval = 0) eviction using pluggable algorithms
+- Manual, non-blocking eviction triggering (`TriggerEviction()`)
+- Maximum cache size (bytes) & capacity (item count) controls
+- Serializer‑aware size accounting for consistent memory tracking across backends
+- Stats collection (histogram by default) + pluggable collectors
+- Middleware-friendly service wrapper (logging, metrics, tracing, custom)
+- Zero-cost if an interval is disabled (tickers are only created when > 0)
 
 ## Installation
 
@@ -40,9 +48,9 @@ Install HyperCache:
 go get -u github.com/hyp3rd/hypercache
 ```
 
-### performance
+### Performance
 
-Running the benchmarks on a 2019 MacBook Pro with a 2.4 GHz 8-Core Intel Core i9 processor and 32 GB 2400 MHz DDR4 memory, the results are as follows on average, using a pretty busy machine:
+Sample benchmark output (numbers will vary by hardware / Go version):
 
 ```bash
 goos: darwin
@@ -66,7 +74,7 @@ To run the examples, use the following command:
 make run-example group=eviction  # or any other example
 ```
 
-For a complete list of examples, refer to the [examples](./__examples/README.md) directory.
+For a complete list of examples, refer to the [examples](./examples/README.md) directory.
 
 ### Observability (OpenTelemetry)
 
@@ -75,7 +83,7 @@ HyperCache provides optional OpenTelemetry middleware for tracing and metrics.
 - Tracing: wrap the service with `middleware.NewOTelTracingMiddleware` using a `trace.Tracer`.
 - Metrics: wrap with `middleware.NewOTelMetricsMiddleware` using a `metric.Meter`.
 
-Example wiring (see `__examples/observability/otel.go`):
+Example wiring:
 
 ```go
 svc := hypercache.ApplyMiddleware(svc,
@@ -84,7 +92,7 @@ svc := hypercache.ApplyMiddleware(svc,
 )
 ```
 
-Use your preferred OpenTelemetry SDK setup for exporters and processors in production; the example uses no-op providers for simplicity.
+Use your preferred OpenTelemetry SDK setup for exporters and processors in production; the snippet uses no-op providers for simplicity.
 
 ### Eviction algorithms
 
@@ -100,14 +108,7 @@ Note: ARC is experimental and isn’t included in the default registry. If you c
 
 ## API
 
-The `NewInMemoryWithDefaults` function creates a new `HyperCache` instance with the defaults:
-
-1. The eviction interval is set to 10 minutes.
-2. The eviction algorithm is set to LRU.
-3. The expiration interval is set to 30 minutes.
-4. The capacity of the in-memory backend is set to 1000 items.
-
-To create a new cache with a given capacity, use the New function as described below:
+`NewInMemoryWithDefaults(capacity)` is the quickest way to start:
 
 ```golang
 cache, err := hypercache.NewInMemoryWithDefaults(100)
@@ -116,29 +117,46 @@ if err != nil {
 }
 ```
 
-For fine-grained control over the cache configuration, use the `New` function, for instance:
+For fine‑grained control use `NewConfig` + `New`:
 
 ```golang
-config := hypercache.NewConfig[backend.InMemory]()
-config.HyperCacheOptions = []hypercache.HyperCacheOption[backend.InMemory]{
-    hypercache.WithEvictionInterval[backend.InMemory](time.Minute * 10),
+config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
+    hypercache.WithEvictionInterval[backend.InMemory](time.Minute * 5),
     hypercache.WithEvictionAlgorithm[backend.InMemory]("cawolfu"),
+    hypercache.WithExpirationTriggerDebounce[backend.InMemory](250 * time.Millisecond),
+    hypercache.WithMaxEvictionCount[backend.InMemory](100),
+    hypercache.WithMaxCacheSize[backend.InMemory](64 * 1024 * 1024), // 64 MiB logical cap
 }
+config.InMemoryOptions = []backend.Option[backend.InMemory]{ backend.WithCapacity[backend.InMemory](10) }
 
-config.InMemoryOptions = []backend.Option[backend.InMemory]{
-    backend.WithCapacity(10),
-}
-
-// Create a new HyperCache with a capacity of 10
-cache, err := hypercache.New(config)
+cache, err := hypercache.New(hypercache.GetDefaultManager(), config)
 if err != nil {
     fmt.Fprintln(os.Stderr, err)
     return
 }
 ```
 
-**Refer to the [config.go](./config.go) file for the full configuration options.**
-**For a comprehensive API overview, see the [documentation](https://pkg.go.dev/github.com/hyp3rd/hypercache).**
+### Advanced options quick reference
+
+| Option | Purpose |
+|--------|---------|
+| `WithEvictionInterval` | Periodic eviction loop; set to `0` for proactive per-write eviction. |
+| `WithExpirationInterval` | Periodic scan for expired items. |
+| `WithExpirationTriggerBuffer` | Buffer size for coalesced expiration trigger channel. |
+| `WithExpirationTriggerDebounce` | Drop rapid-fire triggers within a window. |
+| `WithEvictionAlgorithm` | Select eviction algorithm (lru, lfu, clock, cawolfu, arc*). |
+| `WithMaxEvictionCount` | Cap number of items evicted per cycle. |
+| `WithMaxCacheSize` | Max cumulative serialized item size (bytes). |
+| `WithStatsCollector` | Choose stats collector implementation. |
+
+*ARC is experimental (not registered by default).
+
+### Redis / Redis Cluster notes
+
+When using Redis or Redis Cluster, item size accounting uses the configured serializer (e.g. msgpack) to align in-memory and remote representations. Provide the serializer via backend options (`WithSerializer` / `WithClusterSerializer`).
+
+**Refer to [config.go](./config.go) for complete option definitions and the GoDoc on pkg.go.dev for an exhaustive API reference.**
 
 ## Usage
 
