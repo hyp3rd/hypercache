@@ -27,4 +27,8 @@ const (
 	// Constant identifier for the Redis storage backend implementation
 	// that persists cache data in a Redis database server.
 	RedisBackend = "redis"
+	// RedisClusterBackend is the name of the Redis Cluster backend.
+	// Constant identifier for the Redis Cluster storage backend implementation
+	// that persists cache data across a Redis Cluster.
+	RedisClusterBackend = "redis-cluster"
 )

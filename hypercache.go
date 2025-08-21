@@ -158,51 +158,80 @@ func resolveBackend[T backend.IBackendConstrain](bm *BackendManager, config *Con
 
 	switch config.BackendType {
 	case constants.InMemoryBackend:
-		inMemoryConstructor, ok := constructor.(InMemoryBackendConstructor)
-		if !ok {
-			return nil, sentinel.ErrInvalidBackendType
-		}
-
-		cfg, ok := any(config).(*Config[backend.InMemory])
-		if !ok {
-			return nil, sentinel.ErrInvalidBackendType
-		}
-
-		bi, err := inMemoryConstructor.Create(cfg)
-		if err != nil {
-			return nil, err
-		}
-
-		if b, ok := any(bi).(backend.IBackend[T]); ok {
-			return b, nil
-		}
-
-		return nil, sentinel.ErrInvalidBackendType
-
+		return resolveInMemoryBackend[T](constructor, config)
 	case constants.RedisBackend:
-		redisConstructor, ok := constructor.(RedisBackendConstructor)
-		if !ok {
-			return nil, sentinel.ErrInvalidBackendType
-		}
+		return resolveRedisBackend[T](constructor, config)
+	case constants.RedisClusterBackend:
+		return resolveRedisClusterBackend[T](constructor, config)
+	default:
+		return nil, ewrap.Newf("unknown backend type: %s", config.BackendType)
+	}
+}
 
-		cfg, ok := any(config).(*Config[backend.Redis])
-		if !ok {
-			return nil, sentinel.ErrInvalidBackendType
-		}
+// castBackend tries to cast a backend instance of any concrete type to backend.IBackend[T].
+func castBackend[T backend.IBackendConstrain](bi any) (backend.IBackend[T], error) {
+	if b, ok := bi.(backend.IBackend[T]); ok {
+		return b, nil
+	}
 
-		bi, err := redisConstructor.Create(cfg)
-		if err != nil {
-			return nil, err
-		}
+	return nil, sentinel.ErrInvalidBackendType
+}
 
-		if b, ok := any(bi).(backend.IBackend[T]); ok {
-			return b, nil
-		}
-
+func resolveInMemoryBackend[T backend.IBackendConstrain](constructor any, cfgAny any) (backend.IBackend[T], error) {
+	inMemCtor, ok := constructor.(InMemoryBackendConstructor)
+	if !ok {
 		return nil, sentinel.ErrInvalidBackendType
 	}
 
-	return nil, ewrap.Newf("unknown backend type: %s", config.BackendType)
+	cfg, ok := cfgAny.(*Config[backend.InMemory])
+	if !ok {
+		return nil, sentinel.ErrInvalidBackendType
+	}
+
+	bi, err := inMemCtor.Create(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return castBackend[T](bi)
+}
+
+func resolveRedisBackend[T backend.IBackendConstrain](constructor any, cfgAny any) (backend.IBackend[T], error) {
+	redisCtor, ok := constructor.(RedisBackendConstructor)
+	if !ok {
+		return nil, sentinel.ErrInvalidBackendType
+	}
+
+	cfg, ok := cfgAny.(*Config[backend.Redis])
+	if !ok {
+		return nil, sentinel.ErrInvalidBackendType
+	}
+
+	bi, err := redisCtor.Create(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return castBackend[T](bi)
+}
+
+func resolveRedisClusterBackend[T backend.IBackendConstrain](constructor any, cfgAny any) (backend.IBackend[T], error) {
+	clusterCtor, ok := constructor.(RedisClusterBackendConstructor)
+	if !ok {
+		return nil, sentinel.ErrInvalidBackendType
+	}
+
+	cfg, ok := cfgAny.(*Config[backend.RedisCluster])
+	if !ok {
+		return nil, sentinel.ErrInvalidBackendType
+	}
+
+	bi, err := clusterCtor.Create(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return castBackend[T](bi)
 }
 
 // newHyperCacheBase builds the base HyperCache instance with default timings and internals.

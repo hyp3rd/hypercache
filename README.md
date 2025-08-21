@@ -21,6 +21,7 @@ It ships with a default [historigram stats collector](./pkg/stats/stats.go) and 
 - Supports multiple, custom backends. Default backends are:
     1. [In-memory](./pkg/backend/inmemory.go)
     2. [Redis](./pkg/backend/redis.go)
+    3. [Redis Cluster](./pkg/backend/redis_cluster.go)
 - Store items in the cache with a key and expiration duration
 - Retrieve items from the cache by their key
 - Delete items from the cache by their key
