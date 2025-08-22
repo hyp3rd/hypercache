@@ -41,6 +41,33 @@ type DistMemory struct {
 	hbSuspectAfter time.Duration
 	hbDeadAfter    time.Duration
 	stopCh         chan struct{}
+
+	// consistency / versioning (initial)
+	readConsistency  ConsistencyLevel
+	writeConsistency ConsistencyLevel
+	// versionClock     uint64 // lamport-like counter for primary writes
+}
+
+// ConsistencyLevel defines read/write consistency semantics.
+type ConsistencyLevel int
+
+const (
+	// ConsistencyOne returns after a single owner success (fast, may be stale).
+	ConsistencyOne ConsistencyLevel = iota
+	// ConsistencyQuorum waits for majority (floor(n/2)+1).
+	ConsistencyQuorum
+	// ConsistencyAll waits for all owners.
+	ConsistencyAll
+)
+
+// WithDistReadConsistency sets read consistency (default ONE).
+func WithDistReadConsistency(l ConsistencyLevel) DistMemoryOption {
+	return func(dm *DistMemory) { dm.readConsistency = l }
+}
+
+// WithDistWriteConsistency sets write consistency (default QUORUM).
+func WithDistWriteConsistency(l ConsistencyLevel) DistMemoryOption {
+	return func(dm *DistMemory) { dm.writeConsistency = l }
 }
 
 // Membership returns current membership reference (read-only usage).
@@ -139,7 +166,7 @@ func WithDistSeeds(addresses []string) DistMemoryOption {
 
 // NewDistMemory creates a new DistMemory backend.
 func NewDistMemory(opts ...DistMemoryOption) (IBackend[DistMemory], error) {
-	dm := &DistMemory{shardCount: defaultDistShardCount, replication: 1}
+	dm := &DistMemory{shardCount: defaultDistShardCount, replication: 1, readConsistency: ConsistencyOne, writeConsistency: ConsistencyQuorum}
 	for _, opt := range opts {
 		opt(dm)
 	}
@@ -199,41 +226,22 @@ func (dm *DistMemory) Count(_ context.Context) int {
 
 // Get fetches item.
 func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) { //nolint:ireturn
-	// Fast local path
-	if it, ok := dm.shardFor(key).items.Get(key); ok {
-		return it, true
+	if dm.readConsistency == ConsistencyOne { // fast local path
+		if it, ok := dm.shardFor(key).items.Get(key); ok {
+			return it, true
+		}
 	}
 
-	if dm.ring == nil || dm.transport == nil { // cannot forward
+	owners := dm.lookupOwners(key)
+	if len(owners) == 0 {
 		return nil, false
 	}
 
-	owners := dm.ring.Lookup(key)
-	if len(owners) == 0 { // no ring owners yet
-		return nil, false
+	if dm.readConsistency == ConsistencyOne {
+		return dm.getOne(ctx, key, owners)
 	}
 
-	primary := owners[0]
-	if primary == dm.localNode.ID && len(owners) > 1 { // local primary miss, pick first replica
-		primary = owners[1]
-	}
-
-	atomic.AddInt64(&dm.metrics.forwardGet, 1)
-	it, ok, err := dm.transport.ForwardGet(ctx, string(primary), key) // best-effort
-	_ = err                                                           // intentionally ignored (best-effort) //nolint:errcheck
-
-	if !ok {
-		return nil, false
-	}
-
-	// Read-repair: if we should own (primary or replica) but missed locally, store copy without replication.
-	if dm.isOwner(key) {
-		cloned := *it
-		dm.applySet(&cloned, false)
-		atomic.AddInt64(&dm.metrics.readRepair, 1)
-	}
-
-	return it, true
+	return dm.getWithConsistency(ctx, key, owners)
 }
 
 // Set stores item.
@@ -243,13 +251,13 @@ func (dm *DistMemory) Set(_ context.Context, item *cache.Item) error { //nolint:
 		return err
 	}
 
-	if !dm.isOwner(item.Key) { // forward to primary with replication
-		if dm.transport == nil {
-			return sentinel.ErrNotOwner
-		}
+	owners := dm.lookupOwners(item.Key)
+	if len(owners) == 0 {
+		return sentinel.ErrNotOwner
+	}
 
-		owners := dm.ring.Lookup(item.Key)
-		if len(owners) == 0 {
+	if owners[0] != dm.localNode.ID { // forward to primary
+		if dm.transport == nil {
 			return sentinel.ErrNotOwner
 		}
 
@@ -258,10 +266,20 @@ func (dm *DistMemory) Set(_ context.Context, item *cache.Item) error { //nolint:
 		return dm.transport.ForwardSet(string(owners[0]), item, true)
 	}
 
-	dm.applySet(item, true)
+	// primary path
+	dm.applySet(item, false)
+
+	acks := 1 + dm.replicateTo(item, owners[1:])
+
+	needed := dm.requiredAcks(len(owners), dm.writeConsistency)
+	if acks < needed {
+		return sentinel.ErrQuorumFailed
+	}
 
 	return nil
 }
+
+// --- Consistency helper methods. ---
 
 // List aggregates items (no ordering, then filters applied per interface contract not yet integrated; kept simple).
 func (dm *DistMemory) List(_ context.Context, _ ...IFilter) ([]*cache.Item, error) {
@@ -468,6 +486,125 @@ func (dm *DistMemory) Stop(_ context.Context) error { //nolint:ireturn
 	}
 
 	return nil
+}
+
+// lookupOwners returns ring owners slice for a key (nil if no ring).
+func (dm *DistMemory) lookupOwners(key string) []cluster.NodeID { //nolint:ireturn
+	if dm.ring == nil {
+		return nil
+	}
+
+	return dm.ring.Lookup(key)
+}
+
+// requiredAcks computes required acknowledgements for given consistency level.
+func (dm *DistMemory) requiredAcks(total int, lvl ConsistencyLevel) int { //nolint:ireturn
+	switch lvl {
+	case ConsistencyAll:
+		return total
+	case ConsistencyQuorum:
+		return (total / 2) + 1
+	case ConsistencyOne:
+		return 1
+	default:
+		return 1
+	}
+}
+
+// getOne fetches from a single owner path.
+func (dm *DistMemory) getOne(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+	primary := owners[0]
+	if primary == dm.localNode.ID && len(owners) > 1 {
+		primary = owners[1]
+	}
+
+	if primary == dm.localNode.ID { // local retry
+		if it, ok := dm.shardFor(key).items.Get(key); ok {
+			return it, true
+		}
+
+		return nil, false
+	}
+
+	atomic.AddInt64(&dm.metrics.forwardGet, 1)
+
+	it, ok, _ := dm.transport.ForwardGet(ctx, string(primary), key) //nolint:errcheck
+	if !ok {
+		return nil, false
+	}
+
+	if dm.isOwner(key) { // read-repair
+		if _, ok2 := dm.shardFor(key).items.Get(key); !ok2 {
+			cloned := *it
+			dm.applySet(&cloned, false)
+			atomic.AddInt64(&dm.metrics.readRepair, 1)
+		}
+	}
+
+	return it, true
+}
+
+// getWithConsistency performs quorum/all reads.
+func (dm *DistMemory) getWithConsistency(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+	needed := dm.requiredAcks(len(owners), dm.readConsistency)
+
+	acks := 0
+
+	var chosen *cache.Item
+
+	for _, oid := range owners {
+		if oid == dm.localNode.ID {
+			if it, ok := dm.shardFor(key).items.Get(key); ok {
+				if chosen == nil {
+					chosen = it
+				}
+
+				acks++
+			}
+
+			continue
+		}
+
+		it, ok, _ := dm.transport.ForwardGet(ctx, string(oid), key) //nolint:errcheck
+		if ok {
+			if chosen == nil {
+				chosen = it
+			}
+
+			acks++
+		}
+	}
+
+	if acks < needed || chosen == nil {
+		return nil, false
+	}
+
+	if dm.isOwner(key) { // read-repair if missing
+		if _, ok := dm.shardFor(key).items.Get(key); !ok {
+			cloned := *chosen
+			dm.applySet(&cloned, false)
+			atomic.AddInt64(&dm.metrics.readRepair, 1)
+		}
+	}
+
+	return chosen, true
+}
+
+// replicateTo sends writes to replicas (best-effort) returning ack count.
+func (dm *DistMemory) replicateTo(item *cache.Item, replicas []cluster.NodeID) int { //nolint:ireturn
+	acks := 0
+
+	for _, oid := range replicas {
+		if oid == dm.localNode.ID {
+			continue
+		}
+
+		if dm.transport != nil && dm.transport.ForwardSet(string(oid), item, false) == nil {
+			acks++
+		}
+	}
+
+	return acks
 }
 
 // initStandaloneMembership initializes membership & ring for standalone mode with optional seeds.
