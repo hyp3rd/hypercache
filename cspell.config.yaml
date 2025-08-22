@@ -3,11 +3,13 @@ ignorePaths: []
 dictionaryDefinitions: []
 dictionaries: []
 words:
+  - acks
   - backpressure
   - benchmem
   - benchtime
   - cacheerrors
   - cachev
+  - cand
   - CAWOLFU
   - Cbor
   - cespare
@@ -55,6 +57,7 @@ words:
   - Newf
   - nolint
   - NOVENDOR
+  - paralleltest
   - Pipeliner
   - Prealloc
   - recvcheck
@@ -66,6 +69,7 @@ words:
   - ugorji
   - unmarshals
   - varnamelen
+  - vnode
   - vnodes
   - wrapcheck
   - Wrapf

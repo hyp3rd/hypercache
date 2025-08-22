@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"hash/fnv"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,7 @@ type DistMemory struct {
 	// consistency / versioning (initial)
 	readConsistency  ConsistencyLevel
 	writeConsistency ConsistencyLevel
+	versionCounter   uint64 // global monotonic for this node (lamport-like)
 	// versionClock     uint64 // lamport-like counter for primary writes
 }
 
@@ -165,7 +167,7 @@ func WithDistSeeds(addresses []string) DistMemoryOption {
 }
 
 // NewDistMemory creates a new DistMemory backend.
-func NewDistMemory(opts ...DistMemoryOption) (IBackend[DistMemory], error) {
+func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[DistMemory], error) {
 	dm := &DistMemory{shardCount: defaultDistShardCount, replication: 1, readConsistency: ConsistencyOne, writeConsistency: ConsistencyQuorum}
 	for _, opt := range opts {
 		opt(dm)
@@ -192,7 +194,7 @@ func NewDistMemory(opts ...DistMemoryOption) (IBackend[DistMemory], error) {
 
 	if dm.hbInterval > 0 && dm.transport != nil {
 		dm.stopCh = make(chan struct{})
-		go dm.heartbeatLoop()
+		go dm.heartbeatLoop(ctx)
 	}
 
 	return dm, nil
@@ -256,17 +258,20 @@ func (dm *DistMemory) Set(_ context.Context, item *cache.Item) error { //nolint:
 		return sentinel.ErrNotOwner
 	}
 
-	if owners[0] != dm.localNode.ID { // forward to primary
-		if dm.transport == nil {
-			return sentinel.ErrNotOwner
+	if owners[0] != dm.localNode.ID { // attempt forward; may promote
+		proceedAsPrimary, ferr := dm.handleForwardPrimary(owners, item)
+		if ferr != nil {
+			return ferr
 		}
 
-		atomic.AddInt64(&dm.metrics.forwardSet, 1)
-
-		return dm.transport.ForwardSet(string(owners[0]), item, true)
+		if !proceedAsPrimary { // forwarded successfully; nothing else to do
+			return nil
+		}
 	}
 
-	// primary path
+	// primary path: assign version
+	item.Version = atomic.AddUint64(&dm.versionCounter, 1)
+	item.Origin = string(dm.localNode.ID)
 	dm.applySet(item, false)
 
 	acks := 1 + dm.replicateTo(item, owners[1:])
@@ -348,6 +353,15 @@ func (dm *DistMemory) LocalContains(key string) bool {
 
 // DebugDropLocal removes a key only from the local shard (for tests / read-repair validation).
 func (dm *DistMemory) DebugDropLocal(key string) { dm.shardFor(key).items.Remove(key) }
+
+// DebugInject stores an item directly into the local shard (no replication / ownership checks) for tests.
+func (dm *DistMemory) DebugInject(it *cache.Item) { //nolint:ireturn
+	if it == nil {
+		return
+	}
+
+	dm.shardFor(it.Key).items.Set(it.Key, it)
+}
 
 // LocalNodeID returns this instance's node ID (testing helper).
 func (dm *DistMemory) LocalNodeID() cluster.NodeID { return dm.localNode.ID }
@@ -447,6 +461,9 @@ type distMetrics struct {
 	heartbeatSuccess    int64
 	heartbeatFailure    int64
 	nodesRemoved        int64
+	versionConflicts    int64 // times a newer version (or tie-broken origin) replaced previous candidate
+	versionTieBreaks    int64 // subset of conflicts decided by origin tie-break
+	readPrimaryPromote  int64 // times read path skipped unreachable primary and promoted next owner
 }
 
 // DistMetrics snapshot.
@@ -461,6 +478,9 @@ type DistMetrics struct {
 	HeartbeatSuccess    int64
 	HeartbeatFailure    int64
 	NodesRemoved        int64
+	VersionConflicts    int64
+	VersionTieBreaks    int64
+	ReadPrimaryPromote  int64
 }
 
 // Metrics returns a snapshot of distributed metrics.
@@ -476,6 +496,9 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		HeartbeatSuccess:    atomic.LoadInt64(&dm.metrics.heartbeatSuccess),
 		HeartbeatFailure:    atomic.LoadInt64(&dm.metrics.heartbeatFailure),
 		NodesRemoved:        atomic.LoadInt64(&dm.metrics.nodesRemoved),
+		VersionConflicts:    atomic.LoadInt64(&dm.metrics.versionConflicts),
+		VersionTieBreaks:    atomic.LoadInt64(&dm.metrics.versionTieBreaks),
+		ReadPrimaryPromote:  atomic.LoadInt64(&dm.metrics.readPrimaryPromote),
 	}
 }
 
@@ -513,35 +536,55 @@ func (dm *DistMemory) requiredAcks(total int, lvl ConsistencyLevel) int { //noli
 
 // getOne fetches from a single owner path.
 func (dm *DistMemory) getOne(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
-	primary := owners[0]
-	if primary == dm.localNode.ID && len(owners) > 1 {
-		primary = owners[1]
-	}
+	// attempt each owner in order until success
+	for idx, oid := range owners {
+		if oid == dm.localNode.ID { // local path
+			if it, ok := dm.shardFor(key).items.Get(key); ok {
+				if idx > 0 { // we skipped an earlier owner (promotion)
+					atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+				}
 
-	if primary == dm.localNode.ID { // local retry
-		if it, ok := dm.shardFor(key).items.Get(key); ok {
-			return it, true
+				return it, true
+			}
+
+			continue // try next replica if local miss
 		}
 
-		return nil, false
-	}
-
-	atomic.AddInt64(&dm.metrics.forwardGet, 1)
-
-	it, ok, _ := dm.transport.ForwardGet(ctx, string(primary), key) //nolint:errcheck
-	if !ok {
-		return nil, false
-	}
-
-	if dm.isOwner(key) { // read-repair
-		if _, ok2 := dm.shardFor(key).items.Get(key); !ok2 {
-			cloned := *it
-			dm.applySet(&cloned, false)
-			atomic.AddInt64(&dm.metrics.readRepair, 1)
+		if dm.transport == nil { // cannot reach remote
+			continue
 		}
+
+		atomic.AddInt64(&dm.metrics.forwardGet, 1)
+
+		it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
+		if errors.Is(err, sentinel.ErrBackendNotFound) { // promote next owner
+			if idx == 0 { // primary missing
+				atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+			}
+
+			continue
+		}
+
+		if !ok {
+			continue
+		}
+		// got item
+		if idx > 0 { // promotion occurred
+			atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+		}
+
+		if dm.isOwner(key) { // local repair if missing
+			if _, ok2 := dm.shardFor(key).items.Get(key); !ok2 {
+				cloned := *it
+				dm.applySet(&cloned, false)
+				atomic.AddInt64(&dm.metrics.readRepair, 1)
+			}
+		}
+
+		return it, true
 	}
 
-	return it, true
+	return nil, false
 }
 
 // getWithConsistency performs quorum/all reads.
@@ -552,25 +595,31 @@ func (dm *DistMemory) getWithConsistency(ctx context.Context, key string, owners
 
 	var chosen *cache.Item
 
-	for _, oid := range owners {
+	for idx, oid := range owners {
 		if oid == dm.localNode.ID {
 			if it, ok := dm.shardFor(key).items.Get(key); ok {
-				if chosen == nil {
-					chosen = it
-				}
-
+				chosen = dm.chooseNewer(chosen, it)
 				acks++
 			}
 
 			continue
 		}
 
-		it, ok, _ := dm.transport.ForwardGet(ctx, string(oid), key) //nolint:errcheck
-		if ok {
-			if chosen == nil {
-				chosen = it
+		it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
+		if errors.Is(err, sentinel.ErrBackendNotFound) { // unreachable owner -> promotion scenario
+			if idx == 0 { // primary missing
+				atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
 			}
 
+			continue
+		}
+
+		if ok {
+			if idx > 0 { // implies earlier owner(s) skipped
+				atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+			}
+
+			chosen = dm.chooseNewer(chosen, it)
 			acks++
 		}
 	}
@@ -579,13 +628,8 @@ func (dm *DistMemory) getWithConsistency(ctx context.Context, key string, owners
 		return nil, false
 	}
 
-	if dm.isOwner(key) { // read-repair if missing
-		if _, ok := dm.shardFor(key).items.Get(key); !ok {
-			cloned := *chosen
-			dm.applySet(&cloned, false)
-			atomic.AddInt64(&dm.metrics.readRepair, 1)
-		}
-	}
+	// version-based read repair across all owners (including local) if stale or missing
+	dm.repairReplicas(ctx, key, chosen, owners)
 
 	return chosen, true
 }
@@ -605,6 +649,114 @@ func (dm *DistMemory) replicateTo(item *cache.Item, replicas []cluster.NodeID) i
 	}
 
 	return acks
+}
+
+// chooseNewer picks the item with higher version; on version tie uses lexicographically smaller Origin as winner.
+func (dm *DistMemory) chooseNewer(itemA, itemB *cache.Item) *cache.Item { //nolint:ireturn
+	if itemA == nil {
+		return itemB
+	}
+
+	if itemB == nil {
+		return itemA
+	}
+
+	if itemB.Version > itemA.Version { // itemB newer
+		atomic.AddInt64(&dm.metrics.versionConflicts, 1)
+
+		return itemB
+	}
+
+	if itemA.Version > itemB.Version { // itemA newer
+		atomic.AddInt64(&dm.metrics.versionConflicts, 1)
+
+		return itemA
+	}
+
+	// versions equal: tie-break on origin
+	if itemB.Origin < itemA.Origin { // itemB wins by tie-break
+		atomic.AddInt64(&dm.metrics.versionConflicts, 1)
+		atomic.AddInt64(&dm.metrics.versionTieBreaks, 1)
+
+		return itemB
+	}
+
+	if itemA.Origin < itemB.Origin { // itemA wins by tie-break (still counts)
+		atomic.AddInt64(&dm.metrics.versionConflicts, 1)
+		atomic.AddInt64(&dm.metrics.versionTieBreaks, 1)
+	}
+
+	return itemA
+}
+
+// repairReplicas ensures each owner has at least the chosen version; best-effort.
+func (dm *DistMemory) repairReplicas(ctx context.Context, key string, chosen *cache.Item, owners []cluster.NodeID) { //nolint:ireturn
+	if chosen == nil {
+		return
+	}
+
+	for _, oid := range owners {
+		if oid == dm.localNode.ID {
+			dm.repairLocalReplica(key, chosen)
+
+			continue
+		}
+
+		dm.repairRemoteReplica(ctx, key, chosen, oid)
+	}
+}
+
+// repairLocalReplica updates the local item if stale.
+func (dm *DistMemory) repairLocalReplica(key string, chosen *cache.Item) { // separated to reduce cyclomatic complexity
+	localIt, ok := dm.shardFor(key).items.Get(key)
+	if !ok || localIt.Version < chosen.Version || (localIt.Version == chosen.Version && localIt.Origin > chosen.Origin) {
+		cloned := *chosen
+		dm.applySet(&cloned, false)
+		atomic.AddInt64(&dm.metrics.readRepair, 1)
+	}
+}
+
+// repairRemoteReplica updates a remote replica if stale (best-effort).
+func (dm *DistMemory) repairRemoteReplica(ctx context.Context, key string, chosen *cache.Item, oid cluster.NodeID) { // separated to reduce cyclomatic complexity //nolint:ireturn
+	if dm.transport == nil { // cannot repair remote
+		return
+	}
+
+	it, ok, _ := dm.transport.ForwardGet(ctx, string(oid), key)                                            //nolint:errcheck
+	if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) { // stale
+		_ = dm.transport.ForwardSet(string(oid), chosen, false) //nolint:errcheck
+		atomic.AddInt64(&dm.metrics.readRepair, 1)
+	}
+}
+
+// handleForwardPrimary tries to forward a Set to the primary; returns (proceedAsPrimary,false) if promotion required.
+func (dm *DistMemory) handleForwardPrimary(owners []cluster.NodeID, item *cache.Item) (bool, error) { //nolint:ireturn
+	if dm.transport == nil {
+		return false, sentinel.ErrNotOwner
+	}
+
+	atomic.AddInt64(&dm.metrics.forwardSet, 1)
+
+	errFwd := dm.transport.ForwardSet(string(owners[0]), item, true)
+	switch {
+	case errFwd == nil:
+		return false, nil // forwarded successfully
+	case errors.Is(errFwd, sentinel.ErrBackendNotFound) && len(owners) > 1:
+		// primary missing: promote if this node is a listed replica
+		for _, oid := range owners[1:] {
+			if oid == dm.localNode.ID { // we can promote
+				if !dm.isOwner(item.Key) { // still not recognized locally (ring maybe outdated)
+					return false, errFwd
+				}
+
+				return true, nil // proceed as primary path
+			}
+		}
+
+		return false, errFwd // not promotable
+	default:
+		return false, errFwd
+	}
 }
 
 // initStandaloneMembership initializes membership & ring for standalone mode with optional seeds.
@@ -646,14 +798,14 @@ func (dm *DistMemory) initStandaloneMembership() {
 }
 
 // heartbeatLoop probes peers and updates membership (best-effort experimental).
-func (dm *DistMemory) heartbeatLoop() { // reduced cognitive complexity via helpers
+func (dm *DistMemory) heartbeatLoop(ctx context.Context) { // reduced cognitive complexity via helpers
 	ticker := time.NewTicker(dm.hbInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			dm.runHeartbeatTick()
+			dm.runHeartbeatTick(ctx)
 		case <-dm.stopCh:
 			return
 		}
@@ -738,7 +890,7 @@ func (dm *DistMemory) applyRemove(key string, replicate bool) {
 }
 
 // runHeartbeatTick runs one heartbeat iteration (best-effort).
-func (dm *DistMemory) runHeartbeatTick() { //nolint:ireturn
+func (dm *DistMemory) runHeartbeatTick(ctx context.Context) { //nolint:ireturn
 	if dm.transport == nil || dm.membership == nil {
 		return
 	}
@@ -751,12 +903,12 @@ func (dm *DistMemory) runHeartbeatTick() { //nolint:ireturn
 			continue
 		}
 
-		dm.evaluateLiveness(now, node)
+		dm.evaluateLiveness(ctx, now, node)
 	}
 }
 
 // evaluateLiveness applies timeout-based transitions then performs a probe.
-func (dm *DistMemory) evaluateLiveness(now time.Time, node *cluster.Node) { //nolint:ireturn
+func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node *cluster.Node) { //nolint:ireturn
 	elapsed := now.Sub(node.LastSeen)
 
 	if dm.hbDeadAfter > 0 && elapsed > dm.hbDeadAfter { // prune dead
@@ -771,8 +923,8 @@ func (dm *DistMemory) evaluateLiveness(now time.Time, node *cluster.Node) { //no
 		dm.membership.Mark(node.ID, cluster.NodeSuspect)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), dm.hbInterval/2)
-	err := dm.transport.Health(ctx, string(node.ID))
+	ctxHealth, cancel := context.WithTimeout(ctx, dm.hbInterval/2)
+	err := dm.transport.Health(ctxHealth, string(node.ID))
 
 	cancel()
 

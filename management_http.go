@@ -76,7 +76,7 @@ type managementCache interface {
 	Capacity() int
 	Allocation() int64
 	MaxCacheSize() int64
-	TriggerEviction()
+	TriggerEviction(ctx context.Context)
 	TriggerExpiration()
 	EvictionInterval() time.Duration
 	ExpirationInterval() time.Duration
@@ -257,7 +257,7 @@ func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCac
 	}))
 	// trigger eviction
 	s.app.Post("/evict", useAuth(func(fiberCtx fiber.Ctx) error {
-		hc.TriggerEviction()
+		hc.TriggerEviction(ctx)
 
 		return fiberCtx.SendStatus(fiber.StatusAccepted)
 	}))

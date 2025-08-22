@@ -1,6 +1,8 @@
 package hypercache
 
 import (
+	"context"
+
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
@@ -8,14 +10,14 @@ import (
 // IBackendConstructor is an interface for backend constructors with type safety.
 // It returns a typed backend.IBackend[T] instead of any.
 type IBackendConstructor[T backend.IBackendConstrain] interface {
-	Create(cfg *Config[T]) (backend.IBackend[T], error)
+	Create(ctx context.Context, cfg *Config[T]) (backend.IBackend[T], error)
 }
 
 // InMemoryBackendConstructor constructs InMemory backends.
 type InMemoryBackendConstructor struct{}
 
 // Create creates a new InMemory backend.
-func (InMemoryBackendConstructor) Create(cfg *Config[backend.InMemory]) (backend.IBackend[backend.InMemory], error) {
+func (InMemoryBackendConstructor) Create(_ context.Context, cfg *Config[backend.InMemory]) (backend.IBackend[backend.InMemory], error) {
 	return backend.NewInMemory(cfg.InMemoryOptions...)
 }
 
@@ -23,7 +25,7 @@ func (InMemoryBackendConstructor) Create(cfg *Config[backend.InMemory]) (backend
 type RedisBackendConstructor struct{}
 
 // Create creates a new Redis backend.
-func (RedisBackendConstructor) Create(cfg *Config[backend.Redis]) (backend.IBackend[backend.Redis], error) {
+func (RedisBackendConstructor) Create(_ context.Context, cfg *Config[backend.Redis]) (backend.IBackend[backend.Redis], error) {
 	return backend.NewRedis(cfg.RedisOptions...)
 }
 
@@ -31,7 +33,7 @@ func (RedisBackendConstructor) Create(cfg *Config[backend.Redis]) (backend.IBack
 type RedisClusterBackendConstructor struct{}
 
 // Create creates a new Redis Cluster backend.
-func (RedisClusterBackendConstructor) Create(cfg *Config[backend.RedisCluster]) (backend.IBackend[backend.RedisCluster], error) {
+func (RedisClusterBackendConstructor) Create(_ context.Context, cfg *Config[backend.RedisCluster]) (backend.IBackend[backend.RedisCluster], error) {
 	return backend.NewRedisCluster(cfg.RedisClusterOptions...)
 }
 
@@ -39,8 +41,8 @@ func (RedisClusterBackendConstructor) Create(cfg *Config[backend.RedisCluster]) 
 type DistMemoryBackendConstructor struct{}
 
 // Create creates a new DistMemory backend.
-func (DistMemoryBackendConstructor) Create(_ *Config[backend.DistMemory]) (backend.IBackend[backend.DistMemory], error) {
-	return backend.NewDistMemory()
+func (DistMemoryBackendConstructor) Create(ctx context.Context, _ *Config[backend.DistMemory]) (backend.IBackend[backend.DistMemory], error) {
+	return backend.NewDistMemory(ctx)
 }
 
 // BackendManager is a factory for creating HyperCache backend instances.

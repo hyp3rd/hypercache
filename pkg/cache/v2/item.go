@@ -65,6 +65,8 @@ type Item struct {
 	Size        int64         // size in bytes
 	Expiration  time.Duration // expiration duration
 	AccessCount uint32        // number of times the item has been accessed
+	Version     uint64        // logical version (monotonic per key)
+	Origin      string        // originating node id (tiebreaker)
 }
 
 // Touch updates last access time and increments access count.

@@ -20,7 +20,7 @@ type Service interface {
 	// Count returns the number of items in the cache
 	Count(ctx context.Context) int
 	// TriggerEviction triggers the eviction of the cache
-	TriggerEviction()
+	TriggerEviction(ctx context.Context)
 	// Stop stops the cache
 	Stop(ctx context.Context) error
 	// GetStats returns the stats of the cache

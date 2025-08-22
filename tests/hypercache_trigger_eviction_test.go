@@ -27,7 +27,7 @@ func TestHyperCache_TriggerEviction_Immediate(t *testing.T) {
 	// Without waiting, trigger eviction explicitly (non-blocking)
 	// Rapid fire triggers should be non-blocking
 	for range 5 {
-		hc.TriggerEviction()
+		hc.TriggerEviction(context.TODO())
 	}
 
 	// Allow a tiny time for worker to process

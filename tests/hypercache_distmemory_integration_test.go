@@ -22,6 +22,7 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 	n2 := cluster.NewNode("", "node2:0")
 
 	b1i, err := backend.NewDistMemory(
+		context.TODO(),
 		backend.WithDistMembership(membership, n1),
 		backend.WithDistTransport(transport),
 	)
@@ -29,6 +30,7 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 		t.Fatalf("backend1: %v", err)
 	}
 	b2i, err := backend.NewDistMemory(
+		context.TODO(),
 		backend.WithDistMembership(membership, n2),
 		backend.WithDistTransport(transport),
 	)

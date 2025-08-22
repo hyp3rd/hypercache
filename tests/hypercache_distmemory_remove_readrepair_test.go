@@ -17,12 +17,12 @@ func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, 
 	n1 := cluster.NewNode("", "node1:0")
 	n2 := cluster.NewNode("", "node2:0")
 
-	b1i, err := backend.NewDistMemory(backend.WithDistMembership(membership, n1), backend.WithDistTransport(transport))
+	b1i, err := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n1), backend.WithDistTransport(transport))
 	if err != nil {
 		t.Fatalf("b1: %v", err)
 	}
 
-	b2i, err := backend.NewDistMemory(backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
+	b2i, err := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
 	if err != nil {
 		t.Fatalf("b2: %v", err)
 	}

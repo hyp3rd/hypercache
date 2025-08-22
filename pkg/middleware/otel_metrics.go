@@ -127,7 +127,7 @@ func (mw *OTelMetricsMiddleware) Allocation() int64 { return mw.next.Allocation(
 func (mw *OTelMetricsMiddleware) Count(ctx context.Context) int { return mw.next.Count(ctx) }
 
 // TriggerEviction triggers eviction.
-func (mw *OTelMetricsMiddleware) TriggerEviction() { mw.next.TriggerEviction() }
+func (mw *OTelMetricsMiddleware) TriggerEviction(ctx context.Context) { mw.next.TriggerEviction(ctx) }
 
 // Stop stops the underlying service.
 func (mw *OTelMetricsMiddleware) Stop(ctx context.Context) error { return mw.next.Stop(ctx) }
