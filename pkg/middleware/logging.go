@@ -146,13 +146,14 @@ func (mw LoggingMiddleware) TriggerEviction() {
 }
 
 // Stop logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) Stop() {
+func (mw LoggingMiddleware) Stop(ctx context.Context) error {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method Stop took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("Stop method invoked")
-	mw.next.Stop()
+
+	return mw.next.Stop(ctx)
 }
 
 // GetStats logs the time it takes to execute the next middleware.

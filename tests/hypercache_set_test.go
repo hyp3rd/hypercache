@@ -71,7 +71,7 @@ func TestHyperCache_Set(t *testing.T) {
 	}
 	cache, err := hypercache.NewInMemoryWithDefaults(10)
 	assert.Nil(t, err)
-	defer cache.Stop()
+	defer cache.Stop(context.TODO())
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

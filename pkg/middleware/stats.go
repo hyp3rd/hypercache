@@ -148,7 +148,7 @@ func (mw StatsCollectorMiddleware) Count(ctx context.Context) int {
 }
 
 // Stop collects the stats for Stop methods and stops the cache and all its goroutines (if any).
-func (mw StatsCollectorMiddleware) Stop() {
+func (mw StatsCollectorMiddleware) Stop(ctx context.Context) error {
 	start := time.Now()
 
 	defer func() {
@@ -156,7 +156,7 @@ func (mw StatsCollectorMiddleware) Stop() {
 		mw.statsCollector.Incr("hypercache_stop_count", 1)
 	}()
 
-	mw.next.Stop()
+	return mw.next.Stop(ctx)
 }
 
 // GetStats returns the stats of the cache.

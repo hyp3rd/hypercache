@@ -22,7 +22,7 @@ type Service interface {
 	// TriggerEviction triggers the eviction of the cache
 	TriggerEviction()
 	// Stop stops the cache
-	Stop()
+	Stop(ctx context.Context) error
 	// GetStats returns the stats of the cache
 	GetStats() stats.Stats
 }

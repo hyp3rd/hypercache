@@ -15,7 +15,7 @@ import (
 func TestHyperCache_TriggerEviction_Immediate(t *testing.T) {
 	hc, err := hypercache.NewInMemoryWithDefaults(1)
 	assert.Nil(t, err)
-	defer hc.Stop()
+	defer hc.Stop(context.TODO())
 
 	// Set eviction interval to zero; eviction loop will run on manual trigger
 	hypercache.ApplyHyperCacheOptions(hc, hypercache.WithEvictionInterval[backend.InMemory](0))

@@ -70,6 +70,18 @@ func ApplyHyperCacheOptions[T backend.IBackendConstrain](cache *HyperCache[T], o
 	}
 }
 
+// WithManagementHTTP enables the optional management HTTP server with the provided address and options.
+// addr format example: ":8080" or "127.0.0.1:9090".
+func WithManagementHTTP[T backend.IBackendConstrain](addr string, opts ...ManagementHTTPOption) Option[T] {
+	return func(cache *HyperCache[T]) {
+		if addr == "" { // noop when empty
+			return
+		}
+
+		cache.mgmtHTTP = NewManagementHTTPServer(addr, opts...)
+	}
+}
+
 // WithMaxCacheSize is an option that sets the maximum size of the cache.
 // The maximum size of the cache is the maximum number of items that can be stored in the cache.
 // If the maximum size of the cache is reached, the least recently used item will be evicted from the cache.

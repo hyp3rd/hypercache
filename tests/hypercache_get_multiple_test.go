@@ -68,7 +68,7 @@ func TestGetMultiple(t *testing.T) {
 				},
 			}
 			hypercache.GetDefaultManager()
-			cache, err := hypercache.New(hypercache.GetDefaultManager(), config)
+			cache, err := hypercache.New(context.TODO(), hypercache.GetDefaultManager(), config)
 			assert.Nil(t, err)
 			test.setup(cache)
 

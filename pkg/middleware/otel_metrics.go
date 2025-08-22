@@ -130,7 +130,7 @@ func (mw *OTelMetricsMiddleware) Count(ctx context.Context) int { return mw.next
 func (mw *OTelMetricsMiddleware) TriggerEviction() { mw.next.TriggerEviction() }
 
 // Stop stops the underlying service.
-func (mw *OTelMetricsMiddleware) Stop() { mw.next.Stop() }
+func (mw *OTelMetricsMiddleware) Stop(ctx context.Context) error { return mw.next.Stop(ctx) }
 
 // GetStats returns stats.
 func (mw *OTelMetricsMiddleware) GetStats() stats.Stats { return mw.next.GetStats() }

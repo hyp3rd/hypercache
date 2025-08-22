@@ -40,6 +40,31 @@ It ships with a default [histogram stats collector](./stats/stats.go) and severa
 - Middleware-friendly service wrapper (logging, metrics, tracing, custom)
 - Zero-cost if an interval is disabled (tickers are only created when > 0)
 
+### Optional Management HTTP API
+
+You can enable a lightweight management HTTP server to inspect and control a running cache instance.
+
+Add the option when creating the config:
+
+```go
+cfg := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
+    hypercache.WithManagementHTTP[backend.InMemory]("127.0.0.1:9090"),
+)
+hc, _ := hypercache.New(context.Background(), hypercache.GetDefaultManager(), cfg)
+```
+
+Endpoints (subject to change):
+
+- GET /health – liveness check
+- GET /stats – current stats snapshot
+- GET /config – sanitized runtime config
+- POST /evict – trigger eviction cycle
+- POST /trigger-expiration – trigger expiration scan
+- POST /clear – clear all items
+
+Bind to 127.0.0.1 by default and wrap with an auth function via `WithMgmtAuth` for production use.
+
 ## Installation
 
 Install HyperCache:
@@ -130,7 +155,7 @@ config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 }
 config.InMemoryOptions = []backend.Option[backend.InMemory]{ backend.WithCapacity[backend.InMemory](10) }
 
-cache, err := hypercache.New(hypercache.GetDefaultManager(), config)
+cache, err := hypercache.New(context.Background(), hypercache.GetDefaultManager(), config)
 if err != nil {
     fmt.Fprintln(os.Stderr, err)
     return
