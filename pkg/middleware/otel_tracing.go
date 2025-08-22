@@ -14,6 +14,8 @@ import (
 	"github.com/hyp3rd/hypercache/pkg/stats"
 )
 
+const attrKeyLength = "key.len"
+
 // OTelTracingMiddleware wraps hypercache.Service methods with OpenTelemetry spans.
 type OTelTracingMiddleware struct {
 	next   hypercache.Service
@@ -42,7 +44,7 @@ func NewOTelTracingMiddleware(next hypercache.Service, tracer trace.Tracer, opts
 
 // Get implements Service.Get with tracing.
 func (mw OTelTracingMiddleware) Get(ctx context.Context, key string) (any, bool) {
-	ctx, span := mw.startSpan(ctx, "hypercache.Get", attribute.Int("key.len", len(key)))
+	ctx, span := mw.startSpan(ctx, "hypercache.Get", attribute.Int(attrKeyLength, len(key)))
 	defer span.End()
 
 	v, ok := mw.next.Get(ctx, key)
@@ -53,7 +55,7 @@ func (mw OTelTracingMiddleware) Get(ctx context.Context, key string) (any, bool)
 
 // Set implements Service.Set with tracing.
 func (mw OTelTracingMiddleware) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
-	ctx, span := mw.startSpan(ctx, "hypercache.Set", attribute.Int("key.len", len(key)), attribute.Int64("expiration.ms", expiration.Milliseconds()))
+	ctx, span := mw.startSpan(ctx, "hypercache.Set", attribute.Int(attrKeyLength, len(key)), attribute.Int64("expiration.ms", expiration.Milliseconds()))
 	defer span.End()
 
 	err := mw.next.Set(ctx, key, value, expiration)
@@ -66,7 +68,7 @@ func (mw OTelTracingMiddleware) Set(ctx context.Context, key string, value any, 
 
 // GetOrSet implements Service.GetOrSet with tracing.
 func (mw OTelTracingMiddleware) GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error) {
-	ctx, span := mw.startSpan(ctx, "hypercache.GetOrSet", attribute.Int("key.len", len(key)), attribute.Int64("expiration.ms", expiration.Milliseconds()))
+	ctx, span := mw.startSpan(ctx, "hypercache.GetOrSet", attribute.Int(attrKeyLength, len(key)), attribute.Int64("expiration.ms", expiration.Milliseconds()))
 	defer span.End()
 
 	v, err := mw.next.GetOrSet(ctx, key, value, expiration)
@@ -79,7 +81,7 @@ func (mw OTelTracingMiddleware) GetOrSet(ctx context.Context, key string, value 
 
 // GetWithInfo implements Service.GetWithInfo with tracing.
 func (mw OTelTracingMiddleware) GetWithInfo(ctx context.Context, key string) (*cache.Item, bool) {
-	ctx, span := mw.startSpan(ctx, "hypercache.GetWithInfo", attribute.Int("key.len", len(key)))
+	ctx, span := mw.startSpan(ctx, "hypercache.GetWithInfo", attribute.Int(attrKeyLength, len(key)))
 	defer span.End()
 
 	it, ok := mw.next.GetWithInfo(ctx, key)

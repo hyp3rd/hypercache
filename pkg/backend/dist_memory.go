@@ -276,6 +276,7 @@ func (dm *DistMemory) List(_ context.Context, _ ...IFilter) ([]*cache.Item, erro
 	for _, s := range dm.shards {
 		for kv := range s.items.IterBuffered() {
 			cloned := kv.Val
+
 			items = append(items, &cloned)
 		}
 	}
@@ -302,6 +303,7 @@ func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //noli
 		}
 
 		atomic.AddInt64(&dm.metrics.forwardRemove, 1)
+
 		_ = dm.transport.ForwardRemove(ctx, string(owners[0]), key, true) //nolint:errcheck // best-effort
 	}
 
@@ -547,6 +549,7 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) { //nolint:ireturn
 	}
 
 	dm.httpServer = server
+
 	resolver := func(nodeID string) (string, bool) {
 		if dm.membership != nil {
 			for _, n := range dm.membership.List() {
@@ -562,6 +565,7 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) { //nolint:ireturn
 
 		return "", false
 	}
+
 	dm.transport = NewDistHTTPTransport(2*time.Second, resolver)
 }
 
@@ -583,7 +587,7 @@ func (dm *DistMemory) lookupOwners(key string) []cluster.NodeID { //nolint:iretu
 }
 
 // requiredAcks computes required acknowledgements for given consistency level.
-func (dm *DistMemory) requiredAcks(total int, lvl ConsistencyLevel) int { //nolint:ireturn
+func (*DistMemory) requiredAcks(total int, lvl ConsistencyLevel) int { //nolint:ireturn
 	switch lvl {
 	case ConsistencyAll:
 		return total
@@ -598,49 +602,28 @@ func (dm *DistMemory) requiredAcks(total int, lvl ConsistencyLevel) int { //noli
 
 // getOne fetches from a single owner path.
 func (dm *DistMemory) getOne(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
-	// attempt each owner in order until success
-	for idx, oid := range owners {
-		if oid == dm.localNode.ID { // local path
-			if it, ok := dm.shardFor(key).items.Get(key); ok {
-				if idx > 0 { // we skipped an earlier owner (promotion)
-					atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
-				}
-
-				return it, true
-			}
-
-			continue // try next replica if local miss
+	for idx, oid := range owners { // iterate owners until hit
+		if it, ok := dm.tryLocalGet(key, idx, oid); ok {
+			return it, true
 		}
 
-		if dm.transport == nil { // cannot reach remote
-			continue
+		if it, ok := dm.tryRemoteGet(ctx, key, idx, oid); ok {
+			return it, true
 		}
+	}
 
-		atomic.AddInt64(&dm.metrics.forwardGet, 1)
+	return nil, false
+}
 
-		it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
-		if errors.Is(err, sentinel.ErrBackendNotFound) { // promote next owner
-			if idx == 0 { // primary missing
-				atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
-			}
+// tryLocalGet attempts local shard lookup when oid is local; returns item if found.
+func (dm *DistMemory) tryLocalGet(key string, idx int, oid cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+	if oid != dm.localNode.ID { // not local owner
+		return nil, false
+	}
 
-			continue
-		}
-
-		if !ok {
-			continue
-		}
-		// got item
-		if idx > 0 { // promotion occurred
+	if it, ok := dm.shardFor(key).items.Get(key); ok {
+		if idx > 0 { // promotion
 			atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
-		}
-
-		if dm.isOwner(key) { // local repair if missing
-			if _, ok2 := dm.shardFor(key).items.Get(key); !ok2 {
-				cloned := *it
-				dm.applySet(ctx, &cloned, false)
-				atomic.AddInt64(&dm.metrics.readRepair, 1)
-			}
 		}
 
 		return it, true
@@ -649,51 +632,98 @@ func (dm *DistMemory) getOne(ctx context.Context, key string, owners []cluster.N
 	return nil, false
 }
 
+// tryRemoteGet attempts remote fetch for given owner; includes promotion + repair.
+func (dm *DistMemory) tryRemoteGet(ctx context.Context, key string, idx int, oid cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+	if oid == dm.localNode.ID || dm.transport == nil { // skip local path or missing transport
+		return nil, false
+	}
+
+	atomic.AddInt64(&dm.metrics.forwardGet, 1)
+
+	it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
+	if errors.Is(err, sentinel.ErrBackendNotFound) { // owner unreachable -> promotion scenario
+		if idx == 0 { // primary missing
+			atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+		}
+
+		return nil, false
+	}
+
+	if !ok { // miss
+		return nil, false
+	}
+
+	if idx > 0 { // promotion occurred
+		atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+	}
+
+	// read repair: if we're an owner but local missing, replicate
+	if dm.isOwner(key) {
+		if _, ok2 := dm.shardFor(key).items.Get(key); !ok2 {
+			cloned := *it
+			dm.applySet(ctx, &cloned, false)
+			atomic.AddInt64(&dm.metrics.readRepair, 1)
+		}
+	}
+
+	return it, true
+}
+
 // getWithConsistency performs quorum/all reads.
 func (dm *DistMemory) getWithConsistency(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
 	needed := dm.requiredAcks(len(owners), dm.readConsistency)
-
 	acks := 0
 
 	var chosen *cache.Item
 
 	for idx, oid := range owners {
-		if oid == dm.localNode.ID {
-			if it, ok := dm.shardFor(key).items.Get(key); ok {
-				chosen = dm.chooseNewer(chosen, it)
-				acks++
-			}
-
+		it, ok := dm.fetchOwner(ctx, key, idx, oid)
+		if !ok {
 			continue
 		}
 
-		it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
-		if errors.Is(err, sentinel.ErrBackendNotFound) { // unreachable owner -> promotion scenario
-			if idx == 0 { // primary missing
-				atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
-			}
-
-			continue
-		}
-
-		if ok {
-			if idx > 0 { // implies earlier owner(s) skipped
-				atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
-			}
-
-			chosen = dm.chooseNewer(chosen, it)
-			acks++
-		}
+		chosen = dm.chooseNewer(chosen, it)
+		acks++
 	}
 
 	if acks < needed || chosen == nil {
 		return nil, false
 	}
 
-	// version-based read repair across all owners (including local) if stale or missing
+	// version-based read repair across all owners if stale/missing
 	dm.repairReplicas(ctx, key, chosen, owners)
 
 	return chosen, true
+}
+
+// fetchOwner attempts to fetch item from given owner (local or remote) updating metrics.
+func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+	if oid == dm.localNode.ID { // local
+		if it, ok := dm.shardFor(key).items.Get(key); ok {
+			return it, true
+		}
+
+		return nil, false
+	}
+
+	it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
+	if errors.Is(err, sentinel.ErrBackendNotFound) { // promotion
+		if idx == 0 {
+			atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+		}
+
+		return nil, false
+	}
+
+	if !ok {
+		return nil, false
+	}
+
+	if idx > 0 { // earlier owner skipped
+		atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+	}
+
+	return it, true
 }
 
 // replicateTo sends writes to replicas (best-effort) returning ack count.
@@ -779,7 +809,12 @@ func (dm *DistMemory) repairLocalReplica(ctx context.Context, key string, chosen
 }
 
 // repairRemoteReplica updates a remote replica if stale (best-effort).
-func (dm *DistMemory) repairRemoteReplica(ctx context.Context, key string, chosen *cache.Item, oid cluster.NodeID) { // separated to reduce cyclomatic complexity //nolint:ireturn
+func (dm *DistMemory) repairRemoteReplica(
+	ctx context.Context,
+	key string,
+	chosen *cache.Item,
+	oid cluster.NodeID,
+) { // separated to reduce cyclomatic complexity //nolint:ireturn
 	if dm.transport == nil { // cannot repair remote
 		return
 	}
@@ -816,6 +851,7 @@ func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster
 		}
 
 		return false, errFwd // not promotable
+
 	default:
 		return false, errFwd
 	}
@@ -879,6 +915,7 @@ func (dm *DistMemory) heartbeatLoop(ctx context.Context) { // reduced cognitive 
 // hashKey returns shard index for key.
 func (dm *DistMemory) hashKey(key string) int {
 	h := fnv.New32a()
+
 	_, _ = h.Write([]byte(key)) // hash write cannot error per docs
 
 	return int(h.Sum32()) % dm.shardCount

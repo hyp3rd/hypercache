@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -71,6 +72,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 	}
 	cache, err := hypercache.NewInMemoryWithDefaults(10)
 	assert.Nil(t, err)
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var (
@@ -78,7 +80,7 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 				err error
 			)
 
-			shouldExpire := test.expectedErr == sentinel.ErrKeyExpired
+			shouldExpire := errors.Is(test.expectedErr, sentinel.ErrKeyExpired)
 
 			val, err = cache.GetOrSet(context.TODO(), test.key, test.value, test.expiry)
 			if !shouldExpire {
@@ -92,9 +94,9 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 			if shouldExpire {
 				t.Log("sleeping for 2 Millisecond to allow the key to expire")
 				time.Sleep(2 * time.Millisecond)
+
 				_, err = cache.GetOrSet(context.TODO(), test.key, test.value, test.expiry)
 				assert.Equal(t, test.expectedErr, err)
-
 			}
 
 			// Check if the value has been set in the cache

@@ -102,6 +102,7 @@ func (c *HistogramStatsCollector) Percentile(stat constants.Stat, percentile flo
 	}
 
 	slices.Sort(values)
+
 	index := int(float64(len(values)) * percentile)
 
 	return float64(values[index])

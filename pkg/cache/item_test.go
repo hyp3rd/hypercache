@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ func TestNewItemPoolManager(t *testing.T) {
 
 func TestItemPoolManager_Get(t *testing.T) {
 	manager := NewItemPoolManager()
+
 	item := manager.Get()
 	if item == nil {
 		t.Fatal("Expected non-nil Item")
@@ -41,10 +43,12 @@ func TestItemPoolManager_Put(t *testing.T) {
 
 func TestItem_SetSize(t *testing.T) {
 	item := &Item{Value: "test string"}
+
 	err := item.SetSize()
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
+
 	if item.Size <= 0 {
 		t.Error("Expected positive size")
 	}
@@ -52,6 +56,7 @@ func TestItem_SetSize(t *testing.T) {
 
 func TestItem_SizeMB(t *testing.T) {
 	item := &Item{Size: 1024 * 1024} // 1 MB
+
 	sizeMB := item.SizeMB()
 	if sizeMB != 1.0 {
 		t.Errorf("Expected 1.0 MB, got %f", sizeMB)
@@ -60,6 +65,7 @@ func TestItem_SizeMB(t *testing.T) {
 
 func TestItem_SizeKB(t *testing.T) {
 	item := &Item{Size: 1024} // 1 KB
+
 	sizeKB := item.SizeKB()
 	if sizeKB != 1.0 {
 		t.Errorf("Expected 1.0 KB, got %f", sizeKB)
@@ -77,6 +83,7 @@ func TestItem_Touch(t *testing.T) {
 	if !item.LastAccess.After(initialTime) {
 		t.Error("Expected LastAccess to be updated")
 	}
+
 	if item.AccessCount != initialCount+1 {
 		t.Errorf("Expected AccessCount to be %d, got %d", initialCount+1, item.AccessCount)
 	}
@@ -118,7 +125,7 @@ func TestItem_Valid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.item.Valid()
-			if err != tt.wantErr {
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("Expected error %v, got %v", tt.wantErr, err)
 			}
 		})

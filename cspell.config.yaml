@@ -46,6 +46,7 @@ words:
   - gosec
   - honnef
   - hreq
+  - ints
   - ireturn
   - Itemm
   - lamport
@@ -59,6 +60,7 @@ words:
   - nestif
   - Newf
   - nolint
+  - nonamedreturns
   - NOVENDOR
   - paralleltest
   - Pipeliner
@@ -69,6 +71,7 @@ words:
   - staticcheck
   - stdlib
   - strfnv
+  - strs
   - ugorji
   - unmarshals
   - varnamelen

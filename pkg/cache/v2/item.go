@@ -118,10 +118,12 @@ func (it *Item) SetSize() error {
 		it.Size = int64(len(val))
 
 		return nil
+
 	case string:
 		it.Size = int64(len(val))
 
 		return nil
+
 	case encoding.BinaryMarshaler:
 		b, err := val.MarshalBinary()
 		if err != nil {
@@ -131,6 +133,7 @@ func (it *Item) SetSize() error {
 		it.Size = int64(len(b))
 
 		return nil
+
 	case Sizer:
 		it.Size = int64(val.SizeBytes())
 

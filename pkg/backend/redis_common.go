@@ -65,7 +65,14 @@ func redisSet(ctx context.Context, client redisCmd, keysSetName string, item *ca
 	return nil
 }
 
-func redisList(ctx context.Context, client redisCmd, keysSetName string, ser serializer.ISerializer, pool *cache.ItemPoolManager, filters ...IFilter) ([]*cache.Item, error) {
+func redisList(
+	ctx context.Context,
+	client redisCmd,
+	keysSetName string,
+	ser serializer.ISerializer,
+	pool *cache.ItemPoolManager,
+	filters ...IFilter,
+) ([]*cache.Item, error) {
 	// Get keys in the logical set
 	keys, err := client.SMembers(ctx, keysSetName).Result()
 	if err != nil {
@@ -103,6 +110,7 @@ func redisList(ctx context.Context, client redisCmd, keysSetName string, ser ser
 		err = ser.Unmarshal([]byte(data["data"]), pooled)
 		if err == nil {
 			out := *pooled
+
 			items = append(items, &out)
 		}
 

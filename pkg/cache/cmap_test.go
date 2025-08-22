@@ -21,6 +21,7 @@ func TestNew(t *testing.T) {
 	if cmap.Count() != 0 {
 		t.Errorf("Expected count 0, got %d", cmap.Count())
 	}
+
 	if !cmap.IsEmpty() {
 		t.Error("Expected map to be empty")
 	}
@@ -37,6 +38,7 @@ func TestNewWithCustomShardingFunction(t *testing.T) {
 	customSharding := func(key string) uint32 {
 		return 0 // Always return 0 for testing
 	}
+
 	cmap := NewWithCustomShardingFunction[string, int](customSharding)
 	if cmap.Count() != 0 {
 		t.Errorf("Expected count 0, got %d", cmap.Count())
@@ -54,6 +56,7 @@ func TestSetAndGet(t *testing.T) {
 	if !exists {
 		t.Error("Expected key to exist")
 	}
+
 	if got != value {
 		t.Errorf("Expected %d, got %d", value, got)
 	}
@@ -85,6 +88,7 @@ func TestUpsert(t *testing.T) {
 		if !exist {
 			return newValue
 		}
+
 		return valueInMap + newValue
 	})
 
@@ -97,6 +101,7 @@ func TestUpsert(t *testing.T) {
 		if !exist {
 			return newValue
 		}
+
 		return valueInMap + newValue
 	})
 
@@ -165,9 +170,11 @@ func TestRemoveCb(t *testing.T) {
 		if !exists {
 			t.Error("Expected key to exist in callback")
 		}
+
 		if v != value {
 			t.Errorf("Expected value %d in callback, got %d", value, v)
 		}
+
 		return true
 	})
 
@@ -190,6 +197,7 @@ func TestPop(t *testing.T) {
 	if !exists {
 		t.Error("Expected key to exist")
 	}
+
 	if got != value {
 		t.Errorf("Expected %d, got %d", value, got)
 	}
@@ -365,6 +373,7 @@ func TestMarshalJSON(t *testing.T) {
 	}
 
 	var result map[string]int
+
 	err = json.Unmarshal(data, &result)
 	if err != nil {
 		t.Errorf("Failed to unmarshal: %v", err)
@@ -389,6 +398,7 @@ func TestUnmarshalJSON(t *testing.T) {
 	}
 
 	cmap := New[int]()
+
 	err = cmap.UnmarshalJSON(data)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -403,6 +413,7 @@ func TestUnmarshalJSON(t *testing.T) {
 
 func TestGetShard(t *testing.T) {
 	cmap := New[int]()
+
 	shard := cmap.GetShard("test")
 	if shard == nil {
 		t.Error("Expected non-nil shard")
@@ -411,16 +422,20 @@ func TestGetShard(t *testing.T) {
 
 func TestConcurrency(t *testing.T) {
 	cmap := New[int]()
+
 	var wg sync.WaitGroup
+
 	numGoroutines := 100
 	numOperations := 1000
 
 	// Concurrent writes
 	wg.Add(numGoroutines)
-	for i := 0; i < numGoroutines; i++ {
+
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < numOperations; j++ {
+
+			for j := range numOperations {
 				key := fmt.Sprintf("key-%d-%d", id, j)
 				cmap.Set(key, id*numOperations+j)
 			}
@@ -429,10 +444,12 @@ func TestConcurrency(t *testing.T) {
 
 	// Concurrent reads
 	wg.Add(numGoroutines)
-	for i := 0; i < numGoroutines; i++ {
+
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < numOperations; j++ {
+
+			for j := range numOperations {
 				key := fmt.Sprintf("key-%d-%d", id, j)
 				cmap.Get(key)
 			}

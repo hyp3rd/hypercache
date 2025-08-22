@@ -35,6 +35,7 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 	if err != nil {
 		t.Fatalf("b1: %v", err)
 	}
+
 	b1 := b1i.(*backend.DistMemory) //nolint:forcetypeassert
 
 	// add peers (without heartbeat loops themselves)
@@ -46,6 +47,7 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 	if err != nil {
 		t.Fatalf("b2: %v", err)
 	}
+
 	b2 := b2i.(*backend.DistMemory) //nolint:forcetypeassert
 
 	b3i, err := backend.NewDistMemory(
@@ -56,6 +58,7 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 	if err != nil {
 		t.Fatalf("b3: %v", err)
 	}
+
 	b3 := b3i.(*backend.DistMemory) //nolint:forcetypeassert
 
 	transport.Register(b1)
@@ -71,9 +74,11 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 				aliveCount++
 			}
 		}
+
 		if aliveCount == 3 {
 			break
 		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -83,6 +88,7 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 
 	// Wait until node2 transitions to suspect then removed.
 	var sawSuspect bool
+
 	deadline = time.Now().Add(2 * deadAfter)
 	for time.Now().Before(deadline) {
 		foundN2 := false
@@ -94,11 +100,14 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 				}
 			}
 		}
+
 		if !foundN2 && sawSuspect {
 			break
 		} // removed after suspicion observed
+
 		time.Sleep(20 * time.Millisecond)
 	}
+
 	if !sawSuspect {
 		t.Fatalf("node2 never became suspect")
 	}
@@ -114,11 +123,13 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 	for _, n := range membership.List() {
 		if n.ID == n3.ID {
 			n3Present = true
+
 			if n.State != cluster.NodeAlive {
 				t.Fatalf("node3 not alive: %s", n.State)
 			}
 		}
 	}
+
 	if !n3Present {
 		t.Fatalf("node3 missing")
 	}
@@ -128,9 +139,11 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 	if m.HeartbeatFailure == 0 {
 		t.Errorf("expected heartbeat failures > 0")
 	}
+
 	if m.HeartbeatSuccess == 0 {
 		t.Errorf("expected heartbeat successes > 0")
 	}
+
 	if m.NodesRemoved == 0 {
 		t.Errorf("expected nodes removed metric > 0")
 	}

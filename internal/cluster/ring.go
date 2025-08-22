@@ -68,14 +68,18 @@ func (r *Ring) Build(nodes []*Node) {
 			// combine node id and vnode index (allocate new slice to avoid touching base backing array)
 			buf := make([]byte, len(base)+1)
 			copy(buf, base)
+
 			buf[len(base)] = byte(i)
+
 			hv := xxhash.Sum64(buf)
+
 			vn = append(vn, vnode{hash: hv, nid: node.ID})
 		}
 	}
 
 	sort.Slice(vn, func(i, j int) bool { return vn[i].hash < vn[j].hash })
 	r.mu.Lock()
+
 	r.vnodes = vn
 	r.mu.Unlock()
 }

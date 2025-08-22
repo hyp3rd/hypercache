@@ -9,7 +9,9 @@ import (
 
 func TestWorkerPool_EnqueueAndShutdown(t *testing.T) {
 	pool := NewWorkerPool(3)
+
 	var mu sync.Mutex
+
 	results := []int{}
 
 	// Enqueue 5 jobs
@@ -17,8 +19,11 @@ func TestWorkerPool_EnqueueAndShutdown(t *testing.T) {
 		val := i
 		pool.Enqueue(func() error {
 			mu.Lock()
+
 			results = append(results, val)
+
 			mu.Unlock()
+
 			return nil
 		})
 	}
@@ -47,7 +52,7 @@ func TestWorkerPool_JobErrorHandling(t *testing.T) {
 
 	var gotErr error
 	for err := range pool.Errors() {
-		if err == expectedErr {
+		if errors.Is(err, expectedErr) {
 			gotErr = err
 		}
 	}
@@ -59,15 +64,20 @@ func TestWorkerPool_JobErrorHandling(t *testing.T) {
 
 func TestWorkerPool_ResizeIncrease(t *testing.T) {
 	pool := NewWorkerPool(1)
+
 	var mu sync.Mutex
+
 	count := 0
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		pool.Enqueue(func() error {
 			time.Sleep(10 * time.Millisecond)
 			mu.Lock()
+
 			count++
+
 			mu.Unlock()
+
 			return nil
 		})
 	}
@@ -82,15 +92,20 @@ func TestWorkerPool_ResizeIncrease(t *testing.T) {
 
 func TestWorkerPool_ResizeDecrease(t *testing.T) {
 	pool := NewWorkerPool(4)
+
 	var mu sync.Mutex
+
 	count := 0
 
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		pool.Enqueue(func() error {
 			time.Sleep(10 * time.Millisecond)
 			mu.Lock()
+
 			count++
+
 			mu.Unlock()
+
 			return nil
 		})
 	}
@@ -111,7 +126,9 @@ func TestWorkerPool_ResizeToZeroAndBack(t *testing.T) {
 	pool.Resize(0)
 	pool.Enqueue(func() error {
 		called = true
+
 		close(done)
+
 		return nil
 	})
 
@@ -125,6 +142,7 @@ func TestWorkerPool_ResizeToZeroAndBack(t *testing.T) {
 	}
 
 	pool.Shutdown()
+
 	if !called {
 		t.Errorf("expected job to be called after resizing back up")
 	}
@@ -133,19 +151,23 @@ func TestWorkerPool_ResizeToZeroAndBack(t *testing.T) {
 func TestWorkerPool_NegativeResizeDoesNothing(t *testing.T) {
 	pool := NewWorkerPool(2)
 	pool.Resize(-1)
+
 	if pool.workers != 2 {
 		t.Errorf("expected workers to remain 2, got %d", pool.workers)
 	}
+
 	pool.Shutdown()
 }
 
 func TestWorkerPool_EnqueueAfterShutdownPanics(t *testing.T) {
 	pool := NewWorkerPool(1)
 	pool.Shutdown()
+
 	defer func() {
 		if r := recover(); r == nil {
 			t.Errorf("expected panic when enqueuing after shutdown")
 		}
 	}()
+
 	pool.Enqueue(func() error { return nil })
 }

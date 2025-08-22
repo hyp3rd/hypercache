@@ -118,6 +118,94 @@ linters:
         # You can specify idiomatic endings for interface
         - (or|er|ry)$
 
+    revive:
+      enable-all-rules: true
+      rules:
+        - name: add-constant
+          severity: warning
+          disabled: false
+          arguments:
+            - max-lit-count: "3"
+              allow-strs: '"","get","path","key"'
+              allow-ints: "-1,0,1,2,10"
+              allow-floats: "0.0,1.0"
+
+        - name: cognitive-complexity
+          severity: warning
+          disabled: false
+          arguments: [15]
+
+        - name: cyclomatic
+          arguments: [15]
+
+        # - name: function-length
+        #   arguments: [80, 0]
+
+        - name: max-public-structs
+          arguments: [10]
+
+        - name: nested-structs
+          disabled: true
+
+        - name: flag-parameter
+          disabled: true
+
+        - name: line-length-limit
+          arguments: [160]
+
+        - name: var-naming
+          disabled: true
+
+    wsl_v5:
+      # Allow cuddling a variable if it's used first in the immediate following block,
+      # even if the statement with the block doesn't use the variable.
+      # https://github.com/bombsimon/wsl/tree/main?tab=readme-ov-file#configuration
+      # Default: true
+      allow-first-in-block: false
+      # Same as above,
+      # but allows cuddling if the variable is used anywhere in the following (or nested) block.
+      # https://github.com/bombsimon/wsl/tree/main?tab=readme-ov-file#configuration
+      # Default: false
+      allow-whole-block: true
+      # If a block contains more than this number of lines,
+      # the branch statement needs to be separated by whitespace.
+      # https://github.com/bombsimon/wsl/tree/main?tab=readme-ov-file#configuration
+      # Default: 2
+      branch-max-lines: 4
+      # If set to a non-negative number,
+      # case blocks need to end with whitespace if exceeding this number
+      # https://github.com/bombsimon/wsl/tree/main?tab=readme-ov-file#configuration
+      # Default: 0
+      case-max-lines: 2
+      # Default checks to use.
+      # Can be `all`, `none`, `default` or empty.
+      # https://github.com/bombsimon/wsl/tree/main?tab=readme-ov-file#checks-and-configuration
+      # Default: ""
+      default: all
+      enable:
+        - assign
+        - branch
+        - decl
+        - defer
+        - expr
+        - for
+        - go
+        - if
+        - inc-dec
+        - label
+        - range
+        - return
+        - select
+        - send
+        - switch
+        - type-switch
+        - append
+        - assign-exclusive
+        - assign-expr
+        - err
+        - leading-whitespace
+        - trailing-whitespace
+
     wrapcheck:
       # An array of strings that specify globs of packages to ignore.
       # Default: []

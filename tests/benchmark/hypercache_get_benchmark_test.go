@@ -18,7 +18,8 @@ func BenchmarkHyperCache_Get(b *testing.B) {
 	cache.Set(context.TODO(), "key", "value", time.Hour)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for range b.N {
 		// Retrieve the value from the cache using the key
 		cache.Get(context.TODO(), "key")
 	}
@@ -27,6 +28,7 @@ func BenchmarkHyperCache_Get(b *testing.B) {
 func BenchmarkHyperCache_Get_ProactiveEviction(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
 	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](0),
 		hypercache.WithEvictionAlgorithm[backend.InMemory]("lru"),
@@ -43,7 +45,8 @@ func BenchmarkHyperCache_Get_ProactiveEviction(b *testing.B) {
 	cache.Set(context.TODO(), "key", "value", time.Hour)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for range b.N {
 		// Retrieve the value from the cache using the key
 		cache.Get(context.TODO(), "key")
 	}

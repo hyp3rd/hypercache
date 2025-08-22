@@ -23,6 +23,7 @@ func TestHyperCache_New(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error when capacity is 0: %v", err)
 	}
+
 	if cache == nil {
 		t.Error("Expected a new HyperCache when capacity is 0, got nil")
 	}
@@ -32,6 +33,7 @@ func TestHyperCache_New(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error when capacity is positive: %v", err)
 	}
+
 	if cache == nil {
 		t.Error("Expected a new HyperCache when capacity is positive, got nil")
 	}
@@ -61,6 +63,7 @@ func TestHyperCache_WithExpirationInterval(t *testing.T) {
 	}
 	// Test with custom expiration interval
 	hcm := GetDefaultManager()
+
 	cache, err = New(context.TODO(), hcm, config)
 	assert.Nil(t, err)
 	assert.Equal(t, 1*time.Hour, cache.expirationInterval)
@@ -107,6 +110,7 @@ func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
 		},
 	}
 	hcm := GetDefaultManager()
+
 	cache, err = New(context.TODO(), hcm, config)
 	assert.Nil(t, err)
 	assert.Equal(t, uint(5), cache.maxEvictionCount)

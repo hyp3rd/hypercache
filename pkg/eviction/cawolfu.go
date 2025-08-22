@@ -101,29 +101,24 @@ func (c *CAWOLFU) Set(key string, value any) {
 	}
 
 	// Inline eviction logic to avoid deadlock
-	//nolint:nestif
-	if c.length == c.cap {
-		if c.list.tail != nil {
-			node := c.list.tail
-			c.list.remove(node)
+	if c.length == c.cap { // eviction path
+		if c.list.tail == nil { // nothing to evict
+			return
+		}
 
-			err := c.items.Remove(node.key)
-			if err == nil {
-				c.length--
+		node := c.list.tail
+		c.list.remove(node)
 
-				resetCAWOLFUNode(node)
-				c.nodePool.Put(node)
-			} else {
-				// If map/list out of sync, forcibly clean up
-				resetCAWOLFUNode(node)
-				c.nodePool.Put(node)
-			}
-			// Defensive: if evicted node is the same as key, do not reuse
-			if node.key == key {
-				return
-			}
-		} else {
-			// No node to evict, do not insert
+		err := c.items.Remove(node.key)
+		if err == nil {
+			c.length--
+		}
+
+		// always recycle node
+		resetCAWOLFUNode(node)
+		c.nodePool.Put(node)
+
+		if node.key == key { // same key evicted, abort insert
 			return
 		}
 	}
@@ -138,6 +133,7 @@ func (c *CAWOLFU) Set(key string, value any) {
 	node.count = 1
 	c.items.Set(key, node)
 	c.addToFront(node)
+
 	c.length++
 }
 
@@ -163,12 +159,15 @@ func (l *CAWOLFULinkedList) remove(node *CAWOLFUNode) {
 	case l.head == l.tail: // only one element in the list
 		l.head = nil
 		l.tail = nil
+
 	case node == l.head:
 		l.head = node.next
 		l.head.prev = nil
+
 	case node == l.tail:
 		l.tail = node.prev
 		l.tail.next = nil
+
 	default:
 		node.prev.next = node.next
 		node.next.prev = node.prev

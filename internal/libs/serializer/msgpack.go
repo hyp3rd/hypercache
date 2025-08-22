@@ -11,7 +11,7 @@ type MsgpackSerializer struct{}
 
 // Marshal serializes the given value into a byte slice.
 // @param v.
-func (d *MsgpackSerializer) Marshal(v any) ([]byte, error) {
+func (*MsgpackSerializer) Marshal(v any) ([]byte, error) { // receiver omitted (unused)
 	data, err := msgpack.Marshal(&v)
 	if err != nil {
 		return nil, ewrap.Wrap(err, "failed to marshal msgpack")
@@ -23,7 +23,7 @@ func (d *MsgpackSerializer) Marshal(v any) ([]byte, error) {
 // Unmarshal deserializes the given byte slice into the given value.
 // @param data
 // @param v.
-func (d *MsgpackSerializer) Unmarshal(data []byte, v any) error {
+func (*MsgpackSerializer) Unmarshal(data []byte, v any) error { // receiver omitted (unused)
 	err := msgpack.Unmarshal(data, v)
 	if err != nil {
 		return ewrap.Wrap(err, "failed to unmarshal msgpack")
