@@ -1,6 +1,7 @@
 package hypercache
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func TestHyperCache_WithExpirationInterval(t *testing.T) {
 	}
 	// Test with custom expiration interval
 	hcm := GetDefaultManager()
-	cache, err = New(hcm, config)
+	cache, err = New(context.TODO(), hcm, config)
 	assert.Nil(t, err)
 	assert.Equal(t, 1*time.Hour, cache.expirationInterval)
 }
@@ -83,7 +84,7 @@ func TestHyperCache_WithEvictionInterval(t *testing.T) {
 	}
 	hcm := GetDefaultManager()
 	// Test with custom eviction interval
-	cache, err = New(hcm, config)
+	cache, err = New(context.TODO(), hcm, config)
 	assert.Nil(t, err)
 	assert.Equal(t, 1*time.Hour, cache.evictionInterval)
 }
@@ -106,7 +107,7 @@ func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
 		},
 	}
 	hcm := GetDefaultManager()
-	cache, err = New(hcm, config)
+	cache, err = New(context.TODO(), hcm, config)
 	assert.Nil(t, err)
 	assert.Equal(t, uint(5), cache.maxEvictionCount)
 }

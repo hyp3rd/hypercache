@@ -160,11 +160,11 @@ func (mw OTelTracingMiddleware) TriggerEviction() {
 }
 
 // Stop stops the service with a span.
-func (mw OTelTracingMiddleware) Stop() {
-	_, span := mw.startSpan(context.Background(), "hypercache.Stop")
+func (mw OTelTracingMiddleware) Stop(ctx context.Context) error {
+	_, span := mw.startSpan(ctx, "hypercache.Stop")
 	defer span.End()
 
-	mw.next.Stop()
+	return mw.next.Stop(ctx)
 }
 
 // GetStats returns stats.

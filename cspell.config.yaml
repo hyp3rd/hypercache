@@ -31,6 +31,7 @@ words:
   - GITVERSION
   - goccy
   - gochecknoglobals
+  - gofiber
   - GOFILES
   - gofumpt
   - goimports
@@ -44,6 +45,7 @@ words:
   - localmodule
   - logrus
   - memprofile
+  - Mgmt
   - msgpack
   - mvdan
   - nestif

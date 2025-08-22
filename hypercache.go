@@ -65,6 +65,8 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	statsCollectorName         string              // `statsCollectorName` holds the name of the stats collector that the cache should use when collecting cache statistics
 	// StatsCollector to collect cache statistics
 	StatsCollector stats.ICollector
+	// Optional management HTTP server
+	mgmtHTTP *ManagementHTTPServer
 }
 
 // NewInMemoryWithDefaults initializes a new HyperCache with the default configuration.
@@ -91,8 +93,10 @@ func NewInMemoryWithDefaults(capacity int) (*HyperCache[backend.InMemory], error
 
 	hcm := GetDefaultManager()
 
+	ctx := context.Background()
+
 	// Initialize the cache
-	hyperCache, err := New(hcm, config)
+	hyperCache, err := New(ctx, hcm, config)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +110,7 @@ func NewInMemoryWithDefaults(capacity int) (*HyperCache[backend.InMemory], error
 //   - The eviction algorithm is set to LRU.
 //   - The expiration interval is set to 30 minutes.
 //   - The stats collector is set to the HistogramStatsCollector stats collector.
-func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (*HyperCache[T], error) {
+func New[T backend.IBackendConstrain](ctx context.Context, bm *BackendManager, config *Config[T]) (*HyperCache[T], error) {
 	// Resolve typed backend from registry
 	backendTyped, err := resolveBackend(bm, config)
 	if err != nil {
@@ -147,6 +151,14 @@ func New[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (*H
 	// Initialize expiration trigger channel and start background jobs
 	initExpirationTrigger(hyperCache)
 	hyperCache.startBackgroundJobs()
+
+	// Start optional management HTTP server (non-fatal if start fails)
+	if hyperCache.mgmtHTTP != nil {
+		err = hyperCache.mgmtHTTP.Start(ctx, hyperCache) // optional
+		if err != nil {
+			hyperCache.mgmtHTTP = nil
+		}
+	}
 
 	return hyperCache, nil
 }
@@ -859,8 +871,26 @@ func (hyperCache *HyperCache[T]) TriggerEviction() {
 	}
 }
 
+// TriggerExpiration exposes a manual expiration trigger (debounced/coalesced internally).
+func (hyperCache *HyperCache[T]) TriggerExpiration() { hyperCache.triggerExpiration() }
+
+// EvictionInterval returns configured eviction interval.
+func (hyperCache *HyperCache[T]) EvictionInterval() time.Duration { return hyperCache.evictionInterval }
+
+// ExpirationInterval returns configured expiration interval.
+func (hyperCache *HyperCache[T]) ExpirationInterval() time.Duration {
+	return hyperCache.expirationInterval
+}
+
+// EvictionAlgorithm returns eviction algorithm name.
+func (hyperCache *HyperCache[T]) EvictionAlgorithm() string { return hyperCache.evictionAlgorithmName }
+
+const (
+	shutdownTimeout = 2 * time.Second
+)
+
 // Stop function stops the expiration and eviction loops and closes the stop channel.
-func (hyperCache *HyperCache[T]) Stop() {
+func (hyperCache *HyperCache[T]) Stop(ctx context.Context) error {
 	// Stop the expiration and eviction loops
 	wg := sync.WaitGroup{}
 
@@ -876,6 +906,22 @@ func (hyperCache *HyperCache[T]) Stop() {
 
 	hyperCache.once = sync.Once{}
 	hyperCache.workerPool.Shutdown()
+
+	if hyperCache.mgmtHTTP != nil {
+		ctx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+
+		err := hyperCache.mgmtHTTP.Shutdown(ctx)
+		if err != nil {
+			// Handle error
+			cancel()
+
+			return err
+		}
+
+		cancel()
+	}
+
+	return nil
 }
 
 // GetStats returns the stats collected by the cache.
@@ -888,4 +934,14 @@ func (hyperCache *HyperCache[T]) GetStats() stats.Stats {
 	stats := hyperCache.StatsCollector.GetStats()
 
 	return stats
+}
+
+// ManagementHTTPAddress returns the bound address of the optional management HTTP server.
+// Empty string when the server is disabled or failed to start.
+func (hyperCache *HyperCache[T]) ManagementHTTPAddress() string {
+	if hyperCache.mgmtHTTP == nil {
+		return ""
+	}
+
+	return hyperCache.mgmtHTTP.Address()
 }
