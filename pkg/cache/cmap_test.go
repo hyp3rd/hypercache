@@ -1,10 +1,11 @@
 package cache
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/goccy/go-json"
 )
 
 type testStringer struct {

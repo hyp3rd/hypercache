@@ -29,6 +29,7 @@ type DistMemory struct {
 	membership *cluster.Membership
 	ring       *cluster.Ring
 	transport  DistTransport
+	httpServer *distHTTPServer // optional internal HTTP server
 	metrics    distMetrics
 	// configuration (static for now, future: dynamic membership/gossip)
 	replication  int
@@ -47,7 +48,6 @@ type DistMemory struct {
 	readConsistency  ConsistencyLevel
 	writeConsistency ConsistencyLevel
 	versionCounter   uint64 // global monotonic for this node (lamport-like)
-	// versionClock     uint64 // lamport-like counter for primary writes
 }
 
 // ConsistencyLevel defines read/write consistency semantics.
@@ -173,32 +173,16 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 		opt(dm)
 	}
 
-	if dm.shardCount <= 0 {
-		dm.shardCount = defaultDistShardCount
-	}
-
-	for range dm.shardCount { // Go 1.22+ range-over-int
-		dm.shards = append(dm.shards, &distShard{items: cache.New()})
-	}
-
-	if dm.membership == nil {
-		dm.initStandaloneMembership()
-	} else {
-		if dm.localNode == nil {
-			dm.localNode = cluster.NewNode("", "local")
-		}
-
-		dm.membership.Upsert(dm.localNode)
-		dm.ring = dm.membership.Ring()
-	}
-
-	if dm.hbInterval > 0 && dm.transport != nil {
-		dm.stopCh = make(chan struct{})
-		go dm.heartbeatLoop(ctx)
-	}
+	dm.ensureShardConfig()
+	dm.initMembershipIfNeeded()
+	dm.tryStartHTTP(ctx)
+	dm.startHeartbeatIfEnabled(ctx)
 
 	return dm, nil
 }
+
+// ensureShardConfig initializes shards respecting configured shardCount.
+// helper methods relocated after exported methods for lint ordering.
 
 // Capacity returns logical capacity.
 func (dm *DistMemory) Capacity() int { return dm.capacity }
@@ -247,7 +231,7 @@ func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) {
 }
 
 // Set stores item.
-func (dm *DistMemory) Set(_ context.Context, item *cache.Item) error { //nolint:ireturn
+func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolint:ireturn
 	err := item.Valid()
 	if err != nil {
 		return err
@@ -259,7 +243,7 @@ func (dm *DistMemory) Set(_ context.Context, item *cache.Item) error { //nolint:
 	}
 
 	if owners[0] != dm.localNode.ID { // attempt forward; may promote
-		proceedAsPrimary, ferr := dm.handleForwardPrimary(owners, item)
+		proceedAsPrimary, ferr := dm.handleForwardPrimary(ctx, owners, item)
 		if ferr != nil {
 			return ferr
 		}
@@ -272,9 +256,9 @@ func (dm *DistMemory) Set(_ context.Context, item *cache.Item) error { //nolint:
 	// primary path: assign version
 	item.Version = atomic.AddUint64(&dm.versionCounter, 1)
 	item.Origin = string(dm.localNode.ID)
-	dm.applySet(item, false)
+	dm.applySet(ctx, item, false)
 
-	acks := 1 + dm.replicateTo(item, owners[1:])
+	acks := 1 + dm.replicateTo(ctx, item, owners[1:])
 
 	needed := dm.requiredAcks(len(owners), dm.writeConsistency)
 	if acks < needed {
@@ -300,10 +284,10 @@ func (dm *DistMemory) List(_ context.Context, _ ...IFilter) ([]*cache.Item, erro
 }
 
 // Remove deletes keys.
-func (dm *DistMemory) Remove(_ context.Context, keys ...string) error { //nolint:ireturn
+func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //nolint:ireturn
 	for _, key := range keys {
 		if dm.isOwner(key) { // primary path
-			dm.applyRemove(key, true)
+			dm.applyRemove(ctx, key, true)
 
 			continue
 		}
@@ -318,7 +302,7 @@ func (dm *DistMemory) Remove(_ context.Context, keys ...string) error { //nolint
 		}
 
 		atomic.AddInt64(&dm.metrics.forwardRemove, 1)
-		_ = dm.transport.ForwardRemove(string(owners[0]), key, true) //nolint:errcheck // best-effort
+		_ = dm.transport.ForwardRemove(ctx, string(owners[0]), key, true) //nolint:errcheck // best-effort
 	}
 
 	return nil
@@ -377,9 +361,9 @@ func (dm *DistMemory) DebugOwners(key string) []cluster.NodeID {
 
 // DistTransport defines forwarding operations needed by DistMemory.
 type DistTransport interface {
-	ForwardSet(nodeID string, item *cache.Item, replicate bool) error
+	ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error
 	ForwardGet(ctx context.Context, nodeID string, key string) (*cache.Item, bool, error)
-	ForwardRemove(nodeID string, key string, replicate bool) error
+	ForwardRemove(ctx context.Context, nodeID string, key string, replicate bool) error
 	Health(ctx context.Context, nodeID string) error
 }
 
@@ -402,13 +386,13 @@ func (t *InProcessTransport) Register(b *DistMemory) {
 func (t *InProcessTransport) Unregister(id string) { delete(t.backends, id) }
 
 // ForwardSet forwards a set operation to the specified backend node.
-func (t *InProcessTransport) ForwardSet(nodeID string, item *cache.Item, replicate bool) error { //nolint:ireturn
+func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error { //nolint:ireturn
 	b, ok := t.backends[nodeID]
 	if !ok {
 		return sentinel.ErrBackendNotFound
 	}
 	// direct apply bypasses ownership check (already routed)
-	b.applySet(item, replicate)
+	b.applySet(ctx, item, replicate)
 
 	return nil
 }
@@ -429,13 +413,13 @@ func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID string, key st
 }
 
 // ForwardRemove forwards a remove operation to the specified backend node.
-func (t *InProcessTransport) ForwardRemove(nodeID string, key string, replicate bool) error { //nolint:ireturn
+func (t *InProcessTransport) ForwardRemove(ctx context.Context, nodeID string, key string, replicate bool) error { //nolint:ireturn
 	b, ok := t.backends[nodeID]
 	if !ok {
 		return sentinel.ErrBackendNotFound
 	}
 
-	b.applyRemove(key, replicate)
+	b.applyRemove(ctx, key, replicate)
 
 	return nil
 }
@@ -503,12 +487,90 @@ func (dm *DistMemory) Metrics() DistMetrics {
 }
 
 // Stop stops heartbeat loop if running.
-func (dm *DistMemory) Stop(_ context.Context) error { //nolint:ireturn
+func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 	if dm.stopCh != nil {
 		close(dm.stopCh)
 	}
 
+	if dm.httpServer != nil {
+		err := dm.httpServer.stop(ctx) // best-effort
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// ensureShardConfig initializes shards respecting configured shardCount.
+func (dm *DistMemory) ensureShardConfig() { //nolint:ireturn
+	if dm.shardCount <= 0 {
+		dm.shardCount = defaultDistShardCount
+	}
+
+	for range dm.shardCount {
+		dm.shards = append(dm.shards, &distShard{items: cache.New()})
+	}
+}
+
+// initMembershipIfNeeded sets up membership/ring and local node defaults.
+func (dm *DistMemory) initMembershipIfNeeded() { //nolint:ireturn
+	if dm.membership == nil {
+		dm.initStandaloneMembership()
+
+		return
+	}
+
+	if dm.localNode == nil {
+		dm.localNode = cluster.NewNode("", "local")
+	}
+
+	dm.membership.Upsert(dm.localNode)
+
+	dm.ring = dm.membership.Ring()
+	if dm.nodeAddr == "" && dm.localNode != nil {
+		dm.nodeAddr = dm.localNode.Address
+	}
+}
+
+// tryStartHTTP starts internal HTTP transport if not provided.
+func (dm *DistMemory) tryStartHTTP(ctx context.Context) { //nolint:ireturn
+	if dm.transport != nil || dm.nodeAddr == "" {
+		return
+	}
+
+	server := newDistHTTPServer(dm.nodeAddr)
+
+	err := server.start(ctx, dm)
+	if err != nil { // best-effort
+		return
+	}
+
+	dm.httpServer = server
+	resolver := func(nodeID string) (string, bool) {
+		if dm.membership != nil {
+			for _, n := range dm.membership.List() {
+				if string(n.ID) == nodeID {
+					return "http://" + n.Address, true
+				}
+			}
+		}
+
+		if dm.localNode != nil && string(dm.localNode.ID) == nodeID {
+			return "http://" + dm.localNode.Address, true
+		}
+
+		return "", false
+	}
+	dm.transport = NewDistHTTPTransport(2*time.Second, resolver)
+}
+
+// startHeartbeatIfEnabled launches heartbeat loop if configured.
+func (dm *DistMemory) startHeartbeatIfEnabled(ctx context.Context) { //nolint:ireturn
+	if dm.hbInterval > 0 && dm.transport != nil {
+		dm.stopCh = make(chan struct{})
+		go dm.heartbeatLoop(ctx)
+	}
 }
 
 // lookupOwners returns ring owners slice for a key (nil if no ring).
@@ -576,7 +638,7 @@ func (dm *DistMemory) getOne(ctx context.Context, key string, owners []cluster.N
 		if dm.isOwner(key) { // local repair if missing
 			if _, ok2 := dm.shardFor(key).items.Get(key); !ok2 {
 				cloned := *it
-				dm.applySet(&cloned, false)
+				dm.applySet(ctx, &cloned, false)
 				atomic.AddInt64(&dm.metrics.readRepair, 1)
 			}
 		}
@@ -635,7 +697,7 @@ func (dm *DistMemory) getWithConsistency(ctx context.Context, key string, owners
 }
 
 // replicateTo sends writes to replicas (best-effort) returning ack count.
-func (dm *DistMemory) replicateTo(item *cache.Item, replicas []cluster.NodeID) int { //nolint:ireturn
+func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replicas []cluster.NodeID) int { //nolint:ireturn
 	acks := 0
 
 	for _, oid := range replicas {
@@ -643,7 +705,7 @@ func (dm *DistMemory) replicateTo(item *cache.Item, replicas []cluster.NodeID) i
 			continue
 		}
 
-		if dm.transport != nil && dm.transport.ForwardSet(string(oid), item, false) == nil {
+		if dm.transport != nil && dm.transport.ForwardSet(ctx, string(oid), item, false) == nil {
 			acks++
 		}
 	}
@@ -697,7 +759,7 @@ func (dm *DistMemory) repairReplicas(ctx context.Context, key string, chosen *ca
 
 	for _, oid := range owners {
 		if oid == dm.localNode.ID {
-			dm.repairLocalReplica(key, chosen)
+			dm.repairLocalReplica(ctx, key, chosen)
 
 			continue
 		}
@@ -707,11 +769,11 @@ func (dm *DistMemory) repairReplicas(ctx context.Context, key string, chosen *ca
 }
 
 // repairLocalReplica updates the local item if stale.
-func (dm *DistMemory) repairLocalReplica(key string, chosen *cache.Item) { // separated to reduce cyclomatic complexity
+func (dm *DistMemory) repairLocalReplica(ctx context.Context, key string, chosen *cache.Item) { // separated to reduce cyclomatic complexity
 	localIt, ok := dm.shardFor(key).items.Get(key)
 	if !ok || localIt.Version < chosen.Version || (localIt.Version == chosen.Version && localIt.Origin > chosen.Origin) {
 		cloned := *chosen
-		dm.applySet(&cloned, false)
+		dm.applySet(ctx, &cloned, false)
 		atomic.AddInt64(&dm.metrics.readRepair, 1)
 	}
 }
@@ -724,20 +786,20 @@ func (dm *DistMemory) repairRemoteReplica(ctx context.Context, key string, chose
 
 	it, ok, _ := dm.transport.ForwardGet(ctx, string(oid), key)                                            //nolint:errcheck
 	if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) { // stale
-		_ = dm.transport.ForwardSet(string(oid), chosen, false) //nolint:errcheck
+		_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false) //nolint:errcheck
 		atomic.AddInt64(&dm.metrics.readRepair, 1)
 	}
 }
 
 // handleForwardPrimary tries to forward a Set to the primary; returns (proceedAsPrimary,false) if promotion required.
-func (dm *DistMemory) handleForwardPrimary(owners []cluster.NodeID, item *cache.Item) (bool, error) { //nolint:ireturn
+func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster.NodeID, item *cache.Item) (bool, error) { //nolint:ireturn
 	if dm.transport == nil {
 		return false, sentinel.ErrNotOwner
 	}
 
 	atomic.AddInt64(&dm.metrics.forwardSet, 1)
 
-	errFwd := dm.transport.ForwardSet(string(owners[0]), item, true)
+	errFwd := dm.transport.ForwardSet(ctx, string(owners[0]), item, true)
 	switch {
 	case errFwd == nil:
 		return false, nil // forwarded successfully
@@ -842,7 +904,7 @@ func (dm *DistMemory) isOwner(key string) bool {
 
 // applySet stores item locally and optionally replicates to other owners.
 // replicate indicates whether replication fan-out should occur (false for replica writes).
-func (dm *DistMemory) applySet(item *cache.Item, replicate bool) {
+func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate bool) {
 	dm.shardFor(item.Key).items.Set(item.Key, item)
 
 	if !replicate || dm.ring == nil {
@@ -861,12 +923,12 @@ func (dm *DistMemory) applySet(item *cache.Item, replicate bool) {
 			continue
 		}
 
-		_ = dm.transport.ForwardSet(string(oid), item, false) //nolint:errcheck // best-effort replica write
+		_ = dm.transport.ForwardSet(ctx, string(oid), item, false) //nolint:errcheck // best-effort replica write
 	}
 }
 
 // applyRemove deletes locally and optionally fan-outs removal to replicas.
-func (dm *DistMemory) applyRemove(key string, replicate bool) {
+func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate bool) {
 	dm.shardFor(key).items.Remove(key)
 
 	if !replicate || dm.ring == nil || dm.transport == nil {
@@ -885,7 +947,7 @@ func (dm *DistMemory) applyRemove(key string, replicate bool) {
 			continue
 		}
 
-		_ = dm.transport.ForwardRemove(string(oid), key, false) //nolint:errcheck // best-effort
+		_ = dm.transport.ForwardRemove(ctx, string(oid), key, false) //nolint:errcheck // best-effort
 	}
 }
 
