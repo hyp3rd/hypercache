@@ -31,4 +31,6 @@ const (
 	// Constant identifier for the Redis Cluster storage backend implementation
 	// that persists cache data across a Redis Cluster.
 	RedisClusterBackend = "redis-cluster"
+	// DistMemoryBackend is the name of the distributed in-memory backend (multi-node in-process simulation).
+	DistMemoryBackend = "dist-memory"
 )

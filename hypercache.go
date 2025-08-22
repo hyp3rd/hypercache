@@ -34,7 +34,6 @@ import (
 //
 // The cache leverages two channels to signal the expiration and eviction loops to start:
 //   - The expirationTriggerCh channel is used to signal the expiration loop to start.
-//   - The evictCh channel is used to signal the eviction loop to start.
 //
 // The cache also has a mutex that is used to protect the eviction algorithm from concurrent access.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
@@ -177,6 +176,8 @@ func resolveBackend[T backend.IBackendConstrain](bm *BackendManager, config *Con
 		return resolveRedisBackend[T](constructor, config)
 	case constants.RedisClusterBackend:
 		return resolveRedisClusterBackend[T](constructor, config)
+	case constants.DistMemoryBackend:
+		return resolveDistMemoryBackend[T](constructor, config)
 	default:
 		return nil, ewrap.Newf("unknown backend type: %s", config.BackendType)
 	}
@@ -222,6 +223,25 @@ func resolveRedisBackend[T backend.IBackendConstrain](constructor any, cfgAny an
 	}
 
 	bi, err := redisCtor.Create(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return castBackend[T](bi)
+}
+
+func resolveDistMemoryBackend[T backend.IBackendConstrain](constructor any, cfgAny any) (backend.IBackend[T], error) {
+	distCtor, ok := constructor.(DistMemoryBackendConstructor)
+	if !ok {
+		return nil, sentinel.ErrInvalidBackendType
+	}
+
+	cfg, ok := cfgAny.(*Config[backend.DistMemory])
+	if !ok {
+		return nil, sentinel.ErrInvalidBackendType
+	}
+
+	bi, err := distCtor.Create(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -933,6 +953,89 @@ func (hyperCache *HyperCache[T]) GetStats() stats.Stats {
 	stats := hyperCache.StatsCollector.GetStats()
 
 	return stats
+}
+
+// DistMetrics returns distributed backend metrics if the underlying backend is DistMemory.
+// Returns nil if unsupported.
+func (hyperCache *HyperCache[T]) DistMetrics() any { // generic any to avoid exporting type into core interface
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		m := dm.Metrics()
+
+		return m
+	}
+
+	return nil
+}
+
+// ClusterOwners returns the owners for a key if the distributed backend supports it; otherwise empty slice.
+func (hyperCache *HyperCache[T]) ClusterOwners(key string) []string {
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		owners := dm.DebugOwners(key)
+
+		out := make([]string, 0, len(owners))
+		for _, o := range owners {
+			out = append(out, string(o))
+		}
+
+		return out
+	}
+
+	return nil
+}
+
+// DistMembershipSnapshot returns a snapshot of membership if distributed backend; otherwise nil slice.
+func (hyperCache *HyperCache[T]) DistMembershipSnapshot() ([]struct {
+	ID          string
+	Address     string
+	State       string
+	Incarnation uint64
+}, int, int,
+) { //nolint:ireturn
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		mship := dm.Membership()
+		ring := dm.Ring()
+
+		if mship == nil || ring == nil {
+			return nil, 0, 0
+		}
+
+		nodes := mship.List()
+		out := make([]struct {
+			ID          string
+			Address     string
+			State       string
+			Incarnation uint64
+		}, 0, len(nodes))
+
+		for _, node := range nodes {
+			out = append(out, struct {
+				ID          string
+				Address     string
+				State       string
+				Incarnation uint64
+			}{
+				ID:          string(node.ID),
+				Address:     node.Address,
+				State:       node.State.String(),
+				Incarnation: node.Incarnation,
+			})
+		}
+
+		return out, ring.Replication(), ring.VirtualNodesPerNode()
+	}
+
+	return nil, 0, 0
+}
+
+// DistRingHashSpots returns vnode hashes as hex strings if available (debug).
+func (hyperCache *HyperCache[T]) DistRingHashSpots() []string { //nolint:ireturn
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		if ring := dm.Ring(); ring != nil {
+			return ring.VNodeHashes()
+		}
+	}
+
+	return nil
 }
 
 // ManagementHTTPAddress returns the bound address of the optional management HTTP server.

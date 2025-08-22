@@ -28,6 +28,8 @@ type Config[T backend.IBackendConstrain] struct {
 	RedisOptions []backend.Option[backend.Redis]
 	// RedisClusterOptions is a slice of options to configure the `RedisCluster` backend.
 	RedisClusterOptions []backend.Option[backend.RedisCluster]
+	// DistMemoryOptions configure the distributed in-memory (sharded) backend.
+	DistMemoryOptions []backend.DistMemoryOption
 	// HyperCacheOptions is a slice of options that can be used to configure `HyperCache`.
 	HyperCacheOptions []Option[T]
 }
@@ -52,6 +54,7 @@ func NewConfig[T backend.IBackendConstrain](backendType string) *Config[T] {
 		InMemoryOptions:     []backend.Option[backend.InMemory]{},
 		RedisOptions:        []backend.Option[backend.Redis]{},
 		RedisClusterOptions: []backend.Option[backend.RedisCluster]{},
+		DistMemoryOptions:   []backend.DistMemoryOption{},
 		HyperCacheOptions: []Option[T]{
 			WithExpirationInterval[T](constants.DefaultExpirationInterval),
 			WithEvictionAlgorithm[T]("lfu"),

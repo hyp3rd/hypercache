@@ -35,6 +35,14 @@ func (RedisClusterBackendConstructor) Create(cfg *Config[backend.RedisCluster]) 
 	return backend.NewRedisCluster(cfg.RedisClusterOptions...)
 }
 
+// DistMemoryBackendConstructor constructs DistMemory backends.
+type DistMemoryBackendConstructor struct{}
+
+// Create creates a new DistMemory backend.
+func (DistMemoryBackendConstructor) Create(_ *Config[backend.DistMemory]) (backend.IBackend[backend.DistMemory], error) {
+	return backend.NewDistMemory()
+}
+
 // BackendManager is a factory for creating HyperCache backend instances.
 // It maintains a registry of backend constructors. We store them as any internally,
 // and cast to the typed constructor at use site based on T.
@@ -48,6 +56,7 @@ func getDefaultBackends() map[string]any {
 		constants.InMemoryBackend:     InMemoryBackendConstructor{},
 		constants.RedisBackend:        RedisBackendConstructor{},
 		constants.RedisClusterBackend: RedisClusterBackendConstructor{},
+		constants.DistMemoryBackend:   DistMemoryBackendConstructor{},
 	}
 }
 

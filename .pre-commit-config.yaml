@@ -12,7 +12,6 @@ repos:
       - id: debug-statements
       - id: check-yaml
         files: .*\.(yaml|yml)$
-        exclude: docs/*
         args: [--allow-multiple-documents]
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.37.1
