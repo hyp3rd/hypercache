@@ -909,12 +909,11 @@ func (hyperCache *HyperCache[T]) Stop(ctx context.Context) error {
 
 	if hyperCache.mgmtHTTP != nil {
 		ctx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+		defer cancel()
 
 		err := hyperCache.mgmtHTTP.Shutdown(ctx)
 		if err != nil {
 			// Handle error
-			cancel()
-
 			return err
 		}
 

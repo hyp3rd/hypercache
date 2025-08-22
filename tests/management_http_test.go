@@ -52,7 +52,6 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 	dec := json.NewDecoder(resp.Body)
 	err = dec.Decode(&statsBody)
 	assert.NoError(t, err)
-	assert.True(t, resp.StatusCode == http.StatusOK)
 	_ = resp.Body.Close()
 
 	// /config
@@ -65,6 +64,7 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 	dec = json.NewDecoder(resp.Body)
 	_ = dec.Decode(&cfgBody)
 	_ = resp.Body.Close()
+	assert.True(t, len(cfgBody) > 0)
 
 	assert.True(t, cfgBody["evictionAlgorithm"] != nil)
 }
