@@ -66,6 +66,7 @@ func (f sortByFilter) ApplyFilter(_ string, items []*cache.Item) ([]*cache.Item,
 				return i.Key < j.Key
 			},
 		}
+
 	case constants.SortByLastAccess.String():
 		sorter = &itemSorter{
 			items: items,
@@ -73,6 +74,7 @@ func (f sortByFilter) ApplyFilter(_ string, items []*cache.Item) ([]*cache.Item,
 				return i.LastAccess.UnixNano() < j.LastAccess.UnixNano()
 			},
 		}
+
 	case constants.SortByAccessCount.String():
 		sorter = &itemSorter{
 			items: items,
@@ -80,6 +82,7 @@ func (f sortByFilter) ApplyFilter(_ string, items []*cache.Item) ([]*cache.Item,
 				return i.AccessCount < j.AccessCount
 			},
 		}
+
 	case constants.SortByExpiration.String():
 		sorter = &itemSorter{
 			items: items,
@@ -87,6 +90,7 @@ func (f sortByFilter) ApplyFilter(_ string, items []*cache.Item) ([]*cache.Item,
 				return i.Expiration < j.Expiration
 			},
 		}
+
 	default:
 		return nil, ewrap.Newf("invalid sort field: %s", f.field)
 	}

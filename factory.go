@@ -33,7 +33,10 @@ func (RedisBackendConstructor) Create(_ context.Context, cfg *Config[backend.Red
 type RedisClusterBackendConstructor struct{}
 
 // Create creates a new Redis Cluster backend.
-func (RedisClusterBackendConstructor) Create(_ context.Context, cfg *Config[backend.RedisCluster]) (backend.IBackend[backend.RedisCluster], error) {
+func (RedisClusterBackendConstructor) Create(
+	_ context.Context,
+	cfg *Config[backend.RedisCluster],
+) (backend.IBackend[backend.RedisCluster], error) {
 	return backend.NewRedisCluster(cfg.RedisClusterOptions...)
 }
 
@@ -41,7 +44,10 @@ func (RedisClusterBackendConstructor) Create(_ context.Context, cfg *Config[back
 type DistMemoryBackendConstructor struct{}
 
 // Create creates a new DistMemory backend.
-func (DistMemoryBackendConstructor) Create(ctx context.Context, _ *Config[backend.DistMemory]) (backend.IBackend[backend.DistMemory], error) {
+func (DistMemoryBackendConstructor) Create(
+	ctx context.Context,
+	_ *Config[backend.DistMemory],
+) (backend.IBackend[backend.DistMemory], error) {
 	return backend.NewDistMemory(ctx)
 }
 

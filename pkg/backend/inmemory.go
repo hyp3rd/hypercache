@@ -20,18 +20,18 @@ type InMemory struct {
 
 // NewInMemory creates a new in-memory cache with the given options.
 func NewInMemory(opts ...Option[InMemory]) (IBackend[InMemory], error) {
-	InMemory := &InMemory{
+	backendInstance := &InMemory{
 		items:           cache.New(),
 		itemPoolManager: cache.NewItemPoolManager(),
 	}
 	// Apply the backend options
-	ApplyOptions(InMemory, opts...)
+	ApplyOptions(backendInstance, opts...)
 	// Check if the `capacity` is valid
-	if InMemory.capacity < 0 {
+	if backendInstance.capacity < 0 {
 		return nil, sentinel.ErrInvalidCapacity
 	}
 
-	return InMemory, nil
+	return backendInstance, nil
 }
 
 // SetCapacity sets the capacity of the cache.
@@ -93,6 +93,7 @@ func (cacheBackend *InMemory) List(_ context.Context, filters ...IFilter) ([]*ca
 
 	for item := range cacheBackend.items.IterBuffered() {
 		cloned := item
+
 		items = append(items, &cloned.Val)
 	}
 

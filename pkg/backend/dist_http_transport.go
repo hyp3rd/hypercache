@@ -40,6 +40,11 @@ func NewDistHTTPTransport(timeout time.Duration, resolver func(string) (string, 
 
 // request/response DTOs moved to dist_http_types.go
 
+const (
+	errMsgNewRequest = "new request"
+	errMsgDoRequest  = "do request"
+)
+
 // ForwardSet forwards a set (or replication) request to a remote node.
 func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error { //nolint:ireturn
 	base, ok := t.baseURLFn(nodeID)
@@ -47,7 +52,14 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 		return sentinel.ErrBackendNotFound
 	}
 
-	reqBody := httpSetRequest{Key: item.Key, Value: item.Value, Expiration: item.Expiration.Milliseconds(), Version: item.Version, Origin: item.Origin, Replicate: replicate}
+	reqBody := httpSetRequest{ // split for line length
+		Key:        item.Key,
+		Value:      item.Value,
+		Expiration: item.Expiration.Milliseconds(),
+		Version:    item.Version,
+		Origin:     item.Origin,
+		Replicate:  replicate,
+	}
 
 	payloadBytes, err := json.Marshal(&reqBody)
 	if err != nil {
@@ -56,16 +68,16 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 
 	url := base + "/internal/cache/set"
 
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes)) // background ctx; caller handles outer deadline
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
 	if err != nil {
-		return ewrap.Wrap(err, "new request")
+		return ewrap.Wrap(err, errMsgNewRequest)
 	}
 
 	hreq.Header.Set("Content-Type", "application/json")
 
 	resp, err := t.client.Do(hreq)
 	if err != nil {
-		return ewrap.Wrap(err, "do request")
+		return ewrap.Wrap(err, errMsgDoRequest)
 	}
 
 	defer func() {
@@ -102,12 +114,12 @@ func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID string, key s
 
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, false, ewrap.Wrap(err, "new request")
+		return nil, false, ewrap.Wrap(err, errMsgNewRequest)
 	}
 
 	resp, err := t.client.Do(hreq)
 	if err != nil {
-		return nil, false, ewrap.Wrap(err, "do request")
+		return nil, false, ewrap.Wrap(err, errMsgDoRequest)
 	}
 
 	defer func() { _ = resp.Body.Close() }() //nolint:errcheck // best-effort
@@ -170,7 +182,13 @@ func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
 			return nil, false, ewrap.Wrap(err, "unmarshal mirror")
 		}
 		// reconstruct cache.Item (we ignore expiration formatting difference vs ms)
-		return &cache.Item{Key: mirror.Key, Value: mirror.Value, Expiration: time.Duration(mirror.Expiration) * time.Millisecond, Version: mirror.Version, Origin: mirror.Origin}, true, nil
+		return &cache.Item{ // multi-line for readability
+			Key:        mirror.Key,
+			Value:      mirror.Value,
+			Expiration: time.Duration(mirror.Expiration) * time.Millisecond,
+			Version:    mirror.Version,
+			Origin:     mirror.Origin,
+		}, true, nil
 	}
 
 	return &cache.Item{}, true, nil
@@ -187,12 +205,12 @@ func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID string, ke
 
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return ewrap.Wrap(err, "new request")
+		return ewrap.Wrap(err, errMsgNewRequest)
 	}
 
 	resp, err := t.client.Do(hreq)
 	if err != nil {
-		return ewrap.Wrap(err, "do request")
+		return ewrap.Wrap(err, errMsgDoRequest)
 	}
 
 	defer func() { _ = resp.Body.Close() }() //nolint:errcheck // best-effort
@@ -219,12 +237,12 @@ func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error { /
 
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return ewrap.Wrap(err, "new request")
+		return ewrap.Wrap(err, errMsgNewRequest)
 	}
 
 	resp, err := t.client.Do(hreq)
 	if err != nil {
-		return ewrap.Wrap(err, "do request")
+		return ewrap.Wrap(err, errMsgDoRequest)
 	}
 
 	defer func() { _ = resp.Body.Close() }() //nolint:errcheck // best-effort

@@ -36,30 +36,40 @@ func newDistHTTPServer(addr string) *distHTTPServer {
 }
 
 func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error { //nolint:ireturn
-	// routes
-	// set
-	// POST /internal/cache/set
-	// body: httpSetRequest
-	s.app.Post("/internal/cache/set", func(fctx fiber.Ctx) error {
+	s.registerSet(ctx, dm)
+	s.registerGet(ctx, dm)
+	s.registerRemove(ctx, dm)
+	s.registerHealth()
+
+	return s.listen(ctx)
+}
+
+func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) { //nolint:ireturn
+	s.app.Post("/internal/cache/set", func(fctx fiber.Ctx) error { // small handler
 		var req httpSetRequest
 
-		err := json.Unmarshal(fctx.Body(), &req)
-		if err != nil {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		body := fctx.Body()
+
+		unmarshalErr := json.Unmarshal(body, &req)
+		if unmarshalErr != nil { // separated to satisfy noinlineerr
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": unmarshalErr.Error()})
 		}
 
-		it := &cache.Item{Key: req.Key, Value: req.Value, Expiration: time.Duration(req.Expiration) * time.Millisecond, Version: req.Version, Origin: req.Origin}
-		if req.Replicate {
-			dm.applySet(ctx, it, true)
-
-			return fctx.JSON(httpSetResponse{})
+		it := &cache.Item{
+			Key:        req.Key,
+			Value:      req.Value,
+			Expiration: time.Duration(req.Expiration) * time.Millisecond,
+			Version:    req.Version,
+			Origin:     req.Origin,
 		}
 
-		dm.applySet(ctx, it, false)
+		dm.applySet(ctx, it, req.Replicate)
 
 		return fctx.JSON(httpSetResponse{})
 	})
+}
 
+func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) { //nolint:ireturn
 	s.app.Get("/internal/cache/get", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
@@ -77,16 +87,16 @@ func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error { //no
 
 		return fctx.JSON(httpGetResponse{Found: false})
 	})
+}
 
+func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { //nolint:ireturn
 	s.app.Delete("/internal/cache/remove", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
 			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
 		}
 
-		replicateRaw := fctx.Query("replicate", "false")
-
-		replicate, parseErr := strconv.ParseBool(replicateRaw)
+		replicate, parseErr := strconv.ParseBool(fctx.Query("replicate", "false"))
 		if parseErr != nil {
 			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid replicate"})
 		}
@@ -95,12 +105,13 @@ func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error { //no
 
 		return fctx.SendStatus(fiber.StatusOK)
 	})
+}
 
-	// reuse /health in management server or provide inline
-	s.app.Get("/health", func(fctx fiber.Ctx) error {
-		return fctx.SendString("ok")
-	})
+func (s *distHTTPServer) registerHealth() { //nolint:ireturn
+	s.app.Get("/health", func(fctx fiber.Ctx) error { return fctx.SendString("ok") })
+}
 
+func (s *distHTTPServer) listen(ctx context.Context) error { //nolint:ireturn
 	lc := net.ListenConfig{}
 
 	ln, err := lc.Listen(ctx, "tcp", s.addr)
@@ -110,10 +121,10 @@ func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error { //no
 
 	s.ln = ln
 
-	go func() {
-		err = s.app.Listener(ln)
-		if err != nil {
-			return
+	go func() { // capture server errors (ignored intentionally for now)
+		serveErr := s.app.Listener(ln)
+		if serveErr != nil { // separated for noinlineerr linter
+			_ = serveErr
 		}
 	}()
 

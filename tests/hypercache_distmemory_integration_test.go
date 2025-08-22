@@ -29,6 +29,7 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("backend1: %v", err)
 	}
+
 	b2i, err := backend.NewDistMemory(
 		context.TODO(),
 		backend.WithDistMembership(membership, n2),
@@ -37,6 +38,7 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("backend2: %v", err)
 	}
+
 	b1 := b1i.(*backend.DistMemory) //nolint:forcetypeassert
 	b2 := b2i.(*backend.DistMemory) //nolint:forcetypeassert
 
@@ -51,11 +53,15 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 		if len(owners) == 0 {
 			t.Fatalf("no owners for key %s", k)
 		}
+
 		item := &cachev2.Item{Key: k, Value: k}
-		if err := item.Valid(); err != nil {
+		err := item.Valid()
+		if err != nil {
 			t.Fatalf("item valid %s: %v", k, err)
 		}
+
 		target := owners[0]
+
 		var err2 error
 		switch target {
 		case n1.ID:
@@ -65,6 +71,7 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 		default:
 			t.Fatalf("unexpected owner id %s", target)
 		}
+
 		if err2 != nil {
 			t.Fatalf("set %s via %s: %v", k, target, err2)
 		}
@@ -75,6 +82,7 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 		if _, ok := b1.Get(context.Background(), k); !ok {
 			t.Fatalf("b1 cannot get key %s", k)
 		}
+
 		if _, ok := b2.Get(context.Background(), k); !ok { // should forward or local hit
 			t.Fatalf("b2 cannot get key %s", k)
 		}

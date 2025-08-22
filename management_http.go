@@ -163,28 +163,55 @@ func (s *ManagementHTTPServer) Shutdown(ctx context.Context) error {
 }
 
 // mountRoutes.
-func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCache) {
-	// optional auth wrapper
-	useAuth := func(handler fiber.Handler) fiber.Handler {
-		if s.authFunc == nil {
-			return handler
-		}
+func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCache) { // split into helpers to satisfy funlen
+	useAuth := s.wrapAuth
+	s.registerBasic(useAuth, hc)
+	s.registerDistributed(useAuth, hc)
+	s.registerCluster(useAuth, hc)
+	s.registerControl(ctx, useAuth, hc)
+}
 
-		return func(fiberCtx fiber.Ctx) error {
-			authErr := s.authFunc(fiberCtx)
-			if authErr != nil {
-				return authErr
-			}
-
-			return handler(fiberCtx)
-		}
+// wrapAuth returns an auth-wrapped handler if authFunc provided.
+func (s *ManagementHTTPServer) wrapAuth(handler fiber.Handler) fiber.Handler { //nolint:ireturn
+	if s.authFunc == nil {
+		return handler
 	}
 
-	// health
+	return func(fiberCtx fiber.Ctx) error {
+		authErr := s.authFunc(fiberCtx)
+		if authErr != nil {
+			return authErr
+		}
+
+		return handler(fiberCtx)
+	}
+}
+
+func (s *ManagementHTTPServer) registerBasic(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) { //nolint:ireturn
 	s.app.Get("/health", useAuth(func(fiberCtx fiber.Ctx) error { return fiberCtx.SendString("ok") }))
-	// stats
 	s.app.Get("/stats", useAuth(func(fiberCtx fiber.Ctx) error { return fiberCtx.JSON(hc.GetStats()) }))
-	// distributed metrics (if available via optional interface)
+	s.app.Get("/config", useAuth(func(fiberCtx fiber.Ctx) error {
+		cfg := map[string]any{
+			"capacity":           hc.Capacity(),
+			"allocation":         hc.Allocation(),
+			"maxCacheSize":       hc.MaxCacheSize(),
+			"evictionInterval":   hc.EvictionInterval().String(),
+			"expirationInterval": hc.ExpirationInterval().String(),
+			"evictionAlgorithm":  hc.EvictionAlgorithm(),
+		}
+
+		if mi, ok := hc.(membershipIntrospect); ok { // enrich distributed
+			_, replication, vnodes := mi.DistMembershipSnapshot()
+
+			cfg["replication"] = replication
+			cfg["virtualNodesPerNode"] = vnodes
+		}
+
+		return fiberCtx.JSON(cfg)
+	}))
+}
+
+func (s *ManagementHTTPServer) registerDistributed(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) { //nolint:ireturn
 	s.app.Get("/dist/metrics", useAuth(func(fiberCtx fiber.Ctx) error {
 		if dist, ok := hc.(managementCacheDistOpt); ok {
 			m := dist.DistMetrics()
@@ -197,8 +224,6 @@ func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCac
 
 		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
 	}))
-
-	// cluster owners debug for a key (?key=foo)
 	s.app.Get("/dist/owners", useAuth(func(fiberCtx fiber.Ctx) error {
 		if dist, ok := hc.(managementCacheDistOpt); ok {
 			key := fiberCtx.Query("key")
@@ -213,8 +238,9 @@ func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCac
 
 		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
 	}))
+}
 
-	// cluster members
+func (s *ManagementHTTPServer) registerCluster(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) { //nolint:ireturn
 	s.app.Get("/cluster/members", useAuth(func(fiberCtx fiber.Ctx) error {
 		if mi, ok := hc.(membershipIntrospect); ok {
 			members, replication, vnodes := mi.DistMembershipSnapshot()
@@ -224,8 +250,6 @@ func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCac
 
 		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
 	}))
-
-	// cluster ring hashes
 	s.app.Get("/cluster/ring", useAuth(func(fiberCtx fiber.Ctx) error {
 		if mi, ok := hc.(membershipIntrospect); ok {
 			spots := mi.DistRingHashSpots()
@@ -235,39 +259,19 @@ func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCac
 
 		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
 	}))
-	// config (sanitized minimal)
-	s.app.Get("/config", useAuth(func(fiberCtx fiber.Ctx) error {
-		cfg := map[string]any{
-			"capacity":           hc.Capacity(),
-			"allocation":         hc.Allocation(),
-			"maxCacheSize":       hc.MaxCacheSize(),
-			"evictionInterval":   hc.EvictionInterval().String(),
-			"expirationInterval": hc.ExpirationInterval().String(),
-			"evictionAlgorithm":  hc.EvictionAlgorithm(),
-		}
+}
 
-		// If distributed config available, enrich response (replication, virtualNodes, nodeCount)
-		if mi, ok := hc.(membershipIntrospect); ok {
-			_, replication, vnodes := mi.DistMembershipSnapshot()
-			cfg["replication"] = replication
-			cfg["virtualNodesPerNode"] = vnodes
-		}
-
-		return fiberCtx.JSON(cfg)
-	}))
-	// trigger eviction
+func (s *ManagementHTTPServer) registerControl(ctx context.Context, useAuth func(fiber.Handler) fiber.Handler, hc managementCache) { //nolint:ireturn
 	s.app.Post("/evict", useAuth(func(fiberCtx fiber.Ctx) error {
 		hc.TriggerEviction(ctx)
 
 		return fiberCtx.SendStatus(fiber.StatusAccepted)
 	}))
-	// trigger expiration
 	s.app.Post("/trigger-expiration", useAuth(func(fiberCtx fiber.Ctx) error {
 		hc.TriggerExpiration()
 
 		return fiberCtx.SendStatus(fiber.StatusAccepted)
 	}))
-	// clear cache
 	s.app.Post("/clear", useAuth(func(fiberCtx fiber.Ctx) error {
 		clearErr := hc.Clear(ctx)
 		if clearErr != nil {

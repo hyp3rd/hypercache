@@ -81,6 +81,7 @@ func (m *Membership) Mark(id NodeID, state NodeState) bool { //nolint:ireturn
 	if ok {
 		n.State = state
 		n.Incarnation++
+
 		n.LastSeen = time.Now()
 	}
 

@@ -44,17 +44,20 @@ func TestDistMemoryVersionTieBreak(t *testing.T) { //nolint:paralleltest
 
 	// choose key where b1,b2,b3 ordering fixed
 	key := "tie"
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		cand := fmt.Sprintf("tie%d", i)
+
 		owners := b1.DebugOwners(cand)
 		if len(owners) == 3 && owners[0] == b1.LocalNodeID() && owners[1] == b2.LocalNodeID() && owners[2] == b3.LocalNodeID() {
 			key = cand
+
 			break
 		}
 	}
 
 	// primary write to establish version=1 origin=b1
-	if err := b1.Set(context.Background(), &cachev2.Item{Key: key, Value: "v1"}); err != nil {
+	err := b1.Set(context.Background(), &cachev2.Item{Key: key, Value: "v1"})
+	if err != nil {
 		t.Fatalf("initial set: %v", err)
 	}
 
@@ -67,6 +70,7 @@ func TestDistMemoryVersionTieBreak(t *testing.T) { //nolint:paralleltest
 	if !ok {
 		t.Fatalf("expected quorum read ok")
 	}
+
 	if it.Value != "v1" {
 		t.Fatalf("expected b1 value win, got %v", it.Value)
 	}

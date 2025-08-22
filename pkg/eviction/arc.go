@@ -47,12 +47,15 @@ func (l *arcList) remove(node *arcNode) {
 	case l.head == l.tail:
 		l.head = nil
 		l.tail = nil
+
 	case node == l.head:
 		l.head = node.next
 		l.head.prev = nil
+
 	case node == l.tail:
 		l.tail = node.prev
 		l.tail.next = nil
+
 	default:
 		node.prev.next = node.next
 		node.next.prev = node.prev
@@ -101,12 +104,15 @@ func (l *arcGhostList) remove(node *arcGhostNode) {
 	case l.head == l.tail:
 		l.head = nil
 		l.tail = nil
+
 	case node == l.head:
 		l.head = node.next
 		l.head.prev = nil
+
 	case node == l.tail:
 		l.tail = node.prev
 		l.tail.next = nil
+
 	default:
 		node.prev.next = node.next
 		node.next.prev = node.prev
@@ -177,6 +183,7 @@ func (a *ARC) Get(key string) (any, bool) {
 		a.t1.remove(node)
 		delete(a.t1Idx, key)
 		a.t2.pushFront(node)
+
 		a.t2Idx[key] = node
 
 		return node.value, true
@@ -221,6 +228,7 @@ func (a *ARC) Delete(key string) {
 	if node, ok := a.t1Idx[key]; ok {
 		a.t1.remove(node)
 		delete(a.t1Idx, key)
+
 		a.length--
 
 		return
@@ -229,6 +237,7 @@ func (a *ARC) Delete(key string) {
 	if node, ok := a.t2Idx[key]; ok {
 		a.t2.remove(node)
 		delete(a.t2Idx, key)
+
 		a.length--
 
 		return
@@ -274,6 +283,7 @@ func (a *ARC) replace(x string) string {
 		if tail := a.t1.removeTail(); tail != nil {
 			delete(a.t1Idx, tail.key)
 			a.b1.pushFront(&arcGhostNode{key: tail.key})
+
 			a.b1Idx[tail.key] = a.b1.head
 			a.length--
 
@@ -283,6 +293,7 @@ func (a *ARC) replace(x string) string {
 		if tail := a.t2.removeTail(); tail != nil {
 			delete(a.t2Idx, tail.key)
 			a.b2.pushFront(&arcGhostNode{key: tail.key})
+
 			a.b2Idx[tail.key] = a.b2.head
 			a.length--
 
@@ -301,6 +312,7 @@ func (a *ARC) updateIfResident(key string, value any) bool {
 		delete(a.t1Idx, key)
 
 		a.t2.pushFront(node)
+
 		a.t2Idx[key] = node
 
 		return true
@@ -334,6 +346,7 @@ func (a *ARC) handleGhostHit(key string, value any) bool {
 
 		node := &arcNode{key: key, value: value}
 		a.t2.pushFront(node)
+
 		a.t2Idx[key] = node
 		a.length++
 
@@ -355,6 +368,7 @@ func (a *ARC) handleGhostHit(key string, value any) bool {
 
 		node := &arcNode{key: key, value: value}
 		a.t2.pushFront(node)
+
 		a.t2Idx[key] = node
 		a.length++
 
@@ -372,6 +386,7 @@ func (a *ARC) insertNew(key string, value any) {
 
 	node := &arcNode{key: key, value: value}
 	a.t1.pushFront(node)
+
 	a.t1Idx[key] = node
 	a.length++
 }
@@ -400,6 +415,7 @@ func (a *ARC) trimForHistoryLimit() {
 	if tail := a.t1.removeTail(); tail != nil {
 		delete(a.t1Idx, tail.key)
 		a.b1.pushFront(&arcGhostNode{key: tail.key})
+
 		a.b1Idx[tail.key] = a.b1.head
 		a.length--
 	}

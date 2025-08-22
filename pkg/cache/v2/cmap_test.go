@@ -18,6 +18,7 @@ func TestNew(t *testing.T) {
 
 			return
 		}
+
 		if shard.items == nil {
 			t.Errorf("Shard %d items map is nil", i)
 
@@ -71,11 +72,13 @@ func TestSetAndGet(t *testing.T) {
 
 	// Test Set and Get
 	cm.Set("test_key", item)
+
 	retrieved, ok := cm.Get("test_key")
 
 	if !ok {
 		t.Error("Expected to find item, but it was not found")
 	}
+
 	if retrieved != item {
 		t.Error("Retrieved item does not match set item")
 	}
@@ -101,6 +104,7 @@ func TestHas(t *testing.T) {
 
 	// Test Has with existing key
 	cm.Set("test_key", item)
+
 	if !cm.Has("test_key") {
 		t.Error("Has returned false for existing key")
 	}
@@ -121,6 +125,7 @@ func TestPop(t *testing.T) {
 
 	// Test Pop existing key
 	cm.Set("test_key", item)
+
 	popped, ok = cm.Pop("test_key")
 	if !ok || popped != item {
 		t.Error("Pop did not return correct item")
@@ -163,16 +168,19 @@ func TestCount(t *testing.T) {
 	}
 
 	cm.Set("key1", item)
+
 	if cm.Count() != 1 {
 		t.Error("Count should be 1 after adding one item")
 	}
 
 	cm.Set("key2", item)
+
 	if cm.Count() != 2 {
 		t.Error("Count should be 2 after adding two items")
 	}
 
 	cm.Remove("key1")
+
 	if cm.Count() != 1 {
 		t.Error("Count should be 1 after removing one item")
 	}
@@ -239,10 +247,12 @@ func TestConcurrentAccess(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	// Concurrent writes
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(1)
+
 		go func(i int) {
 			defer wg.Done()
+
 			item := &Item{
 				Value:      i,
 				Expiration: time.Hour,
@@ -252,10 +262,12 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Concurrent reads
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
+
 		go func(i int) {
 			defer wg.Done()
+
 			cm.Get(string(rune(i)))
 		}(i)
 	}
@@ -282,7 +294,8 @@ func BenchmarkSet(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for i := range b.N {
 		cm.Set(string(rune(i)), item)
 	}
 }
@@ -295,12 +308,13 @@ func BenchmarkGet(b *testing.B) {
 	}
 
 	// Pre-populate
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		cm.Set(string(rune(i)), item)
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for i := range b.N {
 		cm.Get(string(rune(i % 1000)))
 	}
 }
@@ -320,6 +334,7 @@ func BenchmarkConcurrentSetGet(b *testing.B) {
 			} else {
 				cm.Get(string(rune(i)))
 			}
+
 			i++
 		}
 	})

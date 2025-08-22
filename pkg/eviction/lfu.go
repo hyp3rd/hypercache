@@ -68,6 +68,7 @@ func (fh *FrequencyHeap) Pop() any {
 	old := *fh
 	n := len(old)
 	node := old[n-1]
+
 	node.index = -1
 	*fh = old[0 : n-1]
 
@@ -115,7 +116,9 @@ func (l *LFUAlgorithm) Set(key string, value any) {
 		// Key exists: update value and increment frequency
 		node.value = value
 		node.count++
+
 		l.seq++
+
 		node.last = l.seq
 		heap.Fix(l.freqs, node.index)
 
@@ -127,14 +130,17 @@ func (l *LFUAlgorithm) Set(key string, value any) {
 	}
 
 	l.seq++
+
 	node := &Node{
 		key:   key,
 		value: value,
 		count: 1,
 		last:  l.seq,
 	}
+
 	l.items[key] = node
 	heap.Push(l.freqs, node)
+
 	l.length++
 }
 
@@ -149,7 +155,9 @@ func (l *LFUAlgorithm) Get(key string) (any, bool) {
 	}
 
 	node.count++
+
 	l.seq++
+
 	node.last = l.seq
 	heap.Fix(l.freqs, node.index)
 
@@ -169,6 +177,7 @@ func (l *LFUAlgorithm) Delete(key string) {
 	// heap.Remove will maintain heap invariants and update indices
 	heap.Remove(l.freqs, node.index)
 	delete(l.items, key)
+
 	l.length--
 }
 
@@ -184,6 +193,7 @@ func (l *LFUAlgorithm) internalEvict() (string, bool) {
 	}
 
 	delete(l.items, node.key)
+
 	l.length--
 
 	return node.key, true

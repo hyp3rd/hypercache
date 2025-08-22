@@ -17,7 +17,7 @@ type DefaultJSONSerializer struct{}
 
 // Marshal serializes the given value into a byte slice.
 // @param v.
-func (d *DefaultJSONSerializer) Marshal(v any) ([]byte, error) {
+func (*DefaultJSONSerializer) Marshal(v any) ([]byte, error) { // receiver omitted (unused)
 	data, err := json.Marshal(&v)
 	if err != nil {
 		return nil, ewrap.Wrap(err, "failed to marshal json")
@@ -29,7 +29,7 @@ func (d *DefaultJSONSerializer) Marshal(v any) ([]byte, error) {
 // Unmarshal deserializes the given byte slice into the given value.
 // @param data
 // @param v.
-func (d *DefaultJSONSerializer) Unmarshal(data []byte, v any) error {
+func (*DefaultJSONSerializer) Unmarshal(data []byte, v any) error { // receiver omitted (unused)
 	err := json.Unmarshal(data, &v)
 	if err != nil {
 		return ewrap.Wrap(err, "failed to unmarshal json")

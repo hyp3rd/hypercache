@@ -17,6 +17,7 @@ func TestLFU_EvictsOldestOnTie_InsertOrder(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected an eviction, got none")
 	}
+
 	if key != "a" {
 		t.Fatalf("expected 'a' to be evicted first on tie, got %q", key)
 	}
@@ -26,6 +27,7 @@ func TestLFU_EvictsOldestOnTie_InsertOrder(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected a second eviction, got none")
 	}
+
 	if key != "b" {
 		t.Fatalf("expected 'b' to be evicted second, got %q", key)
 	}
@@ -46,6 +48,7 @@ func TestLFU_EvictsOldestOnTie_AccessOrder(t *testing.T) {
 	if _, ok := lfu.Get("b"); !ok {
 		t.Fatalf("expected to get 'b'")
 	}
+
 	if _, ok := lfu.Get("a"); !ok {
 		t.Fatalf("expected to get 'a'")
 	}
@@ -55,6 +58,7 @@ func TestLFU_EvictsOldestOnTie_AccessOrder(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected an eviction, got none")
 	}
+
 	if key != "b" {
 		t.Fatalf("expected 'b' to be evicted first on tie after accesses, got %q", key)
 	}
@@ -67,6 +71,7 @@ func TestLFU_ZeroCapacity_NoOp(t *testing.T) {
 	}
 
 	lfu.Set("a", 1)
+
 	if _, ok := lfu.Get("a"); ok {
 		t.Fatalf("expected Get to miss on zero-capacity cache")
 	}

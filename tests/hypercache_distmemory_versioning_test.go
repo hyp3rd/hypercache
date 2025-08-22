@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -44,24 +45,28 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 	b1 := b1i.(*backend.DistMemory) //nolint:forcetypeassert
 	b2 := b2i.(*backend.DistMemory) //nolint:forcetypeassert
 	b3 := b3i.(*backend.DistMemory) //nolint:forcetypeassert
+
 	transport.Register(b1)
 	transport.Register(b2)
 	transport.Register(b3)
 
 	// Find a deterministic key where ownership ordering is b1,b2,b3 to avoid forwarding complexities.
 	key := "k"
-	for i := 0; i < 2000; i++ { // brute force
+	for i := range 2000 { // brute force
 		cand := fmt.Sprintf("k%d", i)
+
 		owners := b1.DebugOwners(cand)
 		if len(owners) == 3 && owners[0] == b1.LocalNodeID() && owners[1] == b2.LocalNodeID() && owners[2] == b3.LocalNodeID() {
 			key = cand
+
 			break
 		}
 	}
 
 	// Write key via primary.
 	item1 := &cachev2.Item{Key: key, Value: "v1"}
-	if err := b1.Set(context.Background(), item1); err != nil {
+	err := b1.Set(context.Background(), item1)
+	if err != nil {
 		t.Fatalf("initial set: %v", err)
 	}
 
@@ -75,6 +80,7 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 	if !ok {
 		t.Fatalf("expected read ok")
 	}
+
 	if it.Value != "v1" {
 		t.Fatalf("expected value v1, got %v", it.Value)
 	}
@@ -86,8 +92,10 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 
 	// Simulate reduced acks: unregister one replica and perform write requiring quorum (2 of 3).
 	transport.Unregister(string(n3.ID))
+
 	item2 := &cachev2.Item{Key: key, Value: "v2"}
-	if err := b1.Set(context.Background(), item2); err != nil && err != sentinel.ErrQuorumFailed {
+	err = b1.Set(context.Background(), item2)
+	if err != nil && !errors.Is(err, sentinel.ErrQuorumFailed) {
 		t.Fatalf("unexpected error after replica loss: %v", err)
 	}
 }

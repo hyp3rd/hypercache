@@ -22,12 +22,13 @@ func TestClock_EvictsWhenHandFindsColdPage(t *testing.T) {
 		key string
 		ok  bool
 	)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		key, ok = clk.Evict()
 		if ok && key == "b" {
 			break
 		}
 	}
+
 	if !ok || key != "b" {
 		t.Fatalf("expected to evict 'b' first within retries, got %q ok=%v", key, ok)
 	}
@@ -37,6 +38,7 @@ func TestClock_EvictsWhenHandFindsColdPage(t *testing.T) {
 	if !ok {
 		key, ok = clk.Evict()
 	}
+
 	if !ok || key != "a" {
 		t.Fatalf("expected to evict 'a' second, got %q ok=%v", key, ok)
 	}
@@ -49,6 +51,7 @@ func TestClock_ZeroCapacity_NoOp(t *testing.T) {
 	}
 
 	clk.Set("a", 1)
+
 	if _, ok := clk.Get("a"); ok {
 		t.Fatalf("expected Get to miss on zero-capacity cache")
 	}
@@ -74,15 +77,17 @@ func TestClock_Delete_RemovesItem(t *testing.T) {
 
 	// Evict should not return deleted key
 	// Loop a couple of times due to potential decrements
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if key, ok := clk.Evict(); ok {
 			if key == "a" {
 				t.Fatalf("did not expect to evict deleted key 'a'")
 			}
+
 			if key == "b" {
 				return
 			}
 		}
 	}
+
 	t.Fatalf("expected to eventually evict 'b'")
 }

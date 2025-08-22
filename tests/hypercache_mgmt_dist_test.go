@@ -17,6 +17,7 @@ import (
 // TestManagementHTTPDistMemory validates management endpoints for the experimental DistMemory backend.
 func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	cfg := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
+
 	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
 		hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:0"), // ephemeral port
 	)
@@ -30,6 +31,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	if err != nil {
 		t.Fatalf("new dist hypercache: %v", err)
 	}
+
 	defer func() { _ = hc.Stop(context.Background()) }()
 
 	baseURL := waitForMgmt(t, hc)
@@ -46,6 +48,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	if _, ok := configBody["replication"]; !ok {
 		t.Errorf("/config missing replication")
 	}
+
 	if vnp, ok := configBody["virtualNodesPerNode"]; !ok || vnp == nil {
 		t.Errorf("/config missing virtualNodesPerNode")
 	}
@@ -67,6 +70,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 		if e, hasErr := ownersBody["error"]; hasErr {
 			t.Fatalf("/dist/owners returned error: %v", e)
 		}
+
 		t.Errorf("/dist/owners missing owners field")
 	}
 
@@ -76,6 +80,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 		if e, hasErr := membersBody["error"]; hasErr {
 			t.Fatalf("/cluster/members returned error: %v", e)
 		}
+
 		t.Errorf("/cluster/members missing members field")
 	}
 
@@ -85,6 +90,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 		if e, hasErr := ringBody["error"]; hasErr {
 			t.Fatalf("/cluster/ring returned error: %v", e)
 		}
+
 		t.Errorf("/cluster/ring missing vnodes field")
 	}
 }
@@ -92,6 +98,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 // waitForMgmt waits until management HTTP server is bound and responsive.
 func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) string { //nolint:thelper
 	deadline := time.Now().Add(2 * time.Second)
+
 	var addr string
 	for time.Now().Before(deadline) {
 		addr = hc.ManagementHTTPAddress()
@@ -99,17 +106,22 @@ func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) st
 			resp, err := http.Get("http://" + addr + "/health") //nolint:noctx,gosec
 			if err == nil && resp.StatusCode == http.StatusOK {
 				_ = resp.Body.Close()
+
 				return "http://" + addr
 			}
+
 			if resp != nil {
 				_ = resp.Body.Close()
 			}
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	if addr == "" {
 		t.Fatalf("management http did not start")
 	}
+
 	return "http://" + addr
 }
 
@@ -119,11 +131,15 @@ func getJSON(t *testing.T, url string) map[string]any { //nolint:thelper
 		t.Fatalf("GET %s: %v", url, err)
 	}
 	defer resp.Body.Close()
+
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
+
 	m := map[string]any{}
+
 	_ = json.Unmarshal(b, &m)
+
 	return m
 }

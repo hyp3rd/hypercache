@@ -82,6 +82,7 @@ func getShardIndex(key string) uint32 {
 	var sum uint32 = fnvOffset32
 	for i := range key { // Go 1.22+ integer range over string indices
 		sum ^= uint32(key[i])
+
 		sum *= fnvPrime32
 	}
 
@@ -93,6 +94,7 @@ func getShardIndex(key string) uint32 {
 func (cm *ConcurrentMap) Set(key string, value *Item) {
 	shard := cm.GetShard(key)
 	shard.Lock()
+
 	shard.items[key] = value
 	shard.Unlock()
 }
@@ -180,6 +182,7 @@ func snapshot(cm *ConcurrentMap) []chan Tuple {
 			shard.RLock()
 			// Determine capacity and copy to a local slice to shorten lock hold time.
 			n := len(shard.items)
+
 			chans[index] = make(chan Tuple, n)
 
 			local := make([]Tuple, 0, n)
@@ -237,6 +240,7 @@ func (cm *ConcurrentMap) Clear() {
 	// Fast clear: reset each shard's map under lock.
 	for _, shard := range cm.shards {
 		shard.Lock()
+
 		shard.items = make(map[string]*Item)
 		shard.Unlock()
 	}
@@ -248,6 +252,7 @@ func (cm *ConcurrentMap) Count() int {
 
 	for _, shard := range cm.shards {
 		shard.RLock()
+
 		count += len(shard.items)
 		shard.RUnlock()
 	}

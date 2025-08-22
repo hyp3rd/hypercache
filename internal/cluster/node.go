@@ -34,9 +34,9 @@ func (s NodeState) String() string {
 		return "suspect"
 	case NodeDead:
 		return "dead"
+	default: // explicit default for revive enforce-switch-style
+		return "unknown"
 	}
-
-	return "unknown"
 }
 
 // NodeID is a stable identifier for a node.

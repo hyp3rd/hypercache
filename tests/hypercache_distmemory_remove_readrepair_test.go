@@ -9,7 +9,7 @@ import (
 	cachev2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
-// helper to build two-node replicated cluster
+// helper to build two-node replicated cluster.
 func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, *cluster.Ring) { //nolint:thelper
 	ring := cluster.NewRing(cluster.WithReplication(2))
 	membership := cluster.NewMembership(ring)
@@ -29,6 +29,7 @@ func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, 
 
 	b1 := b1i.(*backend.DistMemory) //nolint:forcetypeassert
 	b2 := b2i.(*backend.DistMemory) //nolint:forcetypeassert
+
 	transport.Register(b1)
 	transport.Register(b2)
 
@@ -39,21 +40,26 @@ func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, 
 func TestDistMemoryRemoveReplication(t *testing.T) {
 	b1, b2, ring := newTwoNodeCluster(t)
 	key := "remove-key"
+
 	owners := ring.Lookup(key)
 	if len(owners) == 0 {
 		t.Fatalf("no owners")
 	}
+
 	item := &cachev2.Item{Key: key, Value: "val"}
-	if err := item.Valid(); err != nil {
+	err := item.Valid()
+	if err != nil {
 		t.Fatalf("valid: %v", err)
 	}
 	// write via primary
 	if owners[0] == b1.LocalNodeID() { // local helper we add below
-		if err := b1.Set(context.Background(), item); err != nil {
+		err := b1.Set(context.Background(), item)
+		if err != nil {
 			t.Fatalf("set: %v", err)
 		}
 	} else {
-		if err := b2.Set(context.Background(), item); err != nil {
+		err := b2.Set(context.Background(), item)
+		if err != nil {
 			t.Fatalf("set: %v", err)
 		}
 	}
@@ -61,22 +67,27 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 	if _, ok := b1.Get(context.Background(), key); !ok {
 		t.Fatalf("b1 missing pre-remove")
 	}
+
 	if _, ok := b2.Get(context.Background(), key); !ok {
 		t.Fatalf("b2 missing pre-remove")
 	}
 	// remove via primary
 	if owners[0] == b1.LocalNodeID() {
-		if err := b1.Remove(context.Background(), key); err != nil {
+		err := b1.Remove(context.Background(), key)
+		if err != nil {
 			t.Fatalf("remove: %v", err)
 		}
 	} else {
-		if err := b2.Remove(context.Background(), key); err != nil {
+		err := b2.Remove(context.Background(), key)
+		if err != nil {
 			t.Fatalf("remove: %v", err)
 		}
 	}
+
 	if _, ok := b1.Get(context.Background(), key); ok {
 		t.Fatalf("b1 still has key after remove")
 	}
+
 	if _, ok := b2.Get(context.Background(), key); ok {
 		t.Fatalf("b2 still has key after remove")
 	}
@@ -86,21 +97,26 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 func TestDistMemoryReadRepair(t *testing.T) {
 	b1, b2, ring := newTwoNodeCluster(t)
 	key := "rr-key"
+
 	owners := ring.Lookup(key)
 	if len(owners) == 0 {
 		t.Fatalf("no owners")
 	}
+
 	item := &cachev2.Item{Key: key, Value: "val"}
-	if err := item.Valid(); err != nil {
+	err := item.Valid()
+	if err != nil {
 		t.Fatalf("valid: %v", err)
 	}
 	// write via primary
 	if owners[0] == b1.LocalNodeID() {
-		if err := b1.Set(context.Background(), item); err != nil {
+		err := b1.Set(context.Background(), item)
+		if err != nil {
 			t.Fatalf("set: %v", err)
 		}
 	} else {
-		if err := b2.Set(context.Background(), item); err != nil {
+		err := b2.Set(context.Background(), item)
+		if err != nil {
 			t.Fatalf("set: %v", err)
 		}
 	}
@@ -108,6 +124,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	if len(owners) < 2 {
 		t.Skip("replication factor <2")
 	}
+
 	replica := owners[1]
 	// optional: t.Logf("owners: %v primary=%s replica=%s", owners, owners[0], replica)
 	if replica == b1.LocalNodeID() {
@@ -119,6 +136,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	if replica == b1.LocalNodeID() && b1.LocalContains(key) {
 		t.Fatalf("replica still has key after drop")
 	}
+
 	if replica == b2.LocalNodeID() && b2.LocalContains(key) {
 		t.Fatalf("replica still has key after drop")
 	}
@@ -130,6 +148,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	} else if owners[0] == b2.LocalNodeID() && replica == b1.LocalNodeID() {
 		requester = b1
 	}
+
 	if _, ok := requester.Get(context.Background(), key); !ok {
 		t.Fatalf("get for read-repair failed")
 	}
@@ -137,12 +156,15 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	if owners[0] == b1.LocalNodeID() && !b1.LocalContains(key) {
 		t.Fatalf("primary missing after read repair")
 	}
+
 	if owners[0] == b2.LocalNodeID() && !b2.LocalContains(key) {
 		t.Fatalf("primary missing after read repair")
 	}
+
 	if replica == b1.LocalNodeID() && !b1.LocalContains(key) {
 		t.Fatalf("replica missing after read repair")
 	}
+
 	if replica == b2.LocalNodeID() && !b2.LocalContains(key) {
 		t.Fatalf("replica missing after read repair")
 	}
@@ -153,6 +175,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	} else {
 		repaired = b2.Metrics().ReadRepair > 0
 	}
+
 	if !repaired {
 		t.Fatalf("expected read-repair metric increment")
 	}

@@ -8,22 +8,22 @@ import (
 
 // iConfigurableBackend is an interface that defines the methods that a backend should implement to be configurable.
 type iConfigurableBackend interface {
-	// setCapacity sets the capacity of the cache.
-	setCapacity(capacity int)
+	// setBackendCapacity sets the capacity of the cache.
+	setBackendCapacity(capacity int)
 }
 
 // setCapacity sets the `Capacity` field of the `InMemory` backend.
-func (inm *InMemory) setCapacity(capacity int) {
+func (inm *InMemory) setBackendCapacity(capacity int) {
 	inm.capacity = capacity
 }
 
 // setCapacity sets the `Capacity` field of the `Redis` backend.
-func (rb *Redis) setCapacity(capacity int) {
+func (rb *Redis) setBackendCapacity(capacity int) {
 	rb.capacity = capacity
 }
 
 // setCapacity sets the `Capacity` field of the `RedisCluster` backend.
-func (rc *RedisCluster) setCapacity(capacity int) {
+func (rc *RedisCluster) setBackendCapacity(capacity int) {
 	rc.capacity = capacity
 }
 
@@ -41,7 +41,7 @@ func ApplyOptions[T IBackendConstrain](backend *T, options ...Option[T]) {
 func WithCapacity[T IBackendConstrain](capacity int) Option[T] {
 	return func(a *T) {
 		if configurable, ok := any(a).(iConfigurableBackend); ok {
-			configurable.setCapacity(capacity)
+			configurable.setBackendCapacity(capacity)
 		}
 	}
 }
@@ -64,9 +64,9 @@ func WithKeysSetName[T Redis](keysSetName string) Option[Redis] {
 //   - The default serializer is `serializer.MsgpackSerializer`.
 //   - The `serializer.JSONSerializer` can be used to serialize and deserialize the items in the cache as JSON.
 //   - The interface `serializer.ISerializer` can be implemented to use a custom serializer.
-func WithSerializer[T Redis](serializer serializer.ISerializer) Option[Redis] {
+func WithSerializer[T Redis](backendSerializer serializer.ISerializer) Option[Redis] {
 	return func(backend *Redis) {
-		backend.Serializer = serializer
+		backend.Serializer = backendSerializer
 	}
 }
 

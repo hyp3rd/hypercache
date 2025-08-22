@@ -75,6 +75,7 @@ func (m ConcurrentMap[K, V]) MSet(data map[K]V) {
 	for key, value := range data {
 		shard := m.GetShard(key)
 		shard.Lock()
+
 		shard.items[key] = value
 		shard.Unlock()
 	}
@@ -85,6 +86,7 @@ func (m ConcurrentMap[K, V]) Set(key K, value V) {
 	// Get map shard.
 	shard := m.GetShard(key)
 	shard.Lock()
+
 	shard.items[key] = value
 	shard.Unlock()
 }
@@ -144,6 +146,7 @@ func (m ConcurrentMap[K, V]) Count() int {
 	for i := range ShardCount {
 		shard := m.shards[i]
 		shard.RLock()
+
 		count += len(shard.items)
 		shard.RUnlock()
 	}
@@ -189,6 +192,7 @@ func (m ConcurrentMap[K, V]) RemoveCb(key K, cb RemoveCb[K, V]) bool {
 	// Try to get shard.
 	shard := m.GetShard(key)
 	shard.Lock()
+
 	v, ok := shard.items[key]
 
 	remove := cb(key, v, ok)
@@ -206,6 +210,7 @@ func (m ConcurrentMap[K, V]) Pop(key K) (V, bool) {
 	// Try to get shard.
 	shard := m.GetShard(key)
 	shard.Lock()
+
 	v, exists := shard.items[key]
 	delete(shard.items, key)
 	shard.Unlock()
@@ -271,6 +276,7 @@ func snapshot[Key comparable, Val any](cmap ConcurrentMap[Key, Val]) []chan Tupl
 		go func(index int, shard *ConcurrentMapShared[Key, Val]) {
 			// Foreach key, value pair.
 			shard.RLock()
+
 			chans[index] = make(chan Tuple[Key, Val], len(shard.items))
 
 			wg.Done()
@@ -408,6 +414,7 @@ func fnv32(key string) uint32 {
 	keyLength := len(key)
 	for i := range keyLength {
 		hash *= prime32
+
 		hash ^= uint32(key[i])
 	}
 

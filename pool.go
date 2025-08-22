@@ -104,6 +104,7 @@ func (pool *WorkerPool) worker() {
 			}
 
 			pool.wg.Done()
+
 		case <-pool.quit:
 			return
 		}

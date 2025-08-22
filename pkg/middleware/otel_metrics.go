@@ -14,6 +14,8 @@ import (
 	"github.com/hyp3rd/hypercache/pkg/stats"
 )
 
+const attrKeyLen = "key.len" // reused attribute key name
+
 // OTelMetricsMiddleware emits OpenTelemetry metrics for service methods.
 type OTelMetricsMiddleware struct {
 	next  hypercache.Service
@@ -43,7 +45,7 @@ func NewOTelMetricsMiddleware(next hypercache.Service, meter metric.Meter) (hype
 func (mw *OTelMetricsMiddleware) Get(ctx context.Context, key string) (any, bool) {
 	start := time.Now()
 	v, ok := mw.next.Get(ctx, key)
-	mw.rec(ctx, "Get", start, attribute.Int("key.len", len(key)), attribute.Bool("hit", ok))
+	mw.rec(ctx, "Get", start, attribute.Int(attrKeyLen, len(key)), attribute.Bool("hit", ok))
 
 	return v, ok
 }
@@ -52,7 +54,7 @@ func (mw *OTelMetricsMiddleware) Get(ctx context.Context, key string) (any, bool
 func (mw *OTelMetricsMiddleware) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
 	start := time.Now()
 	err := mw.next.Set(ctx, key, value, expiration)
-	mw.rec(ctx, "Set", start, attribute.Int("key.len", len(key)))
+	mw.rec(ctx, "Set", start, attribute.Int(attrKeyLen, len(key)))
 
 	return err
 }
@@ -61,7 +63,7 @@ func (mw *OTelMetricsMiddleware) Set(ctx context.Context, key string, value any,
 func (mw *OTelMetricsMiddleware) GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error) {
 	start := time.Now()
 	v, err := mw.next.GetOrSet(ctx, key, value, expiration)
-	mw.rec(ctx, "GetOrSet", start, attribute.Int("key.len", len(key)))
+	mw.rec(ctx, "GetOrSet", start, attribute.Int(attrKeyLen, len(key)))
 
 	return v, err
 }
@@ -70,7 +72,7 @@ func (mw *OTelMetricsMiddleware) GetOrSet(ctx context.Context, key string, value
 func (mw *OTelMetricsMiddleware) GetWithInfo(ctx context.Context, key string) (*cache.Item, bool) {
 	start := time.Now()
 	it, ok := mw.next.GetWithInfo(ctx, key)
-	mw.rec(ctx, "GetWithInfo", start, attribute.Int("key.len", len(key)), attribute.Bool("hit", ok))
+	mw.rec(ctx, "GetWithInfo", start, attribute.Int(attrKeyLen, len(key)), attribute.Bool("hit", ok))
 
 	return it, ok
 }
@@ -79,7 +81,14 @@ func (mw *OTelMetricsMiddleware) GetWithInfo(ctx context.Context, key string) (*
 func (mw *OTelMetricsMiddleware) GetMultiple(ctx context.Context, keys ...string) (map[string]any, map[string]error) {
 	start := time.Now()
 	res, failed := mw.next.GetMultiple(ctx, keys...)
-	mw.rec(ctx, "GetMultiple", start, attribute.Int("keys.count", len(keys)), attribute.Int("result.count", len(res)), attribute.Int("failed.count", len(failed)))
+	mw.rec(
+		ctx,
+		"GetMultiple",
+		start,
+		attribute.Int("keys.count", len(keys)),
+		attribute.Int("result.count", len(res)),
+		attribute.Int("failed.count", len(failed)),
+	)
 
 	return res, failed
 }
