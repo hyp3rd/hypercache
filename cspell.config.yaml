@@ -27,6 +27,7 @@ words:
   - excludeonly
   - exhaustruct
   - Fanout
+  - fctx
   - forcetypeassert
   - Fprintf
   - Fprintln
@@ -44,8 +45,10 @@ words:
   - GOPATH
   - gosec
   - honnef
+  - hreq
   - ireturn
   - Itemm
+  - lamport
   - LFUDA
   - localmodule
   - logrus

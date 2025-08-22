@@ -2,11 +2,11 @@ package tests
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/longbridgeapp/assert"
 
 	"github.com/hyp3rd/hypercache"

@@ -2,11 +2,12 @@ package tests
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/internal/constants"
