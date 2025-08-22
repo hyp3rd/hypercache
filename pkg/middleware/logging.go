@@ -136,13 +136,13 @@ func (mw LoggingMiddleware) Count(ctx context.Context) int {
 }
 
 // TriggerEviction logs the time it takes to execute the next middleware.
-func (mw LoggingMiddleware) TriggerEviction() {
+func (mw LoggingMiddleware) TriggerEviction(ctx context.Context) {
 	defer func(begin time.Time) {
 		mw.logger.Printf("method TriggerEviction took: %s", time.Since(begin))
 	}(time.Now())
 
 	mw.logger.Printf("TriggerEviction method invoked")
-	mw.next.TriggerEviction()
+	mw.next.TriggerEviction(ctx)
 }
 
 // Stop logs the time it takes to execute the next middleware.

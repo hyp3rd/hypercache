@@ -152,11 +152,11 @@ func (mw OTelTracingMiddleware) Allocation() int64 { return mw.next.Allocation()
 func (mw OTelTracingMiddleware) Count(ctx context.Context) int { return mw.next.Count(ctx) }
 
 // TriggerEviction triggers eviction with a span.
-func (mw OTelTracingMiddleware) TriggerEviction() {
-	_, span := mw.startSpan(context.Background(), "hypercache.TriggerEviction")
+func (mw OTelTracingMiddleware) TriggerEviction(ctx context.Context) {
+	_, span := mw.startSpan(ctx, "hypercache.TriggerEviction")
 	defer span.End()
 
-	mw.next.TriggerEviction()
+	mw.next.TriggerEviction(ctx)
 }
 
 // Stop stops the service with a span.

@@ -12,5 +12,3 @@ rules:
 ignore: |
   .golangci.yaml
   cspell.config.yaml
-  .trunk/*
-  docs/mkdocs.yml

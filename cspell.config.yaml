@@ -3,13 +3,16 @@ ignorePaths: []
 dictionaryDefinitions: []
 dictionaries: []
 words:
+  - acks
   - backpressure
   - benchmem
   - benchtime
   - cacheerrors
   - cachev
+  - cand
   - CAWOLFU
   - Cbor
+  - cespare
   - chans
   - cmap
   - Cmder
@@ -23,6 +26,8 @@ words:
   - ewrap
   - excludeonly
   - exhaustruct
+  - Fanout
+  - forcetypeassert
   - Fprintf
   - Fprintln
   - freqs
@@ -52,7 +57,9 @@ words:
   - Newf
   - nolint
   - NOVENDOR
+  - paralleltest
   - Pipeliner
+  - Prealloc
   - recvcheck
   - sarif
   - SLRU
@@ -60,8 +67,12 @@ words:
   - stdlib
   - strfnv
   - ugorji
+  - unmarshals
   - varnamelen
+  - vnode
+  - vnodes
   - wrapcheck
   - Wrapf
+  - xxhash
 ignoreWords: []
 import: []

@@ -58,7 +58,11 @@ Endpoints (subject to change):
 
 - GET /health – liveness check
 - GET /stats – current stats snapshot
-- GET /config – sanitized runtime config
+- GET /config – sanitized runtime config (now includes replication + virtual node settings when using DistMemory)
+- GET /dist/metrics – distributed backend forwarding / replication counters (DistMemory only)
+- GET /dist/owners?key=K – current ring owners (IDs) for key K (DistMemory only, debug)
+- GET /cluster/members – membership snapshot (id, address, state, incarnation, replication factor, virtual nodes)
+- GET /cluster/ring – ring vnode hashes (debug / diagnostics)
 - POST /evict – trigger eviction cycle
 - POST /trigger-expiration – trigger expiration scan
 - POST /clear – clear all items
@@ -174,6 +178,11 @@ if err != nil {
 | `WithMaxEvictionCount` | Cap number of items evicted per cycle. |
 | `WithMaxCacheSize` | Max cumulative serialized item size (bytes). |
 | `WithStatsCollector` | Choose stats collector implementation. |
+| `WithManagementHTTP` | Start optional management HTTP server. |
+| `WithDistReplication` | (DistMemory) Set replication factor (owners per key). |
+| `WithDistVirtualNodes` | (DistMemory) Virtual nodes per physical node for consistent hashing. |
+| `WithDistNode` | (DistMemory) Explicit node identity (id/address). |
+| `WithDistSeeds` | (DistMemory) Static seed addresses to pre-populate membership. |
 
 *ARC is experimental (not registered by default).
 
@@ -184,6 +193,40 @@ When using Redis or Redis Cluster, item size accounting uses the configured seri
 **Refer to [config.go](./config.go) for complete option definitions and the GoDoc on pkg.go.dev for an exhaustive API reference.**
 
 ## Usage
+
+### Distributed In‑Process Backend (Experimental)
+
+An experimental in‑process distributed backend `DistMemory` is being developed (feature branch: `feat/distributed-backend`). It simulates a small cluster inside a single process using a consistent hash ring with virtual nodes, replication, forwarding, replication fan‑out, and read‑repair. This is primarily for experimentation before introducing real network transports and dynamic membership.
+
+Current capabilities:
+
+- Static membership + ring with configurable replication factor & virtual nodes.
+- Ownership enforcement (non‑owners forward to primary).
+- Replica fan‑out on writes (best‑effort) & replica removals.
+- Read‑repair when a local owner misses but another replica has the key.
+- Metrics exposed via management endpoints (`/dist/metrics`, `/dist/owners`, `/cluster/members`, `/cluster/ring`).
+
+Planned next steps (roadmap excerpts): network transport abstraction, quorum reads/writes, versioning (vector clocks or lamport), failure detection / node states, rebalancing & anti‑entropy sync.
+
+Example minimal setup:
+
+```go
+cfg := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
+cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
+    hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:9090"),
+)
+cfg.DistMemoryOptions = []backend.Option[backend.DistMemory]{
+    backend.WithDistReplication(3),
+    backend.WithDistVirtualNodes(64),
+    backend.WithDistNode("node-a", "127.0.0.1:7000"),
+    backend.WithDistSeeds([]string{"127.0.0.1:7001", "127.0.0.1:7002"}),
+}
+hc, err := hypercache.New(context.Background(), hypercache.GetDefaultManager(), cfg)
+if err != nil { log.Fatal(err) }
+defer hc.Stop(context.Background())
+```
+
+Note: DistMemory is not a production distributed cache; it is a stepping stone towards a networked, failure‑aware implementation.
 
 Examples can be too broad for a readme, refer to the [examples](./__examples/README.md) directory for a more comprehensive overview.
 

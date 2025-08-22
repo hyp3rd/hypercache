@@ -76,12 +76,32 @@ type managementCache interface {
 	Capacity() int
 	Allocation() int64
 	MaxCacheSize() int64
-	TriggerEviction()
+	TriggerEviction(ctx context.Context)
 	TriggerExpiration()
 	EvictionInterval() time.Duration
 	ExpirationInterval() time.Duration
 	EvictionAlgorithm() string
 	Clear(ctx context.Context) error
+}
+
+// managementCacheDistOpt holds optional distributed introspection (queried via type assertion).
+type managementCacheDistOpt interface {
+	DistMetrics() any
+	ClusterOwners(key string) []string
+}
+
+type membershipIntrospect interface {
+	DistMembershipSnapshot() (
+		members []struct {
+			ID          string
+			Address     string
+			State       string
+			Incarnation uint64
+		},
+		replication int,
+		vnodes int,
+	)
+	DistRingHashSpots() []string
 }
 
 // Start launches listener (idempotent). Caller provides cache for handler wiring.
@@ -164,6 +184,57 @@ func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCac
 	s.app.Get("/health", useAuth(func(fiberCtx fiber.Ctx) error { return fiberCtx.SendString("ok") }))
 	// stats
 	s.app.Get("/stats", useAuth(func(fiberCtx fiber.Ctx) error { return fiberCtx.JSON(hc.GetStats()) }))
+	// distributed metrics (if available via optional interface)
+	s.app.Get("/dist/metrics", useAuth(func(fiberCtx fiber.Ctx) error {
+		if dist, ok := hc.(managementCacheDistOpt); ok {
+			m := dist.DistMetrics()
+			if m == nil {
+				return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "dist metrics not available"})
+			}
+
+			return fiberCtx.JSON(m)
+		}
+
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+	}))
+
+	// cluster owners debug for a key (?key=foo)
+	s.app.Get("/dist/owners", useAuth(func(fiberCtx fiber.Ctx) error {
+		if dist, ok := hc.(managementCacheDistOpt); ok {
+			key := fiberCtx.Query("key")
+			if key == "" {
+				return fiberCtx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
+			}
+
+			owners := dist.ClusterOwners(key)
+
+			return fiberCtx.JSON(fiber.Map{"key": key, "owners": owners})
+		}
+
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+	}))
+
+	// cluster members
+	s.app.Get("/cluster/members", useAuth(func(fiberCtx fiber.Ctx) error {
+		if mi, ok := hc.(membershipIntrospect); ok {
+			members, replication, vnodes := mi.DistMembershipSnapshot()
+
+			return fiberCtx.JSON(fiber.Map{"replication": replication, "virtualNodes": vnodes, "members": members})
+		}
+
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+	}))
+
+	// cluster ring hashes
+	s.app.Get("/cluster/ring", useAuth(func(fiberCtx fiber.Ctx) error {
+		if mi, ok := hc.(membershipIntrospect); ok {
+			spots := mi.DistRingHashSpots()
+
+			return fiberCtx.JSON(fiber.Map{"count": len(spots), "vnodes": spots})
+		}
+
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+	}))
 	// config (sanitized minimal)
 	s.app.Get("/config", useAuth(func(fiberCtx fiber.Ctx) error {
 		cfg := map[string]any{
@@ -175,11 +246,18 @@ func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCac
 			"evictionAlgorithm":  hc.EvictionAlgorithm(),
 		}
 
+		// If distributed config available, enrich response (replication, virtualNodes, nodeCount)
+		if mi, ok := hc.(membershipIntrospect); ok {
+			_, replication, vnodes := mi.DistMembershipSnapshot()
+			cfg["replication"] = replication
+			cfg["virtualNodesPerNode"] = vnodes
+		}
+
 		return fiberCtx.JSON(cfg)
 	}))
 	// trigger eviction
 	s.app.Post("/evict", useAuth(func(fiberCtx fiber.Ctx) error {
-		hc.TriggerEviction()
+		hc.TriggerEviction(ctx)
 
 		return fiberCtx.SendStatus(fiber.StatusAccepted)
 	}))

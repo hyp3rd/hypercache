@@ -23,7 +23,7 @@ import (
 // It restricts the generic type parameter to supported backend types, ensuring
 // type safety and proper implementation at compile time.
 type IBackendConstrain interface {
-	InMemory | Redis | RedisCluster
+	InMemory | Redis | RedisCluster | DistMemory
 }
 
 // IBackend defines the contract that all cache backends must implement.

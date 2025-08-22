@@ -126,7 +126,7 @@ func (mw StatsCollectorMiddleware) Capacity() int {
 }
 
 // TriggerEviction triggers the eviction of the cache.
-func (mw StatsCollectorMiddleware) TriggerEviction() {
+func (mw StatsCollectorMiddleware) TriggerEviction(ctx context.Context) {
 	start := time.Now()
 
 	defer func() {
@@ -134,7 +134,7 @@ func (mw StatsCollectorMiddleware) TriggerEviction() {
 		mw.statsCollector.Incr("hypercache_trigger_eviction_count", 1)
 	}()
 
-	mw.next.TriggerEviction()
+	mw.next.TriggerEviction(ctx)
 }
 
 // Allocation returns the size allocation in bytes cache.

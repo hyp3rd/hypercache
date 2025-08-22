@@ -34,7 +34,6 @@ import (
 //
 // The cache leverages two channels to signal the expiration and eviction loops to start:
 //   - The expirationTriggerCh channel is used to signal the expiration loop to start.
-//   - The evictCh channel is used to signal the eviction loop to start.
 //
 // The cache also has a mutex that is used to protect the eviction algorithm from concurrent access.
 // The stop channel is used to signal the expiration and eviction loops to stop. The evictCh channel is used to signal the eviction loop to start.
@@ -112,7 +111,7 @@ func NewInMemoryWithDefaults(capacity int) (*HyperCache[backend.InMemory], error
 //   - The stats collector is set to the HistogramStatsCollector stats collector.
 func New[T backend.IBackendConstrain](ctx context.Context, bm *BackendManager, config *Config[T]) (*HyperCache[T], error) {
 	// Resolve typed backend from registry
-	backendTyped, err := resolveBackend(bm, config)
+	backendTyped, err := resolveBackend(ctx, bm, config)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +149,7 @@ func New[T backend.IBackendConstrain](ctx context.Context, bm *BackendManager, c
 
 	// Initialize expiration trigger channel and start background jobs
 	initExpirationTrigger(hyperCache)
-	hyperCache.startBackgroundJobs()
+	hyperCache.startBackgroundJobs(ctx)
 
 	// Start optional management HTTP server (non-fatal if start fails)
 	if hyperCache.mgmtHTTP != nil {
@@ -164,7 +163,7 @@ func New[T backend.IBackendConstrain](ctx context.Context, bm *BackendManager, c
 }
 
 // resolveBackend constructs a typed backend instance based on the config.BackendType.
-func resolveBackend[T backend.IBackendConstrain](bm *BackendManager, config *Config[T]) (backend.IBackend[T], error) {
+func resolveBackend[T backend.IBackendConstrain](ctx context.Context, bm *BackendManager, config *Config[T]) (backend.IBackend[T], error) {
 	constructor, exists := bm.backendRegistry[config.BackendType]
 	if !exists {
 		return nil, ewrap.Newf("unknown backend type: %s", config.BackendType)
@@ -172,11 +171,13 @@ func resolveBackend[T backend.IBackendConstrain](bm *BackendManager, config *Con
 
 	switch config.BackendType {
 	case constants.InMemoryBackend:
-		return resolveInMemoryBackend[T](constructor, config)
+		return resolveInMemoryBackend[T](ctx, constructor, config)
 	case constants.RedisBackend:
-		return resolveRedisBackend[T](constructor, config)
+		return resolveRedisBackend[T](ctx, constructor, config)
 	case constants.RedisClusterBackend:
-		return resolveRedisClusterBackend[T](constructor, config)
+		return resolveRedisClusterBackend[T](ctx, constructor, config)
+	case constants.DistMemoryBackend:
+		return resolveDistMemoryBackend[T](ctx, constructor, config)
 	default:
 		return nil, ewrap.Newf("unknown backend type: %s", config.BackendType)
 	}
@@ -191,7 +192,7 @@ func castBackend[T backend.IBackendConstrain](bi any) (backend.IBackend[T], erro
 	return nil, sentinel.ErrInvalidBackendType
 }
 
-func resolveInMemoryBackend[T backend.IBackendConstrain](constructor any, cfgAny any) (backend.IBackend[T], error) {
+func resolveInMemoryBackend[T backend.IBackendConstrain](ctx context.Context, constructor any, cfgAny any) (backend.IBackend[T], error) {
 	inMemCtor, ok := constructor.(InMemoryBackendConstructor)
 	if !ok {
 		return nil, sentinel.ErrInvalidBackendType
@@ -202,7 +203,7 @@ func resolveInMemoryBackend[T backend.IBackendConstrain](constructor any, cfgAny
 		return nil, sentinel.ErrInvalidBackendType
 	}
 
-	bi, err := inMemCtor.Create(cfg)
+	bi, err := inMemCtor.Create(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +211,7 @@ func resolveInMemoryBackend[T backend.IBackendConstrain](constructor any, cfgAny
 	return castBackend[T](bi)
 }
 
-func resolveRedisBackend[T backend.IBackendConstrain](constructor any, cfgAny any) (backend.IBackend[T], error) {
+func resolveRedisBackend[T backend.IBackendConstrain](ctx context.Context, constructor any, cfgAny any) (backend.IBackend[T], error) {
 	redisCtor, ok := constructor.(RedisBackendConstructor)
 	if !ok {
 		return nil, sentinel.ErrInvalidBackendType
@@ -221,7 +222,7 @@ func resolveRedisBackend[T backend.IBackendConstrain](constructor any, cfgAny an
 		return nil, sentinel.ErrInvalidBackendType
 	}
 
-	bi, err := redisCtor.Create(cfg)
+	bi, err := redisCtor.Create(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +230,26 @@ func resolveRedisBackend[T backend.IBackendConstrain](constructor any, cfgAny an
 	return castBackend[T](bi)
 }
 
-func resolveRedisClusterBackend[T backend.IBackendConstrain](constructor any, cfgAny any) (backend.IBackend[T], error) {
+func resolveDistMemoryBackend[T backend.IBackendConstrain](ctx context.Context, constructor any, cfgAny any) (backend.IBackend[T], error) {
+	distCtor, ok := constructor.(DistMemoryBackendConstructor)
+	if !ok {
+		return nil, sentinel.ErrInvalidBackendType
+	}
+
+	cfg, ok := cfgAny.(*Config[backend.DistMemory])
+	if !ok {
+		return nil, sentinel.ErrInvalidBackendType
+	}
+
+	bi, err := distCtor.Create(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return castBackend[T](bi)
+}
+
+func resolveRedisClusterBackend[T backend.IBackendConstrain](ctx context.Context, constructor any, cfgAny any) (backend.IBackend[T], error) {
 	clusterCtor, ok := constructor.(RedisClusterBackendConstructor)
 	if !ok {
 		return nil, sentinel.ErrInvalidBackendType
@@ -240,7 +260,7 @@ func resolveRedisClusterBackend[T backend.IBackendConstrain](constructor any, cf
 		return nil, sentinel.ErrInvalidBackendType
 	}
 
-	bi, err := clusterCtor.Create(cfg)
+	bi, err := clusterCtor.Create(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -326,15 +346,15 @@ func initExpirationTrigger[T backend.IBackendConstrain](hc *HyperCache[T]) {
 }
 
 // startBackgroundJobs starts the background jobs for the hyper cache.
-func (hyperCache *HyperCache[T]) startBackgroundJobs() {
+func (hyperCache *HyperCache[T]) startBackgroundJobs(ctx context.Context) {
 	// Start expiration and eviction loops once
 	hyperCache.once.Do(func() {
 		// Long-lived background context, canceled on Stop
-		ctx, cancel := context.WithCancel(context.Background())
+		jobsCtx, cancel := context.WithCancel(ctx)
 		hyperCache.bgCancel = cancel
 
-		hyperCache.startExpirationRoutine(ctx)
-		hyperCache.startEvictionRoutine(ctx)
+		hyperCache.startExpirationRoutine(jobsCtx)
+		hyperCache.startEvictionRoutine(jobsCtx)
 	})
 }
 
@@ -859,7 +879,7 @@ func (hyperCache *HyperCache[T]) Count(ctx context.Context) int {
 }
 
 // TriggerEviction sends a signal to the eviction loop to start.
-func (hyperCache *HyperCache[T]) TriggerEviction() {
+func (hyperCache *HyperCache[T]) TriggerEviction(_ context.Context) {
 	// Safe, non-blocking trigger; no-op if channel not initialized
 	if hyperCache.evictCh == nil {
 		return
@@ -933,6 +953,89 @@ func (hyperCache *HyperCache[T]) GetStats() stats.Stats {
 	stats := hyperCache.StatsCollector.GetStats()
 
 	return stats
+}
+
+// DistMetrics returns distributed backend metrics if the underlying backend is DistMemory.
+// Returns nil if unsupported.
+func (hyperCache *HyperCache[T]) DistMetrics() any { // generic any to avoid exporting type into core interface
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		m := dm.Metrics()
+
+		return m
+	}
+
+	return nil
+}
+
+// ClusterOwners returns the owners for a key if the distributed backend supports it; otherwise empty slice.
+func (hyperCache *HyperCache[T]) ClusterOwners(key string) []string {
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		owners := dm.DebugOwners(key)
+
+		out := make([]string, 0, len(owners))
+		for _, o := range owners {
+			out = append(out, string(o))
+		}
+
+		return out
+	}
+
+	return nil
+}
+
+// DistMembershipSnapshot returns a snapshot of membership if distributed backend; otherwise nil slice.
+func (hyperCache *HyperCache[T]) DistMembershipSnapshot() ([]struct {
+	ID          string
+	Address     string
+	State       string
+	Incarnation uint64
+}, int, int,
+) { //nolint:ireturn
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		mship := dm.Membership()
+		ring := dm.Ring()
+
+		if mship == nil || ring == nil {
+			return nil, 0, 0
+		}
+
+		nodes := mship.List()
+		out := make([]struct {
+			ID          string
+			Address     string
+			State       string
+			Incarnation uint64
+		}, 0, len(nodes))
+
+		for _, node := range nodes {
+			out = append(out, struct {
+				ID          string
+				Address     string
+				State       string
+				Incarnation uint64
+			}{
+				ID:          string(node.ID),
+				Address:     node.Address,
+				State:       node.State.String(),
+				Incarnation: node.Incarnation,
+			})
+		}
+
+		return out, ring.Replication(), ring.VirtualNodesPerNode()
+	}
+
+	return nil, 0, 0
+}
+
+// DistRingHashSpots returns vnode hashes as hex strings if available (debug).
+func (hyperCache *HyperCache[T]) DistRingHashSpots() []string { //nolint:ireturn
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		if ring := dm.Ring(); ring != nil {
+			return ring.VNodeHashes()
+		}
+	}
+
+	return nil
 }
 
 // ManagementHTTPAddress returns the bound address of the optional management HTTP server.
