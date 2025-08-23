@@ -21,6 +21,7 @@ func TestHTTPFetchMerkle(t *testing.T) {
 
 	// create two nodes with HTTP server enabled (addresses)
 	n1 := cluster.NewNode("", "127.0.0.1:9201")
+
 	b1i, err := backend.NewDistMemory(ctx,
 		backend.WithDistMembership(membership, n1),
 		backend.WithDistNode("n1", "127.0.0.1:9201"),
@@ -29,7 +30,9 @@ func TestHTTPFetchMerkle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("b1: %v", err)
 	}
+
 	n2 := cluster.NewNode("", "127.0.0.1:9202")
+
 	b2i, err := backend.NewDistMemory(ctx,
 		backend.WithDistMembership(membership, n2),
 		backend.WithDistNode("n2", "127.0.0.1:9202"),
@@ -50,6 +53,7 @@ func TestHTTPFetchMerkle(t *testing.T) {
 		case "n2":
 			return "http://" + b2.LocalNodeAddr(), true
 		}
+
 		return "", false
 	}
 	transport := backend.NewDistHTTPTransport(2*time.Second, resolver)
@@ -67,8 +71,9 @@ func TestHTTPFetchMerkle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("merkle http get: %v", err)
 	}
+
 	_ = resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected status %d", resp.StatusCode)
 	}
 

@@ -61,6 +61,8 @@ Endpoints (subject to change):
 - GET /config – sanitized runtime config (now includes replication + virtual node settings when using DistMemory)
 - GET /dist/metrics – distributed backend forwarding / replication counters (DistMemory only)
 - GET /dist/owners?key=K – current ring owners (IDs) for key K (DistMemory only, debug)
+- GET /internal/merkle – Merkle tree snapshot (DistMemory experimental anti-entropy)
+- GET /internal/keys – Full key enumeration (debug / anti-entropy fallback; expensive)
 - GET /cluster/members – membership snapshot (id, address, state, incarnation, replication factor, virtual nodes)
 - GET /cluster/ring – ring vnode hashes (debug / diagnostics)
 - POST /evict – trigger eviction cycle
@@ -181,6 +183,10 @@ if err != nil {
 | `WithManagementHTTP` | Start optional management HTTP server. |
 | `WithDistReplication` | (DistMemory) Set replication factor (owners per key). |
 | `WithDistVirtualNodes` | (DistMemory) Virtual nodes per physical node for consistent hashing. |
+| `WithDistMerkleChunkSize` | (DistMemory) Keys per Merkle leaf chunk (power-of-two recommended). |
+| `WithDistMerkleAutoSync` | (DistMemory) Interval for background Merkle sync (<=0 disables). |
+| `WithDistMerkleAutoSyncPeers` | (DistMemory) Limit peers synced per auto-sync tick (0=all). |
+| `WithDistListKeysCap` | (DistMemory) Cap number of keys fetched via fallback enumeration. |
 | `WithDistNode` | (DistMemory) Explicit node identity (id/address). |
 | `WithDistSeeds` | (DistMemory) Static seed addresses to pre-populate membership. |
 
@@ -204,6 +210,8 @@ Current capabilities:
 - Ownership enforcement (non‑owners forward to primary).
 - Replica fan‑out on writes (best‑effort) & replica removals.
 - Read‑repair when a local owner misses but another replica has the key.
+- Basic delete semantics with tombstones: deletions propagate as versioned tombstones preventing
+    resurrection during anti-entropy (tombstone retention is in‑memory, no persistence yet).
 - Metrics exposed via management endpoints (`/dist/metrics`, `/dist/owners`, `/cluster/members`, `/cluster/ring`).
 
 Planned next steps (roadmap excerpts): network transport abstraction, quorum reads/writes, versioning (vector clocks or lamport), failure detection / node states, rebalancing & anti‑entropy sync.

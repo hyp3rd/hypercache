@@ -82,6 +82,7 @@ type DistMemory struct {
 
 	// anti-entropy
 	merkleChunkSize int // number of keys per leaf chunk (power-of-two recommended)
+	listKeysMax     int // cap for fallback ListKeys pulls (0 = unlimited)
 
 	// periodic merkle auto-sync
 	autoSyncInterval         time.Duration
@@ -90,12 +91,22 @@ type DistMemory struct {
 
 	lastAutoSyncDuration atomic.Int64 // nanoseconds of last full loop
 	lastAutoSyncError    atomic.Value // error string or nil
+
+	// tombstone version source when no prior item exists (monotonic per process)
+	tombVersionCounter atomic.Uint64
 }
 
 // hintedEntry represents a deferred replica write.
 type hintedEntry struct {
 	item   *cache.Item
 	expire time.Time
+}
+
+// tombstone marks a delete intent with version ordering to prevent resurrection.
+type tombstone struct {
+	version uint64
+	origin  string
+	at      time.Time
 }
 
 // ConsistencyLevel defines read/write consistency semantics.
@@ -128,6 +139,7 @@ func (dm *DistMemory) Ring() *cluster.Ring { return dm.ring }
 
 type distShard struct {
 	items cache.ConcurrentMap
+	tombs map[string]tombstone // per-key tombstones
 }
 
 // DistMemoryOption configures DistMemory backend.
@@ -162,6 +174,15 @@ func WithDistMerkleAutoSync(interval time.Duration) DistMemoryOption {
 func WithDistMerkleAutoSyncPeers(n int) DistMemoryOption {
 	return func(dm *DistMemory) {
 		dm.autoSyncPeersPerInterval = n
+	}
+}
+
+// WithDistListKeysCap caps number of keys fetched via fallback ListKeys (0 = unlimited).
+func WithDistListKeysCap(n int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if n >= 0 {
+			dm.listKeysMax = n
+		}
 	}
 }
 
@@ -266,19 +287,32 @@ func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error { //nol
 		return errNoTransport
 	}
 
+	startFetch := time.Now()
+
 	remoteTree, err := dm.transport.FetchMerkle(ctx, nodeID)
 	if err != nil {
 		return err
 	}
 
+	fetchDur := time.Since(startFetch)
+	atomic.StoreInt64(&dm.metrics.merkleFetchNanos, fetchDur.Nanoseconds())
+
+	startBuild := time.Now()
 	localTree := dm.BuildMerkleTree()
+	buildDur := time.Since(startBuild)
+	atomic.StoreInt64(&dm.metrics.merkleBuildNanos, buildDur.Nanoseconds())
+
 	entries := dm.sortedMerkleEntries()
+	startDiff := time.Now()
 	diffs := localTree.DiffLeafRanges(remoteTree)
+	diffDur := time.Since(startDiff)
+	atomic.StoreInt64(&dm.metrics.merkleDiffNanos, diffDur.Nanoseconds())
+
 	missing := dm.resolveMissingKeys(ctx, nodeID, entries)
 
 	dm.applyMerkleDiffs(ctx, nodeID, entries, diffs, localTree.ChunkSize)
 
-	for k := range missing {
+	for k := range missing { // missing = remote-only keys
 		dm.fetchAndAdopt(ctx, nodeID, k)
 	}
 
@@ -583,7 +617,10 @@ func (dm *DistMemory) DebugInject(it *cache.Item) { //nolint:ireturn
 		return
 	}
 
-	dm.shardFor(it.Key).items.Set(it.Key, it)
+	sh := dm.shardFor(it.Key)
+	// test helper: injecting a concrete item implies intent to resurrect; clear any tombstone so normal version comparison applies
+	delete(sh.tombs, it.Key)
+	sh.items.Set(it.Key, it)
 }
 
 // LocalNodeID returns this instance's node ID (testing helper).
@@ -721,6 +758,9 @@ type distMetrics struct {
 	hintedDropped       int64 // hints dropped due to non-not-found transport errors
 	merkleSyncs         int64 // merkle sync operations completed
 	merkleKeysPulled    int64 // keys applied during sync
+	merkleBuildNanos    int64 // last build duration (ns)
+	merkleDiffNanos     int64 // last diff duration (ns)
+	merkleFetchNanos    int64 // last remote fetch duration (ns)
 	autoSyncLoops       int64 // number of auto-sync ticks executed
 }
 
@@ -745,6 +785,9 @@ type DistMetrics struct {
 	HintedDropped       int64
 	MerkleSyncs         int64
 	MerkleKeysPulled    int64
+	MerkleBuildNanos    int64
+	MerkleDiffNanos     int64
+	MerkleFetchNanos    int64
 	AutoSyncLoops       int64
 	LastAutoSyncNanos   int64
 	LastAutoSyncError   string
@@ -779,6 +822,9 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		HintedDropped:       atomic.LoadInt64(&dm.metrics.hintedDropped),
 		MerkleSyncs:         atomic.LoadInt64(&dm.metrics.merkleSyncs),
 		MerkleKeysPulled:    atomic.LoadInt64(&dm.metrics.merkleKeysPulled),
+		MerkleBuildNanos:    atomic.LoadInt64(&dm.metrics.merkleBuildNanos),
+		MerkleDiffNanos:     atomic.LoadInt64(&dm.metrics.merkleDiffNanos),
+		MerkleFetchNanos:    atomic.LoadInt64(&dm.metrics.merkleFetchNanos),
 		AutoSyncLoops:       atomic.LoadInt64(&dm.metrics.autoSyncLoops),
 		LastAutoSyncNanos:   dm.lastAutoSyncDuration.Load(),
 		LastAutoSyncError:   lastErr,
@@ -840,6 +886,10 @@ func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, ent
 		return missing
 	}
 
+	if dm.listKeysMax > 0 && len(keys) > dm.listKeysMax { // cap enforcement
+		keys = keys[:dm.listKeysMax]
+	}
+
 	mset := make(map[string]struct{}, len(keys))
 	for _, k := range keys { // populate
 		mset[k] = struct{}{}
@@ -847,6 +897,11 @@ func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, ent
 
 	for _, e := range entries { // remove existing
 		delete(mset, e.k)
+	}
+
+	// track number of remote-only keys discovered via fallback
+	if len(mset) > 0 {
+		atomic.AddInt64(&dm.metrics.merkleKeysPulled, int64(len(mset)))
 	}
 
 	return mset
@@ -906,11 +961,38 @@ func (dm *DistMemory) enumerateRemoteOnlyKeys(nodeID string, local []merkleKV) m
 // fetchAndAdopt pulls a key from a remote node and adopts it if it's newer or absent locally.
 func (dm *DistMemory) fetchAndAdopt(ctx context.Context, nodeID, key string) {
 	it, ok, gerr := dm.transport.ForwardGet(ctx, nodeID, key)
-	if gerr != nil || !ok {
+	if gerr != nil { // remote failure: ignore
 		return
 	}
 
-	if cur, okLocal := dm.shardFor(key).items.Get(key); !okLocal || it.Version > cur.Version {
+	sh := dm.shardFor(key)
+
+	if !ok { // remote missing key (could be delete) -> adopt tombstone locally if we still have it
+		if _, hasTomb := sh.tombs[key]; hasTomb { // already have tombstone
+			return
+		}
+
+		if cur, okLocal := sh.items.Get(key); okLocal { // create tombstone advancing version
+			sh.items.Remove(key)
+
+			nextVer := cur.Version + 1
+
+			sh.tombs[key] = tombstone{version: nextVer, origin: string(dm.localNode.ID), at: time.Now()}
+		}
+
+		return
+	}
+
+	if tomb, hasTomb := sh.tombs[key]; hasTomb {
+		// If tombstone version newer or equal, do not resurrect
+		if tomb.version >= it.Version {
+			return
+		}
+		// remote has newer version; clear tombstone (key resurrected intentionally)
+		delete(sh.tombs, key)
+	}
+
+	if cur, okLocal := sh.items.Get(key); !okLocal || it.Version > cur.Version {
 		dm.applySet(ctx, it, false)
 		atomic.AddInt64(&dm.metrics.merkleKeysPulled, 1)
 	}
@@ -928,6 +1010,10 @@ func (dm *DistMemory) merkleEntries() []merkleKV {
 		ch := shard.items.IterBuffered()
 		for t := range ch {
 			entries = append(entries, merkleKV{k: t.Key, v: t.Val.Version})
+		}
+
+		for k, ts := range shard.tombs { // include tombstones
+			entries = append(entries, merkleKV{k: k, v: ts.version})
 		}
 	}
 
@@ -978,7 +1064,7 @@ func (dm *DistMemory) ensureShardConfig() { //nolint:ireturn
 	}
 
 	for range dm.shardCount {
-		dm.shards = append(dm.shards, &distShard{items: cache.New()})
+		dm.shards = append(dm.shards, &distShard{items: cache.New(), tombs: make(map[string]tombstone)})
 	}
 }
 
@@ -1760,7 +1846,22 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 
 // applyRemove deletes locally and optionally fan-outs removal to replicas.
 func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate bool) {
-	dm.shardFor(key).items.Remove(key)
+	sh := dm.shardFor(key)
+	// capture version from existing item (if any) and increment for tombstone
+	var nextVer uint64
+	if it, ok := sh.items.Get(key); ok && it != nil {
+		ci := it // already *cache.Item (ConcurrentMap stores *cache.Item)
+
+		nextVer = ci.Version + 1
+	}
+
+	if nextVer == 0 { // no prior item seen; allocate monotonic tomb version
+		nextVer = dm.tombVersionCounter.Add(1)
+	}
+
+	sh.items.Remove(key)
+
+	sh.tombs[key] = tombstone{version: nextVer, origin: string(dm.localNode.ID), at: time.Now()}
 
 	if !replicate || dm.ring == nil || dm.transport == nil {
 		return
@@ -1778,7 +1879,7 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 			continue
 		}
 
-		_ = dm.transport.ForwardRemove(ctx, string(oid), key, false) //nolint:errcheck // best-effort
+		_ = dm.transport.ForwardRemove(ctx, string(oid), key, false) //nolint:errcheck // best-effort (tombstone inferred remotely)
 	}
 }
 
