@@ -38,6 +38,7 @@ func TestMerkleNoDiff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
+
 	err = db.SyncWith(ctx, string(da.LocalNodeID()))
 	if err != nil {
 		t.Fatalf("sync2: %v", err)

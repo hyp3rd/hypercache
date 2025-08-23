@@ -27,6 +27,7 @@ func TestMerkleDeleteTombstone(t *testing.T) {
 
 	it := &cache.Item{Key: "del", Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
 	da.DebugInject(it)
+
 	err := db.SyncWith(ctx, string(da.LocalNodeID()))
 	if err != nil {
 		t.Fatalf("initial sync: %v", err)

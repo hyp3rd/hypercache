@@ -8,7 +8,7 @@ GITVERSION_NOT_INSTALLED = "gitversion is not installed: https://github.com/GitT
 
 
 test:
-	go test -v -timeout 5m -cover ./...
+	go test -tags test -v -timeout 5m -cover ./...
 
 # bench runs the benchmark tests in the benchmark subpackage of the tests package.
 bench:
@@ -44,14 +44,14 @@ prepare-toolchain:
 	$(call check_command_exists,staticcheck) || go install honnef.co/go/tools/cmd/staticcheck@latest
 
 	@echo "Checking if pre-commit is installed..."
-	pre-commit --version || (echo "pre-commit is not installed, install it with 'pip install pre-commit'" && exit 1)
-
-	@echo "Initializing pre-commit..."
-	pre-commit validate-config || pre-commit install && pre-commit install-hooks
-
-	@echo "Installing pre-commit hooks..."
-	pre-commit install
-	pre-commit install-hooks
+	pre-commit --version >/dev/null 2>&1 || echo "pre-commit not found; skipping hook installation (optional)"
+	@if command -v pre-commit >/dev/null 2>&1; then \
+		echo "Initializing pre-commit..."; \
+		pre-commit validate-config || pre-commit install && pre-commit install-hooks; \
+		echo "Installing pre-commit hooks..."; \
+		pre-commit install; \
+		pre-commit install-hooks; \
+	fi
 
 
 lint: prepare-toolchain
@@ -64,10 +64,10 @@ lint: prepare-toolchain
 	gofumpt -l -w ${GOFILES_NOVENDOR}
 
 	@echo "\nRunning staticcheck..."
-	staticcheck ./...
+	staticcheck -tags test ./...
 
 	@echo "\nRunning golangci-lint $(GOLANGCI_LINT_VERSION)..."
-	golangci-lint run --fix -v  ./......
+	golangci-lint run --fix -v --build-tags test ./...
 
 # check_command_exists is a helper function that checks if a command exists.
 define check_command_exists

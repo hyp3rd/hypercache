@@ -36,7 +36,8 @@ func TestWriteQuorumSuccess(t *testing.T) {
 	transport.Register(dc)
 
 	item := &cache.Item{Key: "k1", Value: "v1"}
-	if err := a.Set(ctx, item); err != nil { // should succeed with quorum (all up)
+	err := a.Set(ctx, item)
+	if err != nil { // should succeed with quorum (all up)
 		t.Fatalf("expected success, got %v", err)
 	}
 }
@@ -44,6 +45,7 @@ func TestWriteQuorumSuccess(t *testing.T) {
 // TestWriteQuorumFailure ensures ALL consistency fails when not enough acks.
 func TestWriteQuorumFailure(t *testing.T) {
 	t.Skip("quorum ALL failure scenario requires deterministic ownership; skip until dynamic membership test harness provided")
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
@@ -59,12 +61,14 @@ func TestWriteQuorumFailure(t *testing.T) {
 	b, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("B", "B"))...)
 
 	da := any(a).(*backend.DistMemory)
+
 	_ = b // not registered, unreachable
 
 	da.SetTransport(transport)
 	transport.Register(da)
 
 	item := &cache.Item{Key: "k2", Value: "v2"}
+
 	err := a.Set(ctx, item)
 	if err == nil {
 		t.Fatalf("expected quorum failure with ALL consistency")
