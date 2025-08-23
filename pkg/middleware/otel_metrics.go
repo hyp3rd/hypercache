@@ -9,12 +9,11 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/internal/telemetry/attrs"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 	"github.com/hyp3rd/hypercache/pkg/cache"
 	"github.com/hyp3rd/hypercache/pkg/stats"
 )
-
-const attrKeyLen = "key.len" // reused attribute key name
 
 // OTelMetricsMiddleware emits OpenTelemetry metrics for service methods.
 type OTelMetricsMiddleware struct {
@@ -45,7 +44,7 @@ func NewOTelMetricsMiddleware(next hypercache.Service, meter metric.Meter) (hype
 func (mw *OTelMetricsMiddleware) Get(ctx context.Context, key string) (any, bool) {
 	start := time.Now()
 	v, ok := mw.next.Get(ctx, key)
-	mw.rec(ctx, "Get", start, attribute.Int(attrKeyLen, len(key)), attribute.Bool("hit", ok))
+	mw.rec(ctx, "Get", start, attribute.Int(attrs.AttrKeyLength, len(key)), attribute.Bool("hit", ok))
 
 	return v, ok
 }
@@ -54,7 +53,7 @@ func (mw *OTelMetricsMiddleware) Get(ctx context.Context, key string) (any, bool
 func (mw *OTelMetricsMiddleware) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
 	start := time.Now()
 	err := mw.next.Set(ctx, key, value, expiration)
-	mw.rec(ctx, "Set", start, attribute.Int(attrKeyLen, len(key)))
+	mw.rec(ctx, "Set", start, attribute.Int(attrs.AttrKeyLength, len(key)))
 
 	return err
 }
@@ -63,7 +62,7 @@ func (mw *OTelMetricsMiddleware) Set(ctx context.Context, key string, value any,
 func (mw *OTelMetricsMiddleware) GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error) {
 	start := time.Now()
 	v, err := mw.next.GetOrSet(ctx, key, value, expiration)
-	mw.rec(ctx, "GetOrSet", start, attribute.Int(attrKeyLen, len(key)))
+	mw.rec(ctx, "GetOrSet", start, attribute.Int(attrs.AttrKeyLength, len(key)))
 
 	return v, err
 }
@@ -72,7 +71,7 @@ func (mw *OTelMetricsMiddleware) GetOrSet(ctx context.Context, key string, value
 func (mw *OTelMetricsMiddleware) GetWithInfo(ctx context.Context, key string) (*cache.Item, bool) {
 	start := time.Now()
 	it, ok := mw.next.GetWithInfo(ctx, key)
-	mw.rec(ctx, "GetWithInfo", start, attribute.Int(attrKeyLen, len(key)), attribute.Bool("hit", ok))
+	mw.rec(ctx, "GetWithInfo", start, attribute.Int(attrs.AttrKeyLength, len(key)), attribute.Bool("hit", ok))
 
 	return it, ok
 }
@@ -85,9 +84,9 @@ func (mw *OTelMetricsMiddleware) GetMultiple(ctx context.Context, keys ...string
 		ctx,
 		"GetMultiple",
 		start,
-		attribute.Int("keys.count", len(keys)),
-		attribute.Int("result.count", len(res)),
-		attribute.Int("failed.count", len(failed)),
+		attribute.Int(attrs.AttrKeysCount, len(keys)),
+		attribute.Int(attrs.AttrResultCount, len(res)),
+		attribute.Int(attrs.AttrFailedCount, len(failed)),
 	)
 
 	return res, failed
@@ -145,10 +144,10 @@ func (mw *OTelMetricsMiddleware) Stop(ctx context.Context) error { return mw.nex
 func (mw *OTelMetricsMiddleware) GetStats() stats.Stats { return mw.next.GetStats() }
 
 // rec records call count and duration with attributes.
-func (mw *OTelMetricsMiddleware) rec(ctx context.Context, method string, start time.Time, attrs ...attribute.KeyValue) {
+func (mw *OTelMetricsMiddleware) rec(ctx context.Context, method string, start time.Time, attributes ...attribute.KeyValue) {
 	base := []attribute.KeyValue{attribute.String("method", method)}
-	if len(attrs) > 0 {
-		base = append(base, attrs...)
+	if len(attributes) > 0 {
+		base = append(base, attributes...)
 	}
 
 	mw.calls.Add(ctx, 1, metric.WithAttributes(base...))

@@ -55,12 +55,13 @@ func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) { //no
 			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": unmarshalErr.Error()})
 		}
 
-		it := &cache.Item{
-			Key:        req.Key,
-			Value:      req.Value,
-			Expiration: time.Duration(req.Expiration) * time.Millisecond,
-			Version:    req.Version,
-			Origin:     req.Origin,
+		it := &cache.Item{ // LastUpdated set to now for replicated writes
+			Key:         req.Key,
+			Value:       req.Value,
+			Expiration:  time.Duration(req.Expiration) * time.Millisecond,
+			Version:     req.Version,
+			Origin:      req.Origin,
+			LastUpdated: time.Now(),
 		}
 
 		dm.applySet(ctx, it, req.Replicate)
