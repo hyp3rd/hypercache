@@ -33,6 +33,7 @@ words:
   - Fprintln
   - freqs
   - funlen
+  - gerr
   - gitversion
   - GITVERSION
   - goccy
@@ -49,11 +50,13 @@ words:
   - ints
   - ireturn
   - Itemm
+  - keyf
   - lamport
   - LFUDA
   - localmodule
   - logrus
   - memprofile
+  - Merkle
   - Mgmt
   - msgpack
   - mvdan

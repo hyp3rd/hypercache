@@ -55,6 +55,7 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 		}
 
 		item := &cachev2.Item{Key: k, Value: k}
+
 		err := item.Valid()
 		if err != nil {
 			t.Fatalf("item valid %s: %v", k, err)

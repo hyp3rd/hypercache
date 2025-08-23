@@ -3,9 +3,12 @@ package backend
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
+	"hash"
 	"hash/fnv"
 	"math/big"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +23,16 @@ const (
 	defaultDistShardCount = 8  // default number of shards
 	listPrealloc          = 32 // pre-allocation size for List results
 )
+
+// Merkle internal tuning constants & errors.
+const (
+	defaultMerkleChunkSize = 128
+	merklePreallocEntries  = 256
+	merkleVersionBytes     = 8
+	shiftPerByte           = 8 // bit shift per byte when encoding uint64
+)
+
+var errNoTransport = errors.New("no transport")
 
 // DistMemory is a sharded in-process distributed-like backend. It simulates
 // distribution by consistent hashing across a fixed set of in-memory shards.
@@ -66,6 +79,9 @@ type DistMemory struct {
 	// simple gossip
 	gossipInterval time.Duration
 	gossipStopCh   chan struct{}
+
+	// anti-entropy
+	merkleChunkSize int // number of keys per leaf chunk (power-of-two recommended)
 }
 
 // hintedEntry represents a deferred replica write.
@@ -118,6 +134,161 @@ func WithDistShardCount(n int) DistMemoryOption {
 	}
 }
 
+// WithDistMerkleChunkSize sets the number of keys per leaf hash chunk (default 128 if 0).
+func WithDistMerkleChunkSize(n int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if n > 0 {
+			dm.merkleChunkSize = n
+		}
+	}
+}
+
+// --- Merkle tree anti-entropy structures ---
+
+// MerkleTree represents a binary hash tree over key/version pairs.
+type MerkleTree struct { // minimal representation
+	LeafHashes [][]byte // ordered leaf hashes
+	Root       []byte
+	ChunkSize  int
+}
+
+// BuildMerkleTree constructs a Merkle tree snapshot of local data (best-effort, locks each shard briefly).
+func (dm *DistMemory) BuildMerkleTree() *MerkleTree { //nolint:ireturn
+	chunkSize := dm.merkleChunkSize
+	if chunkSize <= 0 {
+		chunkSize = defaultMerkleChunkSize
+	}
+
+	entries := dm.merkleEntries()
+	if len(entries) == 0 {
+		return &MerkleTree{ChunkSize: chunkSize}
+	}
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].k < entries[j].k })
+
+	hasher := sha256.New()
+	buf := make([]byte, merkleVersionBytes)
+	leaves := make([][]byte, 0, (len(entries)+chunkSize-1)/chunkSize)
+
+	for i := 0; i < len(entries); i += chunkSize {
+		end := i + chunkSize
+		if end > len(entries) {
+			end = len(entries)
+		}
+
+		hasher.Reset()
+
+		for _, e := range entries[i:end] {
+			_, _ = hasher.Write([]byte(e.k))
+			encodeUint64BigEndian(buf, e.v)
+
+			_, _ = hasher.Write(buf)
+		}
+
+		leaves = append(leaves, append([]byte(nil), hasher.Sum(nil)...))
+	}
+
+	root := foldMerkle(leaves, hasher)
+
+	return &MerkleTree{LeafHashes: leaves, Root: append([]byte(nil), root...), ChunkSize: chunkSize}
+}
+
+// merkleKV is an internal pair used during tree construction & sync.
+type merkleKV struct {
+	k string
+	v uint64
+}
+
+// DiffLeafRanges compares two trees and returns indexes of differing leaf chunks.
+func (mt *MerkleTree) DiffLeafRanges(other *MerkleTree) []int { //nolint:ireturn
+	if mt == nil || other == nil {
+		return nil
+	}
+
+	if len(mt.LeafHashes) != len(other.LeafHashes) { // size mismatch -> full resync
+		idxs := make([]int, len(mt.LeafHashes))
+		for i := range idxs {
+			idxs[i] = i
+		}
+
+		return idxs
+	}
+
+	var diffs []int
+	for i := range mt.LeafHashes {
+		if !equalBytes(mt.LeafHashes[i], other.LeafHashes[i]) {
+			diffs = append(diffs, i)
+		}
+	}
+
+	return diffs
+}
+
+func equalBytes(a, b []byte) bool { // tiny helper
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// SyncWith performs Merkle anti-entropy against a remote node (pull newer versions for differing chunks).
+func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error { //nolint:ireturn
+	if dm.transport == nil {
+		return errNoTransport
+	}
+
+	remoteTree, err := dm.transport.FetchMerkle(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+
+	localTree := dm.BuildMerkleTree()
+
+	diffs := localTree.DiffLeafRanges(remoteTree)
+	if len(diffs) == 0 { // already consistent
+		return nil
+	}
+
+	// Collect and sort local entries for chunk boundary mapping.
+	entries := dm.merkleEntries()
+	sort.Slice(entries, func(i, j int) bool { return entries[i].k < entries[j].k })
+
+	// Enumerate remote keys for missing detection when using in-process transport.
+	missingKeys := dm.enumerateRemoteOnlyKeys(nodeID, entries)
+
+	chunkSize := localTree.ChunkSize
+	for _, ci := range diffs {
+		start := ci * chunkSize
+		if start >= len(entries) { // diff chunk beyond local entries (only missing keys handled later)
+			continue
+		}
+
+		end := start + chunkSize
+		if end > len(entries) {
+			end = len(entries)
+		}
+
+		for _, e := range entries[start:end] {
+			dm.fetchAndAdopt(ctx, nodeID, e.k)
+		}
+	}
+	// fetch keys that exist only remotely
+	for k := range missingKeys {
+		dm.fetchAndAdopt(ctx, nodeID, k)
+	}
+
+	atomic.AddInt64(&dm.metrics.merkleSyncs, 1)
+
+	return nil
+}
+
 // WithDistCapacity sets logical capacity (not strictly enforced yet).
 func WithDistCapacity(capacity int) DistMemoryOption {
 	return func(dm *DistMemory) { dm.capacity = capacity }
@@ -138,6 +309,9 @@ func WithDistMembership(m *cluster.Membership, node *cluster.Node) DistMemoryOpt
 func WithDistTransport(t DistTransport) DistMemoryOption {
 	return func(dm *DistMemory) { dm.transport = t }
 }
+
+// SetTransport sets the transport post-construction (testing helper).
+func (dm *DistMemory) SetTransport(t DistTransport) { dm.transport = t }
 
 // WithDistHeartbeat configures heartbeat interval and suspect/dead thresholds.
 // If interval <= 0 heartbeat is disabled.
@@ -427,6 +601,7 @@ type DistTransport interface {
 	ForwardGet(ctx context.Context, nodeID string, key string) (*cache.Item, bool, error)
 	ForwardRemove(ctx context.Context, nodeID string, key string, replicate bool) error
 	Health(ctx context.Context, nodeID string) error
+	FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error)
 }
 
 // InProcessTransport implements DistTransport for multiple DistMemory instances in the same process.
@@ -495,6 +670,16 @@ func (t *InProcessTransport) Health(_ context.Context, nodeID string) error { //
 	return nil
 }
 
+// FetchMerkle returns a snapshot Merkle tree of the target backend.
+func (t *InProcessTransport) FetchMerkle(_ context.Context, nodeID string) (*MerkleTree, error) { //nolint:ireturn
+	b, ok := t.backends[nodeID]
+	if !ok {
+		return nil, sentinel.ErrBackendNotFound
+	}
+
+	return b.BuildMerkleTree(), nil
+}
+
 // distMetrics holds internal counters (best-effort, not atomic snapshot consistent).
 type distMetrics struct {
 	forwardGet          int64
@@ -514,6 +699,8 @@ type distMetrics struct {
 	hintedReplayed      int64 // hints successfully replayed
 	hintedExpired       int64 // hints expired before delivery
 	hintedDropped       int64 // hints dropped due to non-not-found transport errors
+	merkleSyncs         int64 // merkle sync operations completed
+	merkleKeysPulled    int64 // keys applied during sync
 }
 
 // DistMetrics snapshot.
@@ -535,6 +722,8 @@ type DistMetrics struct {
 	HintedReplayed      int64
 	HintedExpired       int64
 	HintedDropped       int64
+	MerkleSyncs         int64
+	MerkleKeysPulled    int64
 }
 
 // Metrics returns a snapshot of distributed metrics.
@@ -557,6 +746,8 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		HintedReplayed:      atomic.LoadInt64(&dm.metrics.hintedReplayed),
 		HintedExpired:       atomic.LoadInt64(&dm.metrics.hintedExpired),
 		HintedDropped:       atomic.LoadInt64(&dm.metrics.hintedDropped),
+		MerkleSyncs:         atomic.LoadInt64(&dm.metrics.merkleSyncs),
+		MerkleKeysPulled:    atomic.LoadInt64(&dm.metrics.merkleKeysPulled),
 	}
 }
 
@@ -582,6 +773,106 @@ func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 	}
 
 	return nil
+}
+
+// enumerateRemoteOnlyKeys returns keys present only on the remote side (best-effort, in-process only).
+func (dm *DistMemory) enumerateRemoteOnlyKeys(nodeID string, local []merkleKV) map[string]struct{} { //nolint:ireturn
+	missing := make(map[string]struct{})
+
+	ip, ok := dm.transport.(*InProcessTransport)
+	if !ok {
+		return missing
+	}
+
+	remote, ok := ip.backends[nodeID]
+	if !ok {
+		return missing
+	}
+
+	for _, shard := range remote.shards {
+		if shard == nil {
+			continue
+		}
+
+		rch := shard.items.IterBuffered()
+		for t := range rch {
+			missing[t.Key] = struct{}{}
+		}
+	}
+
+	for _, e := range local { // remove any that we already have
+		delete(missing, e.k)
+	}
+
+	return missing
+}
+
+// fetchAndAdopt pulls a key from a remote node and adopts it if it's newer or absent locally.
+func (dm *DistMemory) fetchAndAdopt(ctx context.Context, nodeID, key string) {
+	it, ok, gerr := dm.transport.ForwardGet(ctx, nodeID, key)
+	if gerr != nil || !ok {
+		return
+	}
+
+	if cur, okLocal := dm.shardFor(key).items.Get(key); !okLocal || it.Version > cur.Version {
+		dm.applySet(ctx, it, false)
+		atomic.AddInt64(&dm.metrics.merkleKeysPulled, 1)
+	}
+}
+
+// merkleEntries gathers key/version pairs from all shards.
+func (dm *DistMemory) merkleEntries() []merkleKV {
+	entries := make([]merkleKV, 0, merklePreallocEntries)
+
+	for _, shard := range dm.shards {
+		if shard == nil {
+			continue
+		}
+
+		ch := shard.items.IterBuffered()
+		for t := range ch {
+			entries = append(entries, merkleKV{k: t.Key, v: t.Val.Version})
+		}
+	}
+
+	return entries
+}
+
+func encodeUint64BigEndian(buf []byte, v uint64) {
+	for i := merkleVersionBytes - 1; i >= 0; i-- { // big endian for deterministic hashing
+		buf[i] = byte(v)
+
+		v >>= shiftPerByte
+	}
+}
+
+// foldMerkle reduces leaf hashes into a single root using a binary tree.
+func foldMerkle(leaves [][]byte, hasher hash.Hash) []byte { //nolint:ireturn
+	if len(leaves) == 0 {
+		return nil
+	}
+
+	level := leaves
+	for len(level) > 1 {
+		next := make([][]byte, 0, (len(level)+1)/2)
+		for i := 0; i < len(level); i += 2 {
+			if i+1 == len(level) { // odd node promoted
+				next = append(next, append([]byte(nil), level[i]...))
+
+				break
+			}
+
+			hasher.Reset()
+
+			_, _ = hasher.Write(level[i])
+			_, _ = hasher.Write(level[i+1])
+			next = append(next, append([]byte(nil), hasher.Sum(nil)...))
+		}
+
+		level = next
+	}
+
+	return level[0]
 }
 
 // ensureShardConfig initializes shards respecting configured shardCount.

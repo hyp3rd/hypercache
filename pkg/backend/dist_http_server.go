@@ -40,6 +40,7 @@ func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error { //no
 	s.registerGet(ctx, dm)
 	s.registerRemove(ctx, dm)
 	s.registerHealth()
+	s.registerMerkle(ctx, dm)
 
 	return s.listen(ctx)
 }
@@ -110,6 +111,18 @@ func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { /
 
 func (s *distHTTPServer) registerHealth() { //nolint:ireturn
 	s.app.Get("/health", func(fctx fiber.Ctx) error { return fctx.SendString("ok") })
+}
+
+func (s *distHTTPServer) registerMerkle(_ context.Context, dm *DistMemory) { //nolint:ireturn
+	s.app.Get("/internal/merkle", func(fctx fiber.Ctx) error {
+		tree := dm.BuildMerkleTree()
+
+		return fctx.JSON(fiber.Map{
+			"root":        tree.Root,
+			"leaf_hashes": tree.LeafHashes,
+			"chunk_size":  tree.ChunkSize,
+		})
+	})
 }
 
 func (s *distHTTPServer) listen(ctx context.Context) error { //nolint:ireturn

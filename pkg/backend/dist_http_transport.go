@@ -258,3 +258,13 @@ func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error { /
 
 	return nil
 }
+
+// FetchMerkle currently unsupported over HTTP transport (would require new endpoint).
+func (t *DistHTTPTransport) FetchMerkle(_ context.Context, _ string) (*MerkleTree, error) { //nolint:ireturn
+	// reference receiver (t) for future extension and to satisfy linters about unused receiver
+	if t == nil {
+		return nil, errNoTransport
+	}
+
+	return nil, ewrap.New("fetch merkle not implemented for http transport")
+}

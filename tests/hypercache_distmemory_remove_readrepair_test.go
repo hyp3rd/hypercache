@@ -47,6 +47,7 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 	}
 
 	item := &cachev2.Item{Key: key, Value: "val"}
+
 	err := item.Valid()
 	if err != nil {
 		t.Fatalf("valid: %v", err)
@@ -104,6 +105,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	}
 
 	item := &cachev2.Item{Key: key, Value: "val"}
+
 	err := item.Valid()
 	if err != nil {
 		t.Fatalf("valid: %v", err)
