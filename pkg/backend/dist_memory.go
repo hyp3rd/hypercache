@@ -82,6 +82,14 @@ type DistMemory struct {
 
 	// anti-entropy
 	merkleChunkSize int // number of keys per leaf chunk (power-of-two recommended)
+
+	// periodic merkle auto-sync
+	autoSyncInterval         time.Duration
+	autoSyncStopCh           chan struct{}
+	autoSyncPeersPerInterval int // limit number of peers synced per tick (0=all)
+
+	lastAutoSyncDuration atomic.Int64 // nanoseconds of last full loop
+	lastAutoSyncError    atomic.Value // error string or nil
 }
 
 // hintedEntry represents a deferred replica write.
@@ -140,6 +148,20 @@ func WithDistMerkleChunkSize(n int) DistMemoryOption {
 		if n > 0 {
 			dm.merkleChunkSize = n
 		}
+	}
+}
+
+// WithDistMerkleAutoSync enables periodic anti-entropy sync attempts. If interval <= 0 disables.
+func WithDistMerkleAutoSync(interval time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) {
+		dm.autoSyncInterval = interval
+	}
+}
+
+// WithDistMerkleAutoSyncPeers limits number of peers synced per interval (0 or <0 = all).
+func WithDistMerkleAutoSyncPeers(n int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		dm.autoSyncPeersPerInterval = n
 	}
 }
 
@@ -250,38 +272,18 @@ func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error { //nol
 	}
 
 	localTree := dm.BuildMerkleTree()
-
+	entries := dm.sortedMerkleEntries()
 	diffs := localTree.DiffLeafRanges(remoteTree)
-	if len(diffs) == 0 { // already consistent
-		return nil
-	}
+	missing := dm.resolveMissingKeys(ctx, nodeID, entries)
 
-	// Collect and sort local entries for chunk boundary mapping.
-	entries := dm.merkleEntries()
-	sort.Slice(entries, func(i, j int) bool { return entries[i].k < entries[j].k })
+	dm.applyMerkleDiffs(ctx, nodeID, entries, diffs, localTree.ChunkSize)
 
-	// Enumerate remote keys for missing detection when using in-process transport.
-	missingKeys := dm.enumerateRemoteOnlyKeys(nodeID, entries)
-
-	chunkSize := localTree.ChunkSize
-	for _, ci := range diffs {
-		start := ci * chunkSize
-		if start >= len(entries) { // diff chunk beyond local entries (only missing keys handled later)
-			continue
-		}
-
-		end := start + chunkSize
-		if end > len(entries) {
-			end = len(entries)
-		}
-
-		for _, e := range entries[start:end] {
-			dm.fetchAndAdopt(ctx, nodeID, e.k)
-		}
-	}
-	// fetch keys that exist only remotely
-	for k := range missingKeys {
+	for k := range missing {
 		dm.fetchAndAdopt(ctx, nodeID, k)
+	}
+
+	if len(diffs) == 0 && len(missing) == 0 {
+		return nil
 	}
 
 	atomic.AddInt64(&dm.metrics.merkleSyncs, 1)
@@ -406,6 +408,7 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 	dm.startHeartbeatIfEnabled(ctx)
 	dm.startHintReplayIfEnabled(ctx)
 	dm.startGossipIfEnabled()
+	dm.startAutoSyncIfEnabled(ctx)
 
 	return dm, nil
 }
@@ -586,6 +589,23 @@ func (dm *DistMemory) DebugInject(it *cache.Item) { //nolint:ireturn
 // LocalNodeID returns this instance's node ID (testing helper).
 func (dm *DistMemory) LocalNodeID() cluster.NodeID { return dm.localNode.ID }
 
+// LocalNodeAddr returns the configured node address (host:port) used by HTTP server.
+func (dm *DistMemory) LocalNodeAddr() string { //nolint:ireturn
+	return dm.nodeAddr
+}
+
+// SetLocalNode manually sets the local node (testing helper before starting HTTP).
+func (dm *DistMemory) SetLocalNode(node *cluster.Node) { //nolint:ireturn
+	dm.localNode = node
+	if dm.nodeAddr == "" && node != nil {
+		dm.nodeAddr = node.Address
+	}
+
+	if dm.membership != nil && node != nil {
+		dm.membership.Upsert(node)
+	}
+}
+
 // DebugOwners returns current owners slice for a key (for tests).
 func (dm *DistMemory) DebugOwners(key string) []cluster.NodeID {
 	if dm.ring == nil {
@@ -701,6 +721,7 @@ type distMetrics struct {
 	hintedDropped       int64 // hints dropped due to non-not-found transport errors
 	merkleSyncs         int64 // merkle sync operations completed
 	merkleKeysPulled    int64 // keys applied during sync
+	autoSyncLoops       int64 // number of auto-sync ticks executed
 }
 
 // DistMetrics snapshot.
@@ -724,10 +745,20 @@ type DistMetrics struct {
 	HintedDropped       int64
 	MerkleSyncs         int64
 	MerkleKeysPulled    int64
+	AutoSyncLoops       int64
+	LastAutoSyncNanos   int64
+	LastAutoSyncError   string
 }
 
 // Metrics returns a snapshot of distributed metrics.
 func (dm *DistMemory) Metrics() DistMetrics {
+	lastErr := ""
+	if v := dm.lastAutoSyncError.Load(); v != nil {
+		if s, ok := v.(string); ok {
+			lastErr = s
+		}
+	}
+
 	return DistMetrics{
 		ForwardGet:          atomic.LoadInt64(&dm.metrics.forwardGet),
 		ForwardSet:          atomic.LoadInt64(&dm.metrics.forwardSet),
@@ -748,6 +779,9 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		HintedDropped:       atomic.LoadInt64(&dm.metrics.hintedDropped),
 		MerkleSyncs:         atomic.LoadInt64(&dm.metrics.merkleSyncs),
 		MerkleKeysPulled:    atomic.LoadInt64(&dm.metrics.merkleKeysPulled),
+		AutoSyncLoops:       atomic.LoadInt64(&dm.metrics.autoSyncLoops),
+		LastAutoSyncNanos:   dm.lastAutoSyncDuration.Load(),
+		LastAutoSyncError:   lastErr,
 	}
 }
 
@@ -765,6 +799,10 @@ func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 		close(dm.gossipStopCh)
 	}
 
+	if dm.autoSyncStopCh != nil {
+		close(dm.autoSyncStopCh)
+	}
+
 	if dm.httpServer != nil {
 		err := dm.httpServer.stop(ctx) // best-effort
 		if err != nil {
@@ -773,6 +811,64 @@ func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 	}
 
 	return nil
+}
+
+// --- Sync helper methods (placed after exported methods to satisfy ordering linter) ---
+
+// sortedMerkleEntries returns merkle entries sorted by key.
+func (dm *DistMemory) sortedMerkleEntries() []merkleKV { //nolint:ireturn
+	entries := dm.merkleEntries()
+	sort.Slice(entries, func(i, j int) bool { return entries[i].k < entries[j].k })
+
+	return entries
+}
+
+// resolveMissingKeys enumerates remote-only keys using in-process or HTTP listing.
+func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, entries []merkleKV) map[string]struct{} { //nolint:ireturn
+	missing := dm.enumerateRemoteOnlyKeys(nodeID, entries)
+	if len(missing) != 0 {
+		return missing
+	}
+
+	httpT, ok := dm.transport.(*DistHTTPTransport)
+	if !ok {
+		return missing
+	}
+
+	keys, kerr := httpT.ListKeys(ctx, nodeID)
+	if kerr != nil || len(keys) == 0 {
+		return missing
+	}
+
+	mset := make(map[string]struct{}, len(keys))
+	for _, k := range keys { // populate
+		mset[k] = struct{}{}
+	}
+
+	for _, e := range entries { // remove existing
+		delete(mset, e.k)
+	}
+
+	return mset
+}
+
+// applyMerkleDiffs fetches and adopts keys for differing Merkle chunks.
+func (dm *DistMemory) applyMerkleDiffs(ctx context.Context, nodeID string, entries []merkleKV, diffs []int, chunkSize int) { //nolint:ireturn
+	for _, ci := range diffs {
+		start := ci * chunkSize
+		if start >= len(entries) {
+			continue
+		}
+
+		end := start + chunkSize
+		if end > len(entries) {
+			end = len(entries)
+		}
+
+		for _, e := range entries[start:end] {
+			dm.fetchAndAdopt(ctx, nodeID, e.k)
+		}
+	}
 }
 
 // enumerateRemoteOnlyKeys returns keys present only on the remote side (best-effort, in-process only).
@@ -1271,6 +1367,74 @@ func (dm *DistMemory) startGossipIfEnabled() { //nolint:ireturn
 
 	dm.gossipStopCh = make(chan struct{})
 	go dm.gossipLoop()
+}
+
+// startAutoSyncIfEnabled launches periodic merkle syncs to all other members.
+func (dm *DistMemory) startAutoSyncIfEnabled(ctx context.Context) { //nolint:ireturn
+	if dm.autoSyncInterval <= 0 || dm.membership == nil {
+		return
+	}
+
+	if dm.autoSyncStopCh != nil { // already running
+		return
+	}
+
+	dm.autoSyncStopCh = make(chan struct{})
+
+	interval := dm.autoSyncInterval
+	go dm.autoSyncLoop(ctx, interval)
+}
+
+func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration) { //nolint:ireturn
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-dm.autoSyncStopCh:
+			return
+		case <-ticker.C:
+			dm.runAutoSyncTick(ctx)
+		}
+	}
+}
+
+// runAutoSyncTick performs one auto-sync cycle; separated for lower complexity.
+func (dm *DistMemory) runAutoSyncTick(ctx context.Context) { //nolint:ireturn
+	start := time.Now()
+
+	var lastErr error
+
+	members := dm.membership.List()
+	limit := dm.autoSyncPeersPerInterval
+	synced := 0
+
+	for _, member := range members {
+		if member == nil || string(member.ID) == dm.nodeID { // skip self
+			continue
+		}
+
+		if limit > 0 && synced >= limit {
+			break
+		}
+
+		err := dm.SyncWith(ctx, string(member.ID))
+		if err != nil { // capture last error only
+			lastErr = err
+		}
+
+		synced++
+	}
+
+	dm.lastAutoSyncDuration.Store(time.Since(start).Nanoseconds())
+
+	if lastErr != nil {
+		dm.lastAutoSyncError.Store(lastErr.Error())
+	} else {
+		dm.lastAutoSyncError.Store("")
+	}
+
+	atomic.AddInt64(&dm.metrics.autoSyncLoops, 1)
 }
 
 func (dm *DistMemory) gossipLoop() { //nolint:ireturn

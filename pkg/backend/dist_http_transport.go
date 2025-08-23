@@ -1,4 +1,3 @@
-// Package backend provides backend implementations including a distributed HTTP transport.
 package backend
 
 import (
@@ -18,41 +17,36 @@ import (
 )
 
 // DistHTTPTransport implements DistTransport over HTTP JSON.
-type DistHTTPTransport struct { // minimal MVP
+type DistHTTPTransport struct {
 	client    *http.Client
-	baseURLFn func(nodeID string) (string, bool) // resolves nodeID -> base URL (scheme+host)
+	baseURLFn func(nodeID string) (string, bool)
 }
 
-// internal status code threshold for error classification.
 const statusThreshold = 300
 
-// NewDistHTTPTransport creates a new HTTP transport.
-func NewDistHTTPTransport(timeout time.Duration, resolver func(string) (string, bool)) *DistHTTPTransport {
+// NewDistHTTPTransport constructs a DistHTTPTransport with the given timeout and
+// nodeID->baseURL resolver. Timeout <=0 defaults to 2s.
+func NewDistHTTPTransport(timeout time.Duration, resolver func(string) (string, bool)) *DistHTTPTransport { //nolint:ireturn
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
 
-	return &DistHTTPTransport{
-		client:    &http.Client{Timeout: timeout},
-		baseURLFn: resolver,
-	}
+	return &DistHTTPTransport{client: &http.Client{Timeout: timeout}, baseURLFn: resolver}
 }
-
-// request/response DTOs moved to dist_http_types.go
 
 const (
 	errMsgNewRequest = "new request"
 	errMsgDoRequest  = "do request"
 )
 
-// ForwardSet forwards a set (or replication) request to a remote node.
+// ForwardSet sends a Set/Replicate request to a remote node.
 func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error { //nolint:ireturn
 	base, ok := t.baseURLFn(nodeID)
 	if !ok {
 		return sentinel.ErrBackendNotFound
 	}
 
-	reqBody := httpSetRequest{ // split for line length
+	reqBody := httpSetRequest{
 		Key:        item.Key,
 		Value:      item.Value,
 		Expiration: item.Expiration.Milliseconds(),
@@ -66,9 +60,7 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 		return ewrap.Wrap(err, "marshal set request")
 	}
 
-	url := base + "/internal/cache/set"
-
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/internal/cache/set", bytes.NewReader(payloadBytes))
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
 	}
@@ -80,15 +72,12 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 		return ewrap.Wrap(err, errMsgDoRequest)
 	}
 
-	defer func() {
-		_ = resp.Body.Close() //nolint:errcheck // best-effort
-	}()
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return sentinel.ErrBackendNotFound
 	}
 
-	const statusThreshold = 300 // local redeclare for linter clarity
 	if resp.StatusCode >= statusThreshold {
 		body, rerr := io.ReadAll(resp.Body)
 		if rerr != nil {
@@ -101,18 +90,14 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 	return nil
 }
 
-// type httpGetResponse formerly used for direct decoding; replaced by map-based decoding to satisfy linters.
-
-// ForwardGet fetches an item from a remote node.
-func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID string, key string) (*cache.Item, bool, error) { //nolint:ireturn
+// ForwardGet fetches a single item from a remote node.
+func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID, key string) (*cache.Item, bool, error) { //nolint:ireturn
 	base, ok := t.baseURLFn(nodeID)
 	if !ok {
 		return nil, false, sentinel.ErrBackendNotFound
 	}
 
-	url := fmt.Sprintf("%s/internal/cache/get?key=%s", base, key)
-
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/internal/cache/get?key=%s", base, key), nil)
 	if err != nil {
 		return nil, false, ewrap.Wrap(err, errMsgNewRequest)
 	}
@@ -122,7 +107,7 @@ func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID string, key s
 		return nil, false, ewrap.Wrap(err, errMsgDoRequest)
 	}
 
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck // best-effort
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, false, sentinel.ErrBackendNotFound
@@ -144,7 +129,6 @@ func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID string, key s
 	return item, true, nil
 }
 
-// decodeGetBody decodes a get response body into an item.
 func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
 	var raw map[string]json.RawMessage
 
@@ -168,7 +152,6 @@ func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
 	}
 
 	if ib, ok := raw["item"]; ok && len(ib) > 0 {
-		// define minimal mirror struct to ensure json tags present (satisfy musttag)
 		var mirror struct {
 			Key        string          `json:"key"`
 			Value      json.RawMessage `json:"value"`
@@ -181,8 +164,8 @@ func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
 		if err != nil {
 			return nil, false, ewrap.Wrap(err, "unmarshal mirror")
 		}
-		// reconstruct cache.Item (we ignore expiration formatting difference vs ms)
-		return &cache.Item{ // multi-line for readability
+
+		return &cache.Item{
 			Key:         mirror.Key,
 			Value:       mirror.Value,
 			Expiration:  time.Duration(mirror.Expiration) * time.Millisecond,
@@ -195,16 +178,14 @@ func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
 	return &cache.Item{}, true, nil
 }
 
-// ForwardRemove forwards a remove operation.
-func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID string, key string, replicate bool) error { //nolint:ireturn
+// ForwardRemove propagates a delete operation to a remote node.
+func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error { //nolint:ireturn
 	base, ok := t.baseURLFn(nodeID)
 	if !ok {
 		return sentinel.ErrBackendNotFound
 	}
 
-	url := fmt.Sprintf("%s/internal/cache/remove?key=%s&replicate=%t", base, key, replicate)
-
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/internal/cache/remove?key=%s&replicate=%t", base, key, replicate), nil)
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
 	}
@@ -214,7 +195,7 @@ func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID string, ke
 		return ewrap.Wrap(err, errMsgDoRequest)
 	}
 
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck // best-effort
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return sentinel.ErrBackendNotFound
@@ -227,16 +208,14 @@ func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID string, ke
 	return nil
 }
 
-// Health probes a remote node health endpoint.
+// Health performs a health probe against a remote node.
 func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error { //nolint:ireturn
 	base, ok := t.baseURLFn(nodeID)
 	if !ok {
 		return sentinel.ErrBackendNotFound
 	}
 
-	url := base + "/health"
-
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/health", nil)
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
 	}
@@ -246,7 +225,7 @@ func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error { /
 		return ewrap.Wrap(err, errMsgDoRequest)
 	}
 
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck // best-effort
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return sentinel.ErrBackendNotFound
@@ -259,12 +238,86 @@ func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error { /
 	return nil
 }
 
-// FetchMerkle currently unsupported over HTTP transport (would require new endpoint).
-func (t *DistHTTPTransport) FetchMerkle(_ context.Context, _ string) (*MerkleTree, error) { //nolint:ireturn
-	// reference receiver (t) for future extension and to satisfy linters about unused receiver
+// FetchMerkle retrieves a Merkle tree snapshot from a remote node.
+func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error) { //nolint:ireturn
 	if t == nil {
 		return nil, errNoTransport
 	}
 
-	return nil, ewrap.New("fetch merkle not implemented for http transport")
+	base, ok := t.baseURLFn(nodeID)
+	if !ok {
+		return nil, sentinel.ErrBackendNotFound
+	}
+
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/internal/merkle", nil)
+	if err != nil {
+		return nil, ewrap.Wrap(err, errMsgNewRequest)
+	}
+
+	resp, err := t.client.Do(hreq)
+	if err != nil {
+		return nil, ewrap.Wrap(err, errMsgDoRequest)
+	}
+
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, sentinel.ErrBackendNotFound
+	}
+
+	if resp.StatusCode >= statusThreshold {
+		return nil, ewrap.Newf("fetch merkle status %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Root       []byte   `json:"root"`
+		LeafHashes [][]byte `json:"leaf_hashes"`
+		ChunkSize  int      `json:"chunk_size"`
+	}
+
+	dec := json.NewDecoder(resp.Body)
+
+	err = dec.Decode(&body)
+	if err != nil {
+		return nil, ewrap.Wrap(err, "decode merkle")
+	}
+
+	return &MerkleTree{Root: body.Root, LeafHashes: body.LeafHashes, ChunkSize: body.ChunkSize}, nil
+}
+
+// ListKeys returns all keys from a remote node (expensive; used for tests / anti-entropy fallback).
+func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]string, error) { //nolint:ireturn
+	base, ok := t.baseURLFn(nodeID)
+	if !ok {
+		return nil, sentinel.ErrBackendNotFound
+	}
+
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/internal/keys", nil)
+	if err != nil {
+		return nil, ewrap.Wrap(err, errMsgNewRequest)
+	}
+
+	resp, err := t.client.Do(hreq)
+	if err != nil {
+		return nil, ewrap.Wrap(err, errMsgDoRequest)
+	}
+
+	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+
+	if resp.StatusCode >= statusThreshold {
+		return nil, ewrap.Newf("list keys status %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Keys []string `json:"keys"`
+	}
+
+	dec := json.NewDecoder(resp.Body)
+
+	err = dec.Decode(&body)
+	if err != nil {
+		return nil, ewrap.Wrap(err, "decode keys")
+	}
+
+	return body.Keys, nil
 }
