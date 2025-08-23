@@ -19,6 +19,7 @@ func TestMerkleSingleMissingKey(t *testing.T) {
 
 	da := any(a).(*backend.DistMemory)
 	db := any(b).(*backend.DistMemory)
+
 	da.SetTransport(transport)
 	db.SetTransport(transport)
 	transport.Register(da)
@@ -28,7 +29,8 @@ func TestMerkleSingleMissingKey(t *testing.T) {
 	it := &cache.Item{Key: "k1", Value: []byte("v1"), Version: 1, Origin: "A", LastUpdated: time.Now()}
 	da.DebugInject(it)
 
-	if err := db.SyncWith(ctx, string(da.LocalNodeID())); err != nil {
+	err := db.SyncWith(ctx, string(da.LocalNodeID()))
+	if err != nil {
 		t.Fatalf("sync single: %v", err)
 	}
 
@@ -36,6 +38,7 @@ func TestMerkleSingleMissingKey(t *testing.T) {
 	if got == nil {
 		t.Fatalf("expected key pulled")
 	}
+
 	if bs, ok := got.Value.([]byte); !ok || string(bs) != "v1" {
 		t.Fatalf("unexpected value %v", got.Value)
 	}

@@ -10,7 +10,7 @@ It is optimized for performance and flexibility:
 
 - Tunable expiration and eviction intervals (or fully proactive eviction when the eviction interval is set to `0`).
 - Debounced & coalesced expiration trigger channel to avoid thrashing.
-- Non-blocking manual `TriggerEviction()` signal.
+- Non-blocking manual `TriggerEviction(context.Context)` signal.
 - Serializer‑aware memory accounting (item size reflects the backend serialization format when available).
 - Multiple eviction algorithms with the ability to register custom ones.
 - Multiple stats collectors (default histogram) and middleware hooks.
@@ -189,6 +189,8 @@ if err != nil {
 | `WithDistListKeysCap` | (DistMemory) Cap number of keys fetched via fallback enumeration. |
 | `WithDistNode` | (DistMemory) Explicit node identity (id/address). |
 | `WithDistSeeds` | (DistMemory) Static seed addresses to pre-populate membership. |
+| `WithDistTombstoneTTL` | (DistMemory) Retain delete tombstones for this duration before compaction (<=0 = infinite). |
+| `WithDistTombstoneSweep` | (DistMemory) Interval to run tombstone compaction (<=0 disables). |
 
 *ARC is experimental (not registered by default).
 
@@ -215,9 +217,10 @@ Current capabilities:
   - Tombstone versioning uses a per-process monotonic counter when no prior item version exists (avoids time-based unsigned casts).
   - Remote pull sync will infer a tombstone when a key present locally is absent remotely and no local tomb exists (anti-resurrection guard).
   - DebugInject intentionally clears any existing tombstone for that key (test helper / simulating authoritative resurrection with higher version).
-  - Planned: configurable tombstone TTL + periodic compaction to reclaim memory; metrics for active tombstones and purges.
+    - Tombstone TTL + periodic compaction: configure with `WithDistTombstoneTTL` / `WithDistTombstoneSweep`; metrics track active & purged counts.
 - Metrics exposed via management endpoints (`/dist/metrics`, `/dist/owners`, `/cluster/members`, `/cluster/ring`).
   - Includes Merkle phase timings (fetch/build/diff nanos) and counters for keys pulled during anti-entropy.
+    - Tombstone metrics: `TombstonesActive`, `TombstonesPurged`.
 
 Planned next steps (roadmap excerpts): network transport abstraction, quorum reads/writes, versioning (vector clocks or lamport), failure detection / node states, rebalancing & anti‑entropy sync.
 

@@ -17,15 +17,18 @@ func TestMerkleEmptyTrees(t *testing.T) {
 
 	da := any(a).(*backend.DistMemory)
 	db := any(b).(*backend.DistMemory)
+
 	da.SetTransport(transport)
 	db.SetTransport(transport)
 	transport.Register(da)
 	transport.Register(db)
 
-	if err := da.SyncWith(ctx, string(db.LocalNodeID())); err != nil {
+	err := da.SyncWith(ctx, string(db.LocalNodeID()))
+	if err != nil {
 		t.Fatalf("sync empty: %v", err)
 	}
-	if err := db.SyncWith(ctx, string(da.LocalNodeID())); err != nil {
+	err = db.SyncWith(ctx, string(da.LocalNodeID()))
+	if err != nil {
 		t.Fatalf("sync empty reverse: %v", err)
 	}
 }

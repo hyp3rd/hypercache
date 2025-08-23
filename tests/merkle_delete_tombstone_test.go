@@ -19,6 +19,7 @@ func TestMerkleDeleteTombstone(t *testing.T) {
 
 	da := any(a).(*backend.DistMemory)
 	db := any(b).(*backend.DistMemory)
+
 	da.SetTransport(transport)
 	db.SetTransport(transport)
 	transport.Register(da)
@@ -26,7 +27,8 @@ func TestMerkleDeleteTombstone(t *testing.T) {
 
 	it := &cache.Item{Key: "del", Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
 	da.DebugInject(it)
-	if err := db.SyncWith(ctx, string(da.LocalNodeID())); err != nil {
+	err := db.SyncWith(ctx, string(da.LocalNodeID()))
+	if err != nil {
 		t.Fatalf("initial sync: %v", err)
 	}
 
@@ -39,7 +41,8 @@ func TestMerkleDeleteTombstone(t *testing.T) {
 	}
 
 	// Remote (B) pulls from A to learn about deletion (pull-based anti-entropy)
-	if err := db.SyncWith(ctx, string(da.LocalNodeID())); err != nil {
+	err = db.SyncWith(ctx, string(da.LocalNodeID()))
+	if err != nil {
 		t.Fatalf("tomb sync pull: %v", err)
 	}
 
@@ -53,9 +56,11 @@ func TestMerkleDeleteTombstone(t *testing.T) {
 	db.DebugInject(stale)
 
 	// Sync B with A again; B should keep deletion (not resurrect)
-	if err := db.SyncWith(ctx, string(da.LocalNodeID())); err != nil {
+	err = db.SyncWith(ctx, string(da.LocalNodeID()))
+	if err != nil {
 		t.Fatalf("resync: %v", err)
 	}
+
 	if val, _ := db.Get(ctx, "del"); val != nil {
 		t.Fatalf("tombstone failed; key resurrected")
 	}

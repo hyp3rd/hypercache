@@ -94,6 +94,11 @@ type DistMemory struct {
 
 	// tombstone version source when no prior item exists (monotonic per process)
 	tombVersionCounter atomic.Uint64
+
+	// tombstone retention / compaction
+	tombstoneTTL      time.Duration
+	tombstoneSweepInt time.Duration
+	tombStopCh        chan struct{}
 }
 
 // hintedEntry represents a deferred replica write.
@@ -129,6 +134,16 @@ func WithDistReadConsistency(l ConsistencyLevel) DistMemoryOption {
 // WithDistWriteConsistency sets write consistency (default QUORUM).
 func WithDistWriteConsistency(l ConsistencyLevel) DistMemoryOption {
 	return func(dm *DistMemory) { dm.writeConsistency = l }
+}
+
+// WithDistTombstoneTTL configures how long tombstones are retained before subject to compaction (<=0 keeps indefinitely).
+func WithDistTombstoneTTL(d time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.tombstoneTTL = d }
+}
+
+// WithDistTombstoneSweep sets sweep interval for tombstone compaction (<=0 disables automatic sweeps).
+func WithDistTombstoneSweep(interval time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.tombstoneSweepInt = interval }
 }
 
 // Membership returns current membership reference (read-only usage).
@@ -443,6 +458,7 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 	dm.startHintReplayIfEnabled(ctx)
 	dm.startGossipIfEnabled()
 	dm.startAutoSyncIfEnabled(ctx)
+	dm.startTombstoneSweeper()
 
 	return dm, nil
 }
@@ -762,6 +778,8 @@ type distMetrics struct {
 	merkleDiffNanos     int64 // last diff duration (ns)
 	merkleFetchNanos    int64 // last remote fetch duration (ns)
 	autoSyncLoops       int64 // number of auto-sync ticks executed
+	tombstonesActive    int64 // approximate active tombstones
+	tombstonesPurged    int64 // cumulative purged tombstones
 }
 
 // DistMetrics snapshot.
@@ -791,6 +809,8 @@ type DistMetrics struct {
 	AutoSyncLoops       int64
 	LastAutoSyncNanos   int64
 	LastAutoSyncError   string
+	TombstonesActive    int64
+	TombstonesPurged    int64
 }
 
 // Metrics returns a snapshot of distributed metrics.
@@ -828,6 +848,8 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		AutoSyncLoops:       atomic.LoadInt64(&dm.metrics.autoSyncLoops),
 		LastAutoSyncNanos:   dm.lastAutoSyncDuration.Load(),
 		LastAutoSyncError:   lastErr,
+		TombstonesActive:    atomic.LoadInt64(&dm.metrics.tombstonesActive),
+		TombstonesPurged:    atomic.LoadInt64(&dm.metrics.tombstonesPurged),
 	}
 }
 
@@ -854,6 +876,10 @@ func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 		if err != nil {
 			return err
 		}
+	}
+
+	if dm.tombStopCh != nil { // stop tomb sweeper
+		close(dm.tombStopCh)
 	}
 
 	return nil
@@ -978,6 +1004,7 @@ func (dm *DistMemory) fetchAndAdopt(ctx context.Context, nodeID, key string) {
 			nextVer := cur.Version + 1
 
 			sh.tombs[key] = tombstone{version: nextVer, origin: string(dm.localNode.ID), at: time.Now()}
+			atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
 		}
 
 		return
@@ -990,6 +1017,7 @@ func (dm *DistMemory) fetchAndAdopt(ctx context.Context, nodeID, key string) {
 		}
 		// remote has newer version; clear tombstone (key resurrected intentionally)
 		delete(sh.tombs, key)
+		atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
 	}
 
 	if cur, okLocal := sh.items.Get(key); !okLocal || it.Version > cur.Version {
@@ -1018,6 +1046,74 @@ func (dm *DistMemory) merkleEntries() []merkleKV {
 	}
 
 	return entries
+}
+
+// startTombstoneSweeper launches periodic compaction if configured.
+func (dm *DistMemory) startTombstoneSweeper() { //nolint:ireturn
+	if dm.tombstoneTTL <= 0 || dm.tombstoneSweepInt <= 0 {
+		return
+	}
+
+	dm.tombStopCh = make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(dm.tombstoneSweepInt)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				purged := dm.compactTombstones()
+				if purged > 0 {
+					atomic.AddInt64(&dm.metrics.tombstonesPurged, purged)
+				}
+
+				atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
+
+			case <-dm.tombStopCh:
+				return
+			}
+		}
+	}()
+}
+
+// compactTombstones removes expired tombstones based on TTL, returns count purged.
+func (dm *DistMemory) compactTombstones() int64 { //nolint:ireturn
+	if dm.tombstoneTTL <= 0 {
+		return 0
+	}
+
+	now := time.Now()
+
+	var purged int64
+	for _, sh := range dm.shards {
+		if sh == nil {
+			continue
+		}
+
+		for k, ts := range sh.tombs {
+			if now.Sub(ts.at) >= dm.tombstoneTTL {
+				delete(sh.tombs, k)
+
+				purged++
+			}
+		}
+	}
+
+	return purged
+}
+
+// countTombstones returns approximate current count.
+func (dm *DistMemory) countTombstones() int64 { //nolint:ireturn
+	var total int64
+	for _, sh := range dm.shards {
+		if sh == nil {
+			continue
+		}
+
+		total += int64(len(sh.tombs))
+	}
+
+	return total
 }
 
 func encodeUint64BigEndian(buf []byte, v uint64) {
@@ -1229,24 +1325,77 @@ func (dm *DistMemory) getWithConsistency(ctx context.Context, key string, owners
 
 	var chosen *cache.Item
 
+	// gather results sequentially until quorum reached, tracking stale owners
+	staleOwners := dm.collectQuorum(ctx, key, owners, needed, &chosen, &acks)
+	if acks < needed || chosen == nil {
+		return nil, false
+	}
+
+	dm.repairStaleOwners(ctx, key, chosen, staleOwners)
+	dm.repairReplicas(ctx, key, chosen, owners)
+
+	return chosen, true
+}
+
+// collectQuorum iterates owners, updates chosen item and acks, returns owners needing repair.
+func (dm *DistMemory) collectQuorum(
+	ctx context.Context,
+	key string,
+	owners []cluster.NodeID,
+	needed int,
+	chosen **cache.Item,
+	acks *int,
+) []cluster.NodeID { //nolint:ireturn
+	stale := make([]cluster.NodeID, 0, len(owners))
 	for idx, oid := range owners {
 		it, ok := dm.fetchOwner(ctx, key, idx, oid)
 		if !ok {
 			continue
 		}
 
-		chosen = dm.chooseNewer(chosen, it)
-		acks++
+		prev := *chosen
+
+		*chosen = dm.chooseNewer(*chosen, it)
+		*acks++
+
+		if prev != nil && *chosen != prev {
+			stale = append(stale, oid)
+		}
+
+		if *acks >= needed && *chosen != nil { // early break
+			break
+		}
 	}
 
-	if acks < needed || chosen == nil {
-		return nil, false
+	return stale
+}
+
+// repairStaleOwners issues best-effort targeted repairs for owners identified as stale.
+func (dm *DistMemory) repairStaleOwners(
+	ctx context.Context,
+	key string,
+	chosen *cache.Item,
+	staleOwners []cluster.NodeID,
+) { //nolint:ireturn
+	if dm.transport == nil || chosen == nil {
+		return
 	}
 
-	// version-based read repair across all owners if stale/missing
-	dm.repairReplicas(ctx, key, chosen, owners)
+	for _, oid := range staleOwners {
+		if oid == dm.localNode.ID { // local handled in repairReplicas
+			continue
+		}
 
-	return chosen, true
+		it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
+		if err != nil { // skip unreachable
+			continue
+		}
+
+		if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) {
+			_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false) //nolint:errcheck
+			atomic.AddInt64(&dm.metrics.readRepair, 1)
+		}
+	}
 }
 
 // fetchOwner attempts to fetch item from given owner (local or remote) updating metrics.
@@ -1862,6 +2011,7 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 	sh.items.Remove(key)
 
 	sh.tombs[key] = tombstone{version: nextVer, origin: string(dm.localNode.ID), at: time.Now()}
+	atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
 
 	if !replicate || dm.ring == nil || dm.transport == nil {
 		return

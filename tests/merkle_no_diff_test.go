@@ -19,6 +19,7 @@ func TestMerkleNoDiff(t *testing.T) {
 
 	da := any(a).(*backend.DistMemory)
 	db := any(b).(*backend.DistMemory)
+
 	da.SetTransport(transport)
 	db.SetTransport(transport)
 	transport.Register(da)
@@ -28,14 +29,17 @@ func TestMerkleNoDiff(t *testing.T) {
 	for i := range 10 {
 		itA := &cache.Item{Key: keyf("nd", i), Value: []byte("v"), Version: uint64(i + 1), Origin: "A", LastUpdated: time.Now()}
 		itB := &cache.Item{Key: keyf("nd", i), Value: []byte("v"), Version: uint64(i + 1), Origin: "B", LastUpdated: time.Now()}
+
 		da.DebugInject(itA)
 		db.DebugInject(itB)
 	}
 
-	if err := da.SyncWith(ctx, string(db.LocalNodeID())); err != nil {
+	err := da.SyncWith(ctx, string(db.LocalNodeID()))
+	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	if err := db.SyncWith(ctx, string(da.LocalNodeID())); err != nil {
+	err = db.SyncWith(ctx, string(da.LocalNodeID()))
+	if err != nil {
 		t.Fatalf("sync2: %v", err)
 	}
 }
