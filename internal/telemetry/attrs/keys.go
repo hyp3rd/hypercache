@@ -1,8 +1,7 @@
-// Package attrs provides reusable OpenTelemetry attribute key constants
-// to avoid duplication across middlewares.
-// Package attrs defines telemetry attribute keys used for observability and monitoring
-// across the hypercache system. These constants provide standardized key names for
-// metrics, traces, and logs to ensure consistent telemetry data collection.
+// Package attrs provides reusable OpenTelemetry attribute key constants to avoid duplication
+// across middlewares. It defines telemetry attribute keys used for observability and monitoring
+// across the hypercache system. These constants provide standardized key names for metrics,
+// traces, and logs to ensure consistent telemetry data collection.
 package attrs
 
 const (
