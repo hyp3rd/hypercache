@@ -65,6 +65,7 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 
 	// Write key via primary.
 	item1 := &cachev2.Item{Key: key, Value: "v1"}
+
 	err := b1.Set(context.Background(), item1)
 	if err != nil {
 		t.Fatalf("initial set: %v", err)
@@ -94,6 +95,7 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 	transport.Unregister(string(n3.ID))
 
 	item2 := &cachev2.Item{Key: key, Value: "v2"}
+
 	err = b1.Set(context.Background(), item2)
 	if err != nil && !errors.Is(err, sentinel.ErrQuorumFailed) {
 		t.Fatalf("unexpected error after replica loss: %v", err)

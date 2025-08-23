@@ -40,6 +40,7 @@ func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error { //no
 	s.registerGet(ctx, dm)
 	s.registerRemove(ctx, dm)
 	s.registerHealth()
+	s.registerMerkle(ctx, dm)
 
 	return s.listen(ctx)
 }
@@ -110,6 +111,35 @@ func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { /
 
 func (s *distHTTPServer) registerHealth() { //nolint:ireturn
 	s.app.Get("/health", func(fctx fiber.Ctx) error { return fctx.SendString("ok") })
+}
+
+func (s *distHTTPServer) registerMerkle(_ context.Context, dm *DistMemory) { //nolint:ireturn
+	s.app.Get("/internal/merkle", func(fctx fiber.Ctx) error {
+		tree := dm.BuildMerkleTree()
+
+		return fctx.JSON(fiber.Map{
+			"root":        tree.Root,
+			"leaf_hashes": tree.LeafHashes,
+			"chunk_size":  tree.ChunkSize,
+		})
+	})
+
+	// naive keys listing for anti-entropy (testing only). Not efficient for large datasets.
+	s.app.Get("/internal/keys", func(fctx fiber.Ctx) error {
+		var keys []string
+		for _, shard := range dm.shards {
+			if shard == nil {
+				continue
+			}
+
+			ch := shard.items.IterBuffered()
+			for t := range ch {
+				keys = append(keys, t.Key)
+			}
+		}
+
+		return fctx.JSON(fiber.Map{"keys": keys})
+	})
 }
 
 func (s *distHTTPServer) listen(ctx context.Context) error { //nolint:ireturn

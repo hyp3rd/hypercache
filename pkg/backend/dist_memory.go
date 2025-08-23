@@ -2,8 +2,14 @@ package backend
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
+	"hash"
 	"hash/fnv"
+	"math/big"
+	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +23,16 @@ const (
 	defaultDistShardCount = 8  // default number of shards
 	listPrealloc          = 32 // pre-allocation size for List results
 )
+
+// Merkle internal tuning constants & errors.
+const (
+	defaultMerkleChunkSize = 128
+	merklePreallocEntries  = 256
+	merkleVersionBytes     = 8
+	shiftPerByte           = 8 // bit shift per byte when encoding uint64
+)
+
+var errNoTransport = errors.New("no transport")
 
 // DistMemory is a sharded in-process distributed-like backend. It simulates
 // distribution by consistent hashing across a fixed set of in-memory shards.
@@ -48,6 +64,54 @@ type DistMemory struct {
 	readConsistency  ConsistencyLevel
 	writeConsistency ConsistencyLevel
 	versionCounter   uint64 // global monotonic for this node (lamport-like)
+
+	// hinted handoff
+	hintTTL        time.Duration
+	hintReplayInt  time.Duration
+	hintMaxPerNode int
+	hintsMu        sync.Mutex
+	hints          map[string][]hintedEntry // nodeID -> queue
+	hintStopCh     chan struct{}
+
+	// parallel reads
+	parallelReads bool
+
+	// simple gossip
+	gossipInterval time.Duration
+	gossipStopCh   chan struct{}
+
+	// anti-entropy
+	merkleChunkSize int // number of keys per leaf chunk (power-of-two recommended)
+	listKeysMax     int // cap for fallback ListKeys pulls (0 = unlimited)
+
+	// periodic merkle auto-sync
+	autoSyncInterval         time.Duration
+	autoSyncStopCh           chan struct{}
+	autoSyncPeersPerInterval int // limit number of peers synced per tick (0=all)
+
+	lastAutoSyncDuration atomic.Int64 // nanoseconds of last full loop
+	lastAutoSyncError    atomic.Value // error string or nil
+
+	// tombstone version source when no prior item exists (monotonic per process)
+	tombVersionCounter atomic.Uint64
+
+	// tombstone retention / compaction
+	tombstoneTTL      time.Duration
+	tombstoneSweepInt time.Duration
+	tombStopCh        chan struct{}
+}
+
+// hintedEntry represents a deferred replica write.
+type hintedEntry struct {
+	item   *cache.Item
+	expire time.Time
+}
+
+// tombstone marks a delete intent with version ordering to prevent resurrection.
+type tombstone struct {
+	version uint64
+	origin  string
+	at      time.Time
 }
 
 // ConsistencyLevel defines read/write consistency semantics.
@@ -72,6 +136,16 @@ func WithDistWriteConsistency(l ConsistencyLevel) DistMemoryOption {
 	return func(dm *DistMemory) { dm.writeConsistency = l }
 }
 
+// WithDistTombstoneTTL configures how long tombstones are retained before subject to compaction (<=0 keeps indefinitely).
+func WithDistTombstoneTTL(d time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.tombstoneTTL = d }
+}
+
+// WithDistTombstoneSweep sets sweep interval for tombstone compaction (<=0 disables automatic sweeps).
+func WithDistTombstoneSweep(interval time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.tombstoneSweepInt = interval }
+}
+
 // Membership returns current membership reference (read-only usage).
 func (dm *DistMemory) Membership() *cluster.Membership { return dm.membership }
 
@@ -80,6 +154,7 @@ func (dm *DistMemory) Ring() *cluster.Ring { return dm.ring }
 
 type distShard struct {
 	items cache.ConcurrentMap
+	tombs map[string]tombstone // per-key tombstones
 }
 
 // DistMemoryOption configures DistMemory backend.
@@ -92,6 +167,177 @@ func WithDistShardCount(n int) DistMemoryOption {
 			dm.shardCount = n
 		}
 	}
+}
+
+// WithDistMerkleChunkSize sets the number of keys per leaf hash chunk (default 128 if 0).
+func WithDistMerkleChunkSize(n int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if n > 0 {
+			dm.merkleChunkSize = n
+		}
+	}
+}
+
+// WithDistMerkleAutoSync enables periodic anti-entropy sync attempts. If interval <= 0 disables.
+func WithDistMerkleAutoSync(interval time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) {
+		dm.autoSyncInterval = interval
+	}
+}
+
+// WithDistMerkleAutoSyncPeers limits number of peers synced per interval (0 or <0 = all).
+func WithDistMerkleAutoSyncPeers(n int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		dm.autoSyncPeersPerInterval = n
+	}
+}
+
+// WithDistListKeysCap caps number of keys fetched via fallback ListKeys (0 = unlimited).
+func WithDistListKeysCap(n int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if n >= 0 {
+			dm.listKeysMax = n
+		}
+	}
+}
+
+// --- Merkle tree anti-entropy structures ---
+
+// MerkleTree represents a binary hash tree over key/version pairs.
+type MerkleTree struct { // minimal representation
+	LeafHashes [][]byte // ordered leaf hashes
+	Root       []byte
+	ChunkSize  int
+}
+
+// BuildMerkleTree constructs a Merkle tree snapshot of local data (best-effort, locks each shard briefly).
+func (dm *DistMemory) BuildMerkleTree() *MerkleTree { //nolint:ireturn
+	chunkSize := dm.merkleChunkSize
+	if chunkSize <= 0 {
+		chunkSize = defaultMerkleChunkSize
+	}
+
+	entries := dm.merkleEntries()
+	if len(entries) == 0 {
+		return &MerkleTree{ChunkSize: chunkSize}
+	}
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].k < entries[j].k })
+
+	hasher := sha256.New()
+	buf := make([]byte, merkleVersionBytes)
+	leaves := make([][]byte, 0, (len(entries)+chunkSize-1)/chunkSize)
+
+	for i := 0; i < len(entries); i += chunkSize {
+		end := i + chunkSize
+		if end > len(entries) {
+			end = len(entries)
+		}
+
+		hasher.Reset()
+
+		for _, e := range entries[i:end] {
+			_, _ = hasher.Write([]byte(e.k))
+			encodeUint64BigEndian(buf, e.v)
+
+			_, _ = hasher.Write(buf)
+		}
+
+		leaves = append(leaves, append([]byte(nil), hasher.Sum(nil)...))
+	}
+
+	root := foldMerkle(leaves, hasher)
+
+	return &MerkleTree{LeafHashes: leaves, Root: append([]byte(nil), root...), ChunkSize: chunkSize}
+}
+
+// merkleKV is an internal pair used during tree construction & sync.
+type merkleKV struct {
+	k string
+	v uint64
+}
+
+// DiffLeafRanges compares two trees and returns indexes of differing leaf chunks.
+func (mt *MerkleTree) DiffLeafRanges(other *MerkleTree) []int { //nolint:ireturn
+	if mt == nil || other == nil {
+		return nil
+	}
+
+	if len(mt.LeafHashes) != len(other.LeafHashes) { // size mismatch -> full resync
+		idxs := make([]int, len(mt.LeafHashes))
+		for i := range idxs {
+			idxs[i] = i
+		}
+
+		return idxs
+	}
+
+	var diffs []int
+	for i := range mt.LeafHashes {
+		if !equalBytes(mt.LeafHashes[i], other.LeafHashes[i]) {
+			diffs = append(diffs, i)
+		}
+	}
+
+	return diffs
+}
+
+func equalBytes(a, b []byte) bool { // tiny helper
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// SyncWith performs Merkle anti-entropy against a remote node (pull newer versions for differing chunks).
+func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error { //nolint:ireturn
+	if dm.transport == nil {
+		return errNoTransport
+	}
+
+	startFetch := time.Now()
+
+	remoteTree, err := dm.transport.FetchMerkle(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+
+	fetchDur := time.Since(startFetch)
+	atomic.StoreInt64(&dm.metrics.merkleFetchNanos, fetchDur.Nanoseconds())
+
+	startBuild := time.Now()
+	localTree := dm.BuildMerkleTree()
+	buildDur := time.Since(startBuild)
+	atomic.StoreInt64(&dm.metrics.merkleBuildNanos, buildDur.Nanoseconds())
+
+	entries := dm.sortedMerkleEntries()
+	startDiff := time.Now()
+	diffs := localTree.DiffLeafRanges(remoteTree)
+	diffDur := time.Since(startDiff)
+	atomic.StoreInt64(&dm.metrics.merkleDiffNanos, diffDur.Nanoseconds())
+
+	missing := dm.resolveMissingKeys(ctx, nodeID, entries)
+
+	dm.applyMerkleDiffs(ctx, nodeID, entries, diffs, localTree.ChunkSize)
+
+	for k := range missing { // missing = remote-only keys
+		dm.fetchAndAdopt(ctx, nodeID, k)
+	}
+
+	if len(diffs) == 0 && len(missing) == 0 {
+		return nil
+	}
+
+	atomic.AddInt64(&dm.metrics.merkleSyncs, 1)
+
+	return nil
 }
 
 // WithDistCapacity sets logical capacity (not strictly enforced yet).
@@ -114,6 +360,9 @@ func WithDistMembership(m *cluster.Membership, node *cluster.Node) DistMemoryOpt
 func WithDistTransport(t DistTransport) DistMemoryOption {
 	return func(dm *DistMemory) { dm.transport = t }
 }
+
+// SetTransport sets the transport post-construction (testing helper).
+func (dm *DistMemory) SetTransport(t DistTransport) { dm.transport = t }
 
 // WithDistHeartbeat configures heartbeat interval and suspect/dead thresholds.
 // If interval <= 0 heartbeat is disabled.
@@ -141,6 +390,35 @@ func WithDistVirtualNodes(n int) DistMemoryOption {
 			dm.virtualNodes = n
 		}
 	}
+}
+
+// WithDistHintTTL sets TTL for hinted handoff entries.
+func WithDistHintTTL(d time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.hintTTL = d }
+}
+
+// WithDistHintReplayInterval sets how often to attempt replay of hints.
+func WithDistHintReplayInterval(d time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.hintReplayInt = d }
+}
+
+// WithDistHintMaxPerNode caps number of queued hints per target node.
+func WithDistHintMaxPerNode(n int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if n > 0 {
+			dm.hintMaxPerNode = n
+		}
+	}
+}
+
+// WithDistParallelReads enables parallel quorum/all read fan-out.
+func WithDistParallelReads(enable bool) DistMemoryOption {
+	return func(dm *DistMemory) { dm.parallelReads = enable }
+}
+
+// WithDistGossipInterval enables simple membership gossip at provided interval.
+func WithDistGossipInterval(d time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.gossipInterval = d }
 }
 
 // WithDistNode identity (id optional; derived from address if empty). Address used for future RPC.
@@ -177,6 +455,10 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 	dm.initMembershipIfNeeded()
 	dm.tryStartHTTP(ctx)
 	dm.startHeartbeatIfEnabled(ctx)
+	dm.startHintReplayIfEnabled(ctx)
+	dm.startGossipIfEnabled()
+	dm.startAutoSyncIfEnabled(ctx)
+	dm.startTombstoneSweeper()
 
 	return dm, nil
 }
@@ -225,6 +507,10 @@ func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) {
 
 	if dm.readConsistency == ConsistencyOne {
 		return dm.getOne(ctx, key, owners)
+	}
+
+	if dm.parallelReads {
+		return dm.getWithConsistencyParallel(ctx, key, owners)
 	}
 
 	return dm.getWithConsistency(ctx, key, owners)
@@ -347,11 +633,31 @@ func (dm *DistMemory) DebugInject(it *cache.Item) { //nolint:ireturn
 		return
 	}
 
-	dm.shardFor(it.Key).items.Set(it.Key, it)
+	sh := dm.shardFor(it.Key)
+	// test helper: injecting a concrete item implies intent to resurrect; clear any tombstone so normal version comparison applies
+	delete(sh.tombs, it.Key)
+	sh.items.Set(it.Key, it)
 }
 
 // LocalNodeID returns this instance's node ID (testing helper).
 func (dm *DistMemory) LocalNodeID() cluster.NodeID { return dm.localNode.ID }
+
+// LocalNodeAddr returns the configured node address (host:port) used by HTTP server.
+func (dm *DistMemory) LocalNodeAddr() string { //nolint:ireturn
+	return dm.nodeAddr
+}
+
+// SetLocalNode manually sets the local node (testing helper before starting HTTP).
+func (dm *DistMemory) SetLocalNode(node *cluster.Node) { //nolint:ireturn
+	dm.localNode = node
+	if dm.nodeAddr == "" && node != nil {
+		dm.nodeAddr = node.Address
+	}
+
+	if dm.membership != nil && node != nil {
+		dm.membership.Upsert(node)
+	}
+}
 
 // DebugOwners returns current owners slice for a key (for tests).
 func (dm *DistMemory) DebugOwners(key string) []cluster.NodeID {
@@ -368,6 +674,7 @@ type DistTransport interface {
 	ForwardGet(ctx context.Context, nodeID string, key string) (*cache.Item, bool, error)
 	ForwardRemove(ctx context.Context, nodeID string, key string, replicate bool) error
 	Health(ctx context.Context, nodeID string) error
+	FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error)
 }
 
 // InProcessTransport implements DistTransport for multiple DistMemory instances in the same process.
@@ -436,6 +743,16 @@ func (t *InProcessTransport) Health(_ context.Context, nodeID string) error { //
 	return nil
 }
 
+// FetchMerkle returns a snapshot Merkle tree of the target backend.
+func (t *InProcessTransport) FetchMerkle(_ context.Context, nodeID string) (*MerkleTree, error) { //nolint:ireturn
+	b, ok := t.backends[nodeID]
+	if !ok {
+		return nil, sentinel.ErrBackendNotFound
+	}
+
+	return b.BuildMerkleTree(), nil
+}
+
 // distMetrics holds internal counters (best-effort, not atomic snapshot consistent).
 type distMetrics struct {
 	forwardGet          int64
@@ -451,6 +768,18 @@ type distMetrics struct {
 	versionConflicts    int64 // times a newer version (or tie-broken origin) replaced previous candidate
 	versionTieBreaks    int64 // subset of conflicts decided by origin tie-break
 	readPrimaryPromote  int64 // times read path skipped unreachable primary and promoted next owner
+	hintedQueued        int64 // hints queued
+	hintedReplayed      int64 // hints successfully replayed
+	hintedExpired       int64 // hints expired before delivery
+	hintedDropped       int64 // hints dropped due to non-not-found transport errors
+	merkleSyncs         int64 // merkle sync operations completed
+	merkleKeysPulled    int64 // keys applied during sync
+	merkleBuildNanos    int64 // last build duration (ns)
+	merkleDiffNanos     int64 // last diff duration (ns)
+	merkleFetchNanos    int64 // last remote fetch duration (ns)
+	autoSyncLoops       int64 // number of auto-sync ticks executed
+	tombstonesActive    int64 // approximate active tombstones
+	tombstonesPurged    int64 // cumulative purged tombstones
 }
 
 // DistMetrics snapshot.
@@ -468,10 +797,31 @@ type DistMetrics struct {
 	VersionConflicts    int64
 	VersionTieBreaks    int64
 	ReadPrimaryPromote  int64
+	HintedQueued        int64
+	HintedReplayed      int64
+	HintedExpired       int64
+	HintedDropped       int64
+	MerkleSyncs         int64
+	MerkleKeysPulled    int64
+	MerkleBuildNanos    int64
+	MerkleDiffNanos     int64
+	MerkleFetchNanos    int64
+	AutoSyncLoops       int64
+	LastAutoSyncNanos   int64
+	LastAutoSyncError   string
+	TombstonesActive    int64
+	TombstonesPurged    int64
 }
 
 // Metrics returns a snapshot of distributed metrics.
 func (dm *DistMemory) Metrics() DistMetrics {
+	lastErr := ""
+	if v := dm.lastAutoSyncError.Load(); v != nil {
+		if s, ok := v.(string); ok {
+			lastErr = s
+		}
+	}
+
 	return DistMetrics{
 		ForwardGet:          atomic.LoadInt64(&dm.metrics.forwardGet),
 		ForwardSet:          atomic.LoadInt64(&dm.metrics.forwardSet),
@@ -486,6 +836,20 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		VersionConflicts:    atomic.LoadInt64(&dm.metrics.versionConflicts),
 		VersionTieBreaks:    atomic.LoadInt64(&dm.metrics.versionTieBreaks),
 		ReadPrimaryPromote:  atomic.LoadInt64(&dm.metrics.readPrimaryPromote),
+		HintedQueued:        atomic.LoadInt64(&dm.metrics.hintedQueued),
+		HintedReplayed:      atomic.LoadInt64(&dm.metrics.hintedReplayed),
+		HintedExpired:       atomic.LoadInt64(&dm.metrics.hintedExpired),
+		HintedDropped:       atomic.LoadInt64(&dm.metrics.hintedDropped),
+		MerkleSyncs:         atomic.LoadInt64(&dm.metrics.merkleSyncs),
+		MerkleKeysPulled:    atomic.LoadInt64(&dm.metrics.merkleKeysPulled),
+		MerkleBuildNanos:    atomic.LoadInt64(&dm.metrics.merkleBuildNanos),
+		MerkleDiffNanos:     atomic.LoadInt64(&dm.metrics.merkleDiffNanos),
+		MerkleFetchNanos:    atomic.LoadInt64(&dm.metrics.merkleFetchNanos),
+		AutoSyncLoops:       atomic.LoadInt64(&dm.metrics.autoSyncLoops),
+		LastAutoSyncNanos:   dm.lastAutoSyncDuration.Load(),
+		LastAutoSyncError:   lastErr,
+		TombstonesActive:    atomic.LoadInt64(&dm.metrics.tombstonesActive),
+		TombstonesPurged:    atomic.LoadInt64(&dm.metrics.tombstonesPurged),
 	}
 }
 
@@ -495,6 +859,18 @@ func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 		close(dm.stopCh)
 	}
 
+	if dm.hintStopCh != nil {
+		close(dm.hintStopCh)
+	}
+
+	if dm.gossipStopCh != nil {
+		close(dm.gossipStopCh)
+	}
+
+	if dm.autoSyncStopCh != nil {
+		close(dm.autoSyncStopCh)
+	}
+
 	if dm.httpServer != nil {
 		err := dm.httpServer.stop(ctx) // best-effort
 		if err != nil {
@@ -502,7 +878,279 @@ func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 		}
 	}
 
+	if dm.tombStopCh != nil { // stop tomb sweeper
+		close(dm.tombStopCh)
+	}
+
 	return nil
+}
+
+// --- Sync helper methods (placed after exported methods to satisfy ordering linter) ---
+
+// sortedMerkleEntries returns merkle entries sorted by key.
+func (dm *DistMemory) sortedMerkleEntries() []merkleKV { //nolint:ireturn
+	entries := dm.merkleEntries()
+	sort.Slice(entries, func(i, j int) bool { return entries[i].k < entries[j].k })
+
+	return entries
+}
+
+// resolveMissingKeys enumerates remote-only keys using in-process or HTTP listing.
+func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, entries []merkleKV) map[string]struct{} { //nolint:ireturn
+	missing := dm.enumerateRemoteOnlyKeys(nodeID, entries)
+	if len(missing) != 0 {
+		return missing
+	}
+
+	httpT, ok := dm.transport.(*DistHTTPTransport)
+	if !ok {
+		return missing
+	}
+
+	keys, kerr := httpT.ListKeys(ctx, nodeID)
+	if kerr != nil || len(keys) == 0 {
+		return missing
+	}
+
+	if dm.listKeysMax > 0 && len(keys) > dm.listKeysMax { // cap enforcement
+		keys = keys[:dm.listKeysMax]
+	}
+
+	mset := make(map[string]struct{}, len(keys))
+	for _, k := range keys { // populate
+		mset[k] = struct{}{}
+	}
+
+	for _, e := range entries { // remove existing
+		delete(mset, e.k)
+	}
+
+	// track number of remote-only keys discovered via fallback
+	if len(mset) > 0 {
+		atomic.AddInt64(&dm.metrics.merkleKeysPulled, int64(len(mset)))
+	}
+
+	return mset
+}
+
+// applyMerkleDiffs fetches and adopts keys for differing Merkle chunks.
+func (dm *DistMemory) applyMerkleDiffs(ctx context.Context, nodeID string, entries []merkleKV, diffs []int, chunkSize int) { //nolint:ireturn
+	for _, ci := range diffs {
+		start := ci * chunkSize
+		if start >= len(entries) {
+			continue
+		}
+
+		end := start + chunkSize
+		if end > len(entries) {
+			end = len(entries)
+		}
+
+		for _, e := range entries[start:end] {
+			dm.fetchAndAdopt(ctx, nodeID, e.k)
+		}
+	}
+}
+
+// enumerateRemoteOnlyKeys returns keys present only on the remote side (best-effort, in-process only).
+func (dm *DistMemory) enumerateRemoteOnlyKeys(nodeID string, local []merkleKV) map[string]struct{} { //nolint:ireturn
+	missing := make(map[string]struct{})
+
+	ip, ok := dm.transport.(*InProcessTransport)
+	if !ok {
+		return missing
+	}
+
+	remote, ok := ip.backends[nodeID]
+	if !ok {
+		return missing
+	}
+
+	for _, shard := range remote.shards {
+		if shard == nil {
+			continue
+		}
+
+		rch := shard.items.IterBuffered()
+		for t := range rch {
+			missing[t.Key] = struct{}{}
+		}
+	}
+
+	for _, e := range local { // remove any that we already have
+		delete(missing, e.k)
+	}
+
+	return missing
+}
+
+// fetchAndAdopt pulls a key from a remote node and adopts it if it's newer or absent locally.
+func (dm *DistMemory) fetchAndAdopt(ctx context.Context, nodeID, key string) {
+	it, ok, gerr := dm.transport.ForwardGet(ctx, nodeID, key)
+	if gerr != nil { // remote failure: ignore
+		return
+	}
+
+	sh := dm.shardFor(key)
+
+	if !ok { // remote missing key (could be delete) -> adopt tombstone locally if we still have it
+		if _, hasTomb := sh.tombs[key]; hasTomb { // already have tombstone
+			return
+		}
+
+		if cur, okLocal := sh.items.Get(key); okLocal { // create tombstone advancing version
+			sh.items.Remove(key)
+
+			nextVer := cur.Version + 1
+
+			sh.tombs[key] = tombstone{version: nextVer, origin: string(dm.localNode.ID), at: time.Now()}
+			atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
+		}
+
+		return
+	}
+
+	if tomb, hasTomb := sh.tombs[key]; hasTomb {
+		// If tombstone version newer or equal, do not resurrect
+		if tomb.version >= it.Version {
+			return
+		}
+		// remote has newer version; clear tombstone (key resurrected intentionally)
+		delete(sh.tombs, key)
+		atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
+	}
+
+	if cur, okLocal := sh.items.Get(key); !okLocal || it.Version > cur.Version {
+		dm.applySet(ctx, it, false)
+		atomic.AddInt64(&dm.metrics.merkleKeysPulled, 1)
+	}
+}
+
+// merkleEntries gathers key/version pairs from all shards.
+func (dm *DistMemory) merkleEntries() []merkleKV {
+	entries := make([]merkleKV, 0, merklePreallocEntries)
+
+	for _, shard := range dm.shards {
+		if shard == nil {
+			continue
+		}
+
+		ch := shard.items.IterBuffered()
+		for t := range ch {
+			entries = append(entries, merkleKV{k: t.Key, v: t.Val.Version})
+		}
+
+		for k, ts := range shard.tombs { // include tombstones
+			entries = append(entries, merkleKV{k: k, v: ts.version})
+		}
+	}
+
+	return entries
+}
+
+// startTombstoneSweeper launches periodic compaction if configured.
+func (dm *DistMemory) startTombstoneSweeper() { //nolint:ireturn
+	if dm.tombstoneTTL <= 0 || dm.tombstoneSweepInt <= 0 {
+		return
+	}
+
+	dm.tombStopCh = make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(dm.tombstoneSweepInt)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				purged := dm.compactTombstones()
+				if purged > 0 {
+					atomic.AddInt64(&dm.metrics.tombstonesPurged, purged)
+				}
+
+				atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
+
+			case <-dm.tombStopCh:
+				return
+			}
+		}
+	}()
+}
+
+// compactTombstones removes expired tombstones based on TTL, returns count purged.
+func (dm *DistMemory) compactTombstones() int64 { //nolint:ireturn
+	if dm.tombstoneTTL <= 0 {
+		return 0
+	}
+
+	now := time.Now()
+
+	var purged int64
+	for _, sh := range dm.shards {
+		if sh == nil {
+			continue
+		}
+
+		for k, ts := range sh.tombs {
+			if now.Sub(ts.at) >= dm.tombstoneTTL {
+				delete(sh.tombs, k)
+
+				purged++
+			}
+		}
+	}
+
+	return purged
+}
+
+// countTombstones returns approximate current count.
+func (dm *DistMemory) countTombstones() int64 { //nolint:ireturn
+	var total int64
+	for _, sh := range dm.shards {
+		if sh == nil {
+			continue
+		}
+
+		total += int64(len(sh.tombs))
+	}
+
+	return total
+}
+
+func encodeUint64BigEndian(buf []byte, v uint64) {
+	for i := merkleVersionBytes - 1; i >= 0; i-- { // big endian for deterministic hashing
+		buf[i] = byte(v)
+
+		v >>= shiftPerByte
+	}
+}
+
+// foldMerkle reduces leaf hashes into a single root using a binary tree.
+func foldMerkle(leaves [][]byte, hasher hash.Hash) []byte { //nolint:ireturn
+	if len(leaves) == 0 {
+		return nil
+	}
+
+	level := leaves
+	for len(level) > 1 {
+		next := make([][]byte, 0, (len(level)+1)/2)
+		for i := 0; i < len(level); i += 2 {
+			if i+1 == len(level) { // odd node promoted
+				next = append(next, append([]byte(nil), level[i]...))
+
+				break
+			}
+
+			hasher.Reset()
+
+			_, _ = hasher.Write(level[i])
+			_, _ = hasher.Write(level[i+1])
+			next = append(next, append([]byte(nil), hasher.Sum(nil)...))
+		}
+
+		level = next
+	}
+
+	return level[0]
 }
 
 // ensureShardConfig initializes shards respecting configured shardCount.
@@ -512,7 +1160,7 @@ func (dm *DistMemory) ensureShardConfig() { //nolint:ireturn
 	}
 
 	for range dm.shardCount {
-		dm.shards = append(dm.shards, &distShard{items: cache.New()})
+		dm.shards = append(dm.shards, &distShard{items: cache.New(), tombs: make(map[string]tombstone)})
 	}
 }
 
@@ -677,24 +1325,77 @@ func (dm *DistMemory) getWithConsistency(ctx context.Context, key string, owners
 
 	var chosen *cache.Item
 
+	// gather results sequentially until quorum reached, tracking stale owners
+	staleOwners := dm.collectQuorum(ctx, key, owners, needed, &chosen, &acks)
+	if acks < needed || chosen == nil {
+		return nil, false
+	}
+
+	dm.repairStaleOwners(ctx, key, chosen, staleOwners)
+	dm.repairReplicas(ctx, key, chosen, owners)
+
+	return chosen, true
+}
+
+// collectQuorum iterates owners, updates chosen item and acks, returns owners needing repair.
+func (dm *DistMemory) collectQuorum(
+	ctx context.Context,
+	key string,
+	owners []cluster.NodeID,
+	needed int,
+	chosen **cache.Item,
+	acks *int,
+) []cluster.NodeID { //nolint:ireturn
+	stale := make([]cluster.NodeID, 0, len(owners))
 	for idx, oid := range owners {
 		it, ok := dm.fetchOwner(ctx, key, idx, oid)
 		if !ok {
 			continue
 		}
 
-		chosen = dm.chooseNewer(chosen, it)
-		acks++
+		prev := *chosen
+
+		*chosen = dm.chooseNewer(*chosen, it)
+		*acks++
+
+		if prev != nil && *chosen != prev {
+			stale = append(stale, oid)
+		}
+
+		if *acks >= needed && *chosen != nil { // early break
+			break
+		}
 	}
 
-	if acks < needed || chosen == nil {
-		return nil, false
+	return stale
+}
+
+// repairStaleOwners issues best-effort targeted repairs for owners identified as stale.
+func (dm *DistMemory) repairStaleOwners(
+	ctx context.Context,
+	key string,
+	chosen *cache.Item,
+	staleOwners []cluster.NodeID,
+) { //nolint:ireturn
+	if dm.transport == nil || chosen == nil {
+		return
 	}
 
-	// version-based read repair across all owners if stale/missing
-	dm.repairReplicas(ctx, key, chosen, owners)
+	for _, oid := range staleOwners {
+		if oid == dm.localNode.ID { // local handled in repairReplicas
+			continue
+		}
 
-	return chosen, true
+		it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
+		if err != nil { // skip unreachable
+			continue
+		}
+
+		if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) {
+			_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false) //nolint:errcheck
+			atomic.AddInt64(&dm.metrics.readRepair, 1)
+		}
+	}
 }
 
 // fetchOwner attempts to fetch item from given owner (local or remote) updating metrics.
@@ -730,18 +1431,362 @@ func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid c
 // replicateTo sends writes to replicas (best-effort) returning ack count.
 func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replicas []cluster.NodeID) int { //nolint:ireturn
 	acks := 0
-
 	for _, oid := range replicas {
 		if oid == dm.localNode.ID {
 			continue
 		}
 
-		if dm.transport != nil && dm.transport.ForwardSet(ctx, string(oid), item, false) == nil {
-			acks++
+		if dm.transport != nil {
+			err := dm.transport.ForwardSet(ctx, string(oid), item, false)
+			if err == nil {
+				acks++
+
+				continue
+			}
+
+			if errors.Is(err, sentinel.ErrBackendNotFound) { // queue hint for unreachable replica
+				dm.queueHint(string(oid), item)
+			}
 		}
 	}
 
 	return acks
+}
+
+// getWithConsistencyParallel performs parallel owner fan-out until quorum/all reached.
+func (dm *DistMemory) getWithConsistencyParallel(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+	needed := dm.requiredAcks(len(owners), dm.readConsistency)
+
+	type res struct {
+		owner cluster.NodeID
+		it    *cache.Item
+		ok    bool
+	}
+
+	ch := make(chan res, len(owners))
+
+	ctxFetch, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	for idx, oid := range owners { // launch all with proper capture (Go <1.22 style)
+		idxLocal, oidLocal := idx, oid
+		go func(i int, o cluster.NodeID) {
+			it, ok := dm.fetchOwner(ctxFetch, key, i, o)
+			ch <- res{owner: o, it: it, ok: ok}
+		}(idxLocal, oidLocal)
+	}
+
+	acks := 0
+
+	var chosen *cache.Item
+
+	staleOwners := make([]cluster.NodeID, 0, len(owners))
+
+	for range owners {
+		resp := <-ch
+		if !resp.ok {
+			continue
+		}
+
+		prev := chosen
+
+		chosen = dm.chooseNewer(chosen, resp.it)
+		acks++
+
+		if prev != nil && chosen != prev { // newer version found, mark new owner for targeted check (mirrors sequential path semantics)
+			staleOwners = append(staleOwners, resp.owner)
+		}
+
+		if acks >= needed && chosen != nil { // early satisfied
+			cancel()
+
+			break
+		}
+	}
+
+	if acks < needed || chosen == nil {
+		return nil, false
+	}
+
+	// targeted repairs for owners involved in version advancement (best-effort)
+	dm.repairStaleOwners(ctx, key, chosen, staleOwners)
+
+	// full repair across all owners to ensure convergence
+	dm.repairReplicas(ctx, key, chosen, owners)
+
+	return chosen, true
+}
+
+// --- Hinted handoff implementation ---.
+func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) {
+	if dm.hintTTL <= 0 { // disabled
+		return
+	}
+
+	dm.hintsMu.Lock()
+
+	if dm.hints == nil {
+		dm.hints = make(map[string][]hintedEntry)
+	}
+
+	queueHints := dm.hints[nodeID]
+	if dm.hintMaxPerNode > 0 && len(queueHints) >= dm.hintMaxPerNode { // drop oldest
+		queueHints = queueHints[1:]
+	}
+
+	cloned := *item
+
+	queueHints = append(queueHints, hintedEntry{item: &cloned, expire: time.Now().Add(dm.hintTTL)})
+	dm.hints[nodeID] = queueHints
+	dm.hintsMu.Unlock()
+	atomic.AddInt64(&dm.metrics.hintedQueued, 1)
+}
+
+func (dm *DistMemory) startHintReplayIfEnabled(ctx context.Context) {
+	if dm.hintReplayInt <= 0 || dm.hintTTL <= 0 {
+		return
+	}
+
+	dm.hintStopCh = make(chan struct{})
+	go dm.hintReplayLoop(ctx)
+}
+
+func (dm *DistMemory) hintReplayLoop(ctx context.Context) { //nolint:ireturn
+	ticker := time.NewTicker(dm.hintReplayInt)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			dm.replayHints(ctx)
+		case <-dm.hintStopCh:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (dm *DistMemory) replayHints(ctx context.Context) { //nolint:ireturn
+	if dm.transport == nil {
+		return
+	}
+
+	now := time.Now()
+
+	dm.hintsMu.Lock()
+
+	for nodeID, q := range dm.hints {
+		out := q[:0]
+		for _, hint := range q {
+			if now.After(hint.expire) { // expired
+				atomic.AddInt64(&dm.metrics.hintedExpired, 1)
+
+				continue
+			}
+
+			err := dm.transport.ForwardSet(ctx, nodeID, hint.item, false) // best-effort
+			if err == nil {                                               // success
+				atomic.AddInt64(&dm.metrics.hintedReplayed, 1)
+
+				continue
+			}
+
+			if errors.Is(err, sentinel.ErrBackendNotFound) { // keep
+				out = append(out, hint)
+
+				continue
+			}
+
+			atomic.AddInt64(&dm.metrics.hintedDropped, 1)
+		}
+
+		if len(out) == 0 {
+			delete(dm.hints, nodeID)
+		} else {
+			dm.hints[nodeID] = out
+		}
+	}
+
+	dm.hintsMu.Unlock()
+}
+
+// --- Simple gossip (in-process only) ---.
+func (dm *DistMemory) startGossipIfEnabled() { //nolint:ireturn
+	if dm.gossipInterval <= 0 {
+		return
+	}
+
+	dm.gossipStopCh = make(chan struct{})
+	go dm.gossipLoop()
+}
+
+// startAutoSyncIfEnabled launches periodic merkle syncs to all other members.
+func (dm *DistMemory) startAutoSyncIfEnabled(ctx context.Context) { //nolint:ireturn
+	if dm.autoSyncInterval <= 0 || dm.membership == nil {
+		return
+	}
+
+	if dm.autoSyncStopCh != nil { // already running
+		return
+	}
+
+	dm.autoSyncStopCh = make(chan struct{})
+
+	interval := dm.autoSyncInterval
+	go dm.autoSyncLoop(ctx, interval)
+}
+
+func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration) { //nolint:ireturn
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-dm.autoSyncStopCh:
+			return
+		case <-ticker.C:
+			dm.runAutoSyncTick(ctx)
+		}
+	}
+}
+
+// runAutoSyncTick performs one auto-sync cycle; separated for lower complexity.
+func (dm *DistMemory) runAutoSyncTick(ctx context.Context) { //nolint:ireturn
+	start := time.Now()
+
+	var lastErr error
+
+	members := dm.membership.List()
+	limit := dm.autoSyncPeersPerInterval
+	synced := 0
+
+	for _, member := range members {
+		if member == nil || string(member.ID) == dm.nodeID { // skip self
+			continue
+		}
+
+		if limit > 0 && synced >= limit {
+			break
+		}
+
+		err := dm.SyncWith(ctx, string(member.ID))
+		if err != nil { // capture last error only
+			lastErr = err
+		}
+
+		synced++
+	}
+
+	dm.lastAutoSyncDuration.Store(time.Since(start).Nanoseconds())
+
+	if lastErr != nil {
+		dm.lastAutoSyncError.Store(lastErr.Error())
+	} else {
+		dm.lastAutoSyncError.Store("")
+	}
+
+	atomic.AddInt64(&dm.metrics.autoSyncLoops, 1)
+}
+
+func (dm *DistMemory) gossipLoop() { //nolint:ireturn
+	ticker := time.NewTicker(dm.gossipInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			dm.runGossipTick()
+		case <-dm.gossipStopCh:
+			return
+		}
+	}
+}
+
+func (dm *DistMemory) runGossipTick() { //nolint:ireturn
+	if dm.membership == nil || dm.transport == nil {
+		return
+	}
+
+	peers := dm.membership.List()
+	if len(peers) <= 1 {
+		return
+	}
+
+	var candidates []*cluster.Node
+	for _, n := range peers {
+		if n.ID != dm.localNode.ID {
+			candidates = append(candidates, n)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	// secure random selection (not strictly required but avoids G404 warning)
+	n := len(candidates)
+
+	idxBig, err := rand.Int(rand.Reader, big.NewInt(int64(n))) // #nosec G404 - cryptographic randomness acceptable here
+	if err != nil {
+		return
+	}
+
+	target := candidates[idxBig.Int64()]
+
+	ip, ok := dm.transport.(*InProcessTransport)
+	if !ok {
+		return
+	}
+
+	remote, ok2 := ip.backends[string(target.ID)]
+	if !ok2 {
+		return
+	}
+
+	snapshot := dm.membership.List()
+	remote.acceptGossip(snapshot)
+}
+
+func (dm *DistMemory) acceptGossip(nodes []*cluster.Node) { //nolint:ireturn
+	if dm.membership == nil {
+		return
+	}
+
+	for _, node := range nodes {
+		if node.ID == dm.localNode.ID {
+			continue
+		}
+
+		existing := false
+		for _, cur := range dm.membership.List() {
+			if cur.ID == node.ID {
+				existing = true
+
+				if node.Incarnation > cur.Incarnation {
+					dm.membership.Upsert(&cluster.Node{
+						ID:          node.ID,
+						Address:     node.Address,
+						State:       node.State,
+						Incarnation: node.Incarnation,
+						LastSeen:    time.Now(),
+					})
+				}
+
+				break
+			}
+		}
+
+		if !existing {
+			dm.membership.Upsert(&cluster.Node{
+				ID:          node.ID,
+				Address:     node.Address,
+				State:       node.State,
+				Incarnation: node.Incarnation,
+				LastSeen:    time.Now(),
+			})
+		}
+	}
 }
 
 // chooseNewer picks the item with higher version; on version tie uses lexicographically smaller Origin as winner.
@@ -967,7 +2012,23 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 
 // applyRemove deletes locally and optionally fan-outs removal to replicas.
 func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate bool) {
-	dm.shardFor(key).items.Remove(key)
+	sh := dm.shardFor(key)
+	// capture version from existing item (if any) and increment for tombstone
+	var nextVer uint64
+	if it, ok := sh.items.Get(key); ok && it != nil {
+		ci := it // already *cache.Item (ConcurrentMap stores *cache.Item)
+
+		nextVer = ci.Version + 1
+	}
+
+	if nextVer == 0 { // no prior item seen; allocate monotonic tomb version
+		nextVer = dm.tombVersionCounter.Add(1)
+	}
+
+	sh.items.Remove(key)
+
+	sh.tombs[key] = tombstone{version: nextVer, origin: string(dm.localNode.ID), at: time.Now()}
+	atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
 
 	if !replicate || dm.ring == nil || dm.transport == nil {
 		return
@@ -985,7 +2046,7 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 			continue
 		}
 
-		_ = dm.transport.ForwardRemove(ctx, string(oid), key, false) //nolint:errcheck // best-effort
+		_ = dm.transport.ForwardRemove(ctx, string(oid), key, false) //nolint:errcheck // best-effort (tombstone inferred remotely)
 	}
 }
 

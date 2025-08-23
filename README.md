@@ -10,7 +10,7 @@ It is optimized for performance and flexibility:
 
 - Tunable expiration and eviction intervals (or fully proactive eviction when the eviction interval is set to `0`).
 - Debounced & coalesced expiration trigger channel to avoid thrashing.
-- Non-blocking manual `TriggerEviction()` signal.
+- Non-blocking manual `TriggerEviction(context.Context)` signal.
 - Serializer‑aware memory accounting (item size reflects the backend serialization format when available).
 - Multiple eviction algorithms with the ability to register custom ones.
 - Multiple stats collectors (default histogram) and middleware hooks.
@@ -61,6 +61,8 @@ Endpoints (subject to change):
 - GET /config – sanitized runtime config (now includes replication + virtual node settings when using DistMemory)
 - GET /dist/metrics – distributed backend forwarding / replication counters (DistMemory only)
 - GET /dist/owners?key=K – current ring owners (IDs) for key K (DistMemory only, debug)
+- GET /internal/merkle – Merkle tree snapshot (DistMemory experimental anti-entropy)
+- GET /internal/keys – Full key enumeration (debug / anti-entropy fallback; expensive)
 - GET /cluster/members – membership snapshot (id, address, state, incarnation, replication factor, virtual nodes)
 - GET /cluster/ring – ring vnode hashes (debug / diagnostics)
 - POST /evict – trigger eviction cycle
@@ -181,8 +183,14 @@ if err != nil {
 | `WithManagementHTTP` | Start optional management HTTP server. |
 | `WithDistReplication` | (DistMemory) Set replication factor (owners per key). |
 | `WithDistVirtualNodes` | (DistMemory) Virtual nodes per physical node for consistent hashing. |
+| `WithDistMerkleChunkSize` | (DistMemory) Keys per Merkle leaf chunk (power-of-two recommended). |
+| `WithDistMerkleAutoSync` | (DistMemory) Interval for background Merkle sync (<=0 disables). |
+| `WithDistMerkleAutoSyncPeers` | (DistMemory) Limit peers synced per auto-sync tick (0=all). |
+| `WithDistListKeysCap` | (DistMemory) Cap number of keys fetched via fallback enumeration. |
 | `WithDistNode` | (DistMemory) Explicit node identity (id/address). |
 | `WithDistSeeds` | (DistMemory) Static seed addresses to pre-populate membership. |
+| `WithDistTombstoneTTL` | (DistMemory) Retain delete tombstones for this duration before compaction (<=0 = infinite). |
+| `WithDistTombstoneSweep` | (DistMemory) Interval to run tombstone compaction (<=0 disables). |
 
 *ARC is experimental (not registered by default).
 
@@ -204,9 +212,38 @@ Current capabilities:
 - Ownership enforcement (non‑owners forward to primary).
 - Replica fan‑out on writes (best‑effort) & replica removals.
 - Read‑repair when a local owner misses but another replica has the key.
+- Basic delete semantics with tombstones: deletions propagate as versioned tombstones preventing
+    resurrection during anti-entropy (tombstone retention is in‑memory, no persistence yet).
+  - Tombstone versioning uses a per-process monotonic counter when no prior item version exists (avoids time-based unsigned casts).
+  - Remote pull sync will infer a tombstone when a key present locally is absent remotely and no local tomb exists (anti-resurrection guard).
+  - DebugInject intentionally clears any existing tombstone for that key (test helper / simulating authoritative resurrection with higher version).
+    - Tombstone TTL + periodic compaction: configure with `WithDistTombstoneTTL` / `WithDistTombstoneSweep`; metrics track active & purged counts.
 - Metrics exposed via management endpoints (`/dist/metrics`, `/dist/owners`, `/cluster/members`, `/cluster/ring`).
+  - Includes Merkle phase timings (fetch/build/diff nanos) and counters for keys pulled during anti-entropy.
+    - Tombstone metrics: `TombstonesActive`, `TombstonesPurged`.
 
 Planned next steps (roadmap excerpts): network transport abstraction, quorum reads/writes, versioning (vector clocks or lamport), failure detection / node states, rebalancing & anti‑entropy sync.
+
+### Roadmap / PRD Progress Snapshot
+
+| Area | Status |
+|------|--------|
+| Core in-process sharding | Complete (static ring) |
+| Replication fan-out | Implemented (best-effort) |
+| Read-repair | Implemented |
+| Merkle anti-entropy | Implemented (pull-based) |
+| Merkle performance metrics | Implemented (fetch/build/diff nanos) |
+| Remote-only key enumeration fallback | Implemented with optional cap (`WithDistListKeysCap`) |
+| Delete semantics (tombstones) | Implemented (no compaction yet) |
+| Tombstone compaction / TTL | Planned |
+| Quorum read/write consistency | Partially scaffolded (consistency levels enum) |
+| Failure detection / heartbeat | Experimental heartbeat present |
+| Membership changes / dynamic rebalancing | Not yet |
+| Network transport (HTTP partial) | Basic HTTP management + fetch merkle/keys; full RPC TBD |
+| Tracing spans (distributed ops) | Planned |
+| Metrics exposure | Basic + Merkle phase metrics |
+| Persistence | Not in scope yet |
+| Benchmarks & tests | Extensive unit + benchmark coverage |
 
 Example minimal setup:
 
