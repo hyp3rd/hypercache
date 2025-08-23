@@ -102,6 +102,7 @@ type membershipIntrospect interface {
 		vnodes int,
 	)
 	DistRingHashSpots() []string
+	DistHeartbeatMetrics() any
 }
 
 // Start launches listener (idempotent). Caller provides cache for handler wiring.
@@ -255,6 +256,13 @@ func (s *ManagementHTTPServer) registerCluster(useAuth func(fiber.Handler) fiber
 			spots := mi.DistRingHashSpots()
 
 			return fiberCtx.JSON(fiber.Map{"count": len(spots), "vnodes": spots})
+		}
+
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+	}))
+	s.app.Get("/cluster/heartbeat", useAuth(func(fiberCtx fiber.Ctx) error { // heartbeat metrics
+		if mi, ok := hc.(membershipIntrospect); ok {
+			return fiberCtx.JSON(mi.DistHeartbeatMetrics())
 		}
 
 		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})

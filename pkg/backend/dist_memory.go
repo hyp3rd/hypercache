@@ -253,9 +253,10 @@ func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolin
 		}
 	}
 
-	// primary path: assign version
+	// primary path: assign version & timestamp
 	item.Version = atomic.AddUint64(&dm.versionCounter, 1)
 	item.Origin = string(dm.localNode.ID)
+	item.LastUpdated = time.Now()
 	dm.applySet(ctx, item, false)
 
 	acks := 1 + dm.replicateTo(ctx, item, owners[1:])

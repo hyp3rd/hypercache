@@ -1056,6 +1056,22 @@ func (hyperCache *HyperCache[T]) DistRingHashSpots() []string { //nolint:ireturn
 	return nil
 }
 
+// DistHeartbeatMetrics returns distributed heartbeat metrics if supported.
+func (hyperCache *HyperCache[T]) DistHeartbeatMetrics() any { //nolint:ireturn
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		m := dm.Metrics()
+
+		return map[string]any{
+			"heartbeatSuccess":   m.HeartbeatSuccess,
+			"heartbeatFailure":   m.HeartbeatFailure,
+			"nodesRemoved":       m.NodesRemoved,
+			"readPrimaryPromote": m.ReadPrimaryPromote,
+		}
+	}
+
+	return nil
+}
+
 // ManagementHTTPAddress returns the bound address of the optional management HTTP server.
 // Empty string when the server is disabled or failed to start.
 func (hyperCache *HyperCache[T]) ManagementHTTPAddress() string {

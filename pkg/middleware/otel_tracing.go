@@ -9,12 +9,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/internal/telemetry/attrs"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 	"github.com/hyp3rd/hypercache/pkg/cache"
 	"github.com/hyp3rd/hypercache/pkg/stats"
 )
-
-const attrKeyLength = "key.len"
 
 // OTelTracingMiddleware wraps hypercache.Service methods with OpenTelemetry spans.
 type OTelTracingMiddleware struct {
@@ -28,8 +27,8 @@ type OTelTracingMiddleware struct {
 type OTelTracingOption func(*OTelTracingMiddleware)
 
 // WithCommonAttributes sets attributes applied to all spans.
-func WithCommonAttributes(attrs ...attribute.KeyValue) OTelTracingOption {
-	return func(m *OTelTracingMiddleware) { m.commonAttrs = append(m.commonAttrs, attrs...) }
+func WithCommonAttributes(attributes ...attribute.KeyValue) OTelTracingOption {
+	return func(m *OTelTracingMiddleware) { m.commonAttrs = append(m.commonAttrs, attributes...) }
 }
 
 // NewOTelTracingMiddleware creates a tracing middleware.
@@ -44,7 +43,7 @@ func NewOTelTracingMiddleware(next hypercache.Service, tracer trace.Tracer, opts
 
 // Get implements Service.Get with tracing.
 func (mw OTelTracingMiddleware) Get(ctx context.Context, key string) (any, bool) {
-	ctx, span := mw.startSpan(ctx, "hypercache.Get", attribute.Int(attrKeyLength, len(key)))
+	ctx, span := mw.startSpan(ctx, "hypercache.Get", attribute.Int(attrs.AttrKeyLength, len(key)))
 	defer span.End()
 
 	v, ok := mw.next.Get(ctx, key)
@@ -55,7 +54,10 @@ func (mw OTelTracingMiddleware) Get(ctx context.Context, key string) (any, bool)
 
 // Set implements Service.Set with tracing.
 func (mw OTelTracingMiddleware) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
-	ctx, span := mw.startSpan(ctx, "hypercache.Set", attribute.Int(attrKeyLength, len(key)), attribute.Int64("expiration.ms", expiration.Milliseconds()))
+	ctx, span := mw.startSpan(
+		ctx, "hypercache.Set",
+		attribute.Int(attrs.AttrKeyLength, len(key)),
+		attribute.Int64(attrs.AttrExpirationMS, expiration.Milliseconds()))
 	defer span.End()
 
 	err := mw.next.Set(ctx, key, value, expiration)
@@ -68,7 +70,10 @@ func (mw OTelTracingMiddleware) Set(ctx context.Context, key string, value any, 
 
 // GetOrSet implements Service.GetOrSet with tracing.
 func (mw OTelTracingMiddleware) GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error) {
-	ctx, span := mw.startSpan(ctx, "hypercache.GetOrSet", attribute.Int(attrKeyLength, len(key)), attribute.Int64("expiration.ms", expiration.Milliseconds()))
+	ctx, span := mw.startSpan(
+		ctx, "hypercache.GetOrSet",
+		attribute.Int(attrs.AttrKeyLength, len(key)),
+		attribute.Int64(attrs.AttrExpirationMS, expiration.Milliseconds()))
 	defer span.End()
 
 	v, err := mw.next.GetOrSet(ctx, key, value, expiration)
@@ -81,7 +86,7 @@ func (mw OTelTracingMiddleware) GetOrSet(ctx context.Context, key string, value 
 
 // GetWithInfo implements Service.GetWithInfo with tracing.
 func (mw OTelTracingMiddleware) GetWithInfo(ctx context.Context, key string) (*cache.Item, bool) {
-	ctx, span := mw.startSpan(ctx, "hypercache.GetWithInfo", attribute.Int(attrKeyLength, len(key)))
+	ctx, span := mw.startSpan(ctx, "hypercache.GetWithInfo", attribute.Int(attrs.AttrKeyLength, len(key)))
 	defer span.End()
 
 	it, ok := mw.next.GetWithInfo(ctx, key)
@@ -173,14 +178,14 @@ func (mw OTelTracingMiddleware) Stop(ctx context.Context) error {
 func (mw OTelTracingMiddleware) GetStats() stats.Stats { return mw.next.GetStats() }
 
 // startSpan starts a span with common and provided attributes.
-func (mw OTelTracingMiddleware) startSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+func (mw OTelTracingMiddleware) startSpan(ctx context.Context, name string, attributes ...attribute.KeyValue) (context.Context, trace.Span) {
 	ctx, span := mw.tracer.Start(ctx, name, trace.WithSpanKind(trace.SpanKindInternal))
 	if len(mw.commonAttrs) > 0 {
 		span.SetAttributes(mw.commonAttrs...)
 	}
 
-	if len(attrs) > 0 {
-		span.SetAttributes(attrs...)
+	if len(attributes) > 0 {
+		span.SetAttributes(attributes...)
 	}
 
 	return ctx, span

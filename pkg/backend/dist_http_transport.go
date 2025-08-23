@@ -183,11 +183,12 @@ func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
 		}
 		// reconstruct cache.Item (we ignore expiration formatting difference vs ms)
 		return &cache.Item{ // multi-line for readability
-			Key:        mirror.Key,
-			Value:      mirror.Value,
-			Expiration: time.Duration(mirror.Expiration) * time.Millisecond,
-			Version:    mirror.Version,
-			Origin:     mirror.Origin,
+			Key:         mirror.Key,
+			Value:       mirror.Value,
+			Expiration:  time.Duration(mirror.Expiration) * time.Millisecond,
+			Version:     mirror.Version,
+			Origin:      mirror.Origin,
+			LastUpdated: time.Now(),
 		}, true, nil
 	}
 

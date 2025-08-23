@@ -62,6 +62,7 @@ type Item struct {
 	Key         string        // key of the item
 	Value       any           // value of the item
 	LastAccess  time.Time     // last access time
+	LastUpdated time.Time     // last write/version assignment time (distributed usage)
 	Size        int64         // size in bytes
 	Expiration  time.Duration // expiration duration
 	AccessCount uint32        // number of times the item has been accessed
