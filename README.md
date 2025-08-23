@@ -212,9 +212,35 @@ Current capabilities:
 - Read‑repair when a local owner misses but another replica has the key.
 - Basic delete semantics with tombstones: deletions propagate as versioned tombstones preventing
     resurrection during anti-entropy (tombstone retention is in‑memory, no persistence yet).
+  - Tombstone versioning uses a per-process monotonic counter when no prior item version exists (avoids time-based unsigned casts).
+  - Remote pull sync will infer a tombstone when a key present locally is absent remotely and no local tomb exists (anti-resurrection guard).
+  - DebugInject intentionally clears any existing tombstone for that key (test helper / simulating authoritative resurrection with higher version).
+  - Planned: configurable tombstone TTL + periodic compaction to reclaim memory; metrics for active tombstones and purges.
 - Metrics exposed via management endpoints (`/dist/metrics`, `/dist/owners`, `/cluster/members`, `/cluster/ring`).
+  - Includes Merkle phase timings (fetch/build/diff nanos) and counters for keys pulled during anti-entropy.
 
 Planned next steps (roadmap excerpts): network transport abstraction, quorum reads/writes, versioning (vector clocks or lamport), failure detection / node states, rebalancing & anti‑entropy sync.
+
+### Roadmap / PRD Progress Snapshot
+
+| Area | Status |
+|------|--------|
+| Core in-process sharding | Complete (static ring) |
+| Replication fan-out | Implemented (best-effort) |
+| Read-repair | Implemented |
+| Merkle anti-entropy | Implemented (pull-based) |
+| Merkle performance metrics | Implemented (fetch/build/diff nanos) |
+| Remote-only key enumeration fallback | Implemented with optional cap (`WithDistListKeysCap`) |
+| Delete semantics (tombstones) | Implemented (no compaction yet) |
+| Tombstone compaction / TTL | Planned |
+| Quorum read/write consistency | Partially scaffolded (consistency levels enum) |
+| Failure detection / heartbeat | Experimental heartbeat present |
+| Membership changes / dynamic rebalancing | Not yet |
+| Network transport (HTTP partial) | Basic HTTP management + fetch merkle/keys; full RPC TBD |
+| Tracing spans (distributed ops) | Planned |
+| Metrics exposure | Basic + Merkle phase metrics |
+| Persistence | Not in scope yet |
+| Benchmarks & tests | Extensive unit + benchmark coverage |
 
 Example minimal setup:
 
