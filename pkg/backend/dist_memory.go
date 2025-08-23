@@ -523,6 +523,10 @@ func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolin
 		return err
 	}
 
+	start := time.Now()
+
+	atomic.AddInt64(&dm.metrics.writeAttempts, 1)
+
 	owners := dm.lookupOwners(item.Key)
 	if len(owners) == 0 {
 		return sentinel.ErrNotOwner
@@ -546,11 +550,16 @@ func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolin
 	dm.applySet(ctx, item, false)
 
 	acks := 1 + dm.replicateTo(ctx, item, owners[1:])
+	atomic.AddInt64(&dm.metrics.writeAcks, int64(acks))
 
 	needed := dm.requiredAcks(len(owners), dm.writeConsistency)
 	if acks < needed {
+		atomic.AddInt64(&dm.metrics.writeQuorumFailures, 1)
+
 		return sentinel.ErrQuorumFailed
 	}
+
+	_ = start // placeholder in case we later expose latency histogram
 
 	return nil
 }
@@ -780,6 +789,9 @@ type distMetrics struct {
 	autoSyncLoops       int64 // number of auto-sync ticks executed
 	tombstonesActive    int64 // approximate active tombstones
 	tombstonesPurged    int64 // cumulative purged tombstones
+	writeQuorumFailures int64 // number of write operations that failed quorum
+	writeAcks           int64 // cumulative replica write acks (includes primary)
+	writeAttempts       int64 // total write operations attempted (Set)
 }
 
 // DistMetrics snapshot.
@@ -811,6 +823,9 @@ type DistMetrics struct {
 	LastAutoSyncError   string
 	TombstonesActive    int64
 	TombstonesPurged    int64
+	WriteQuorumFailures int64
+	WriteAcks           int64
+	WriteAttempts       int64
 }
 
 // Metrics returns a snapshot of distributed metrics.
@@ -850,6 +865,9 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		LastAutoSyncError:   lastErr,
 		TombstonesActive:    atomic.LoadInt64(&dm.metrics.tombstonesActive),
 		TombstonesPurged:    atomic.LoadInt64(&dm.metrics.tombstonesPurged),
+		WriteQuorumFailures: atomic.LoadInt64(&dm.metrics.writeQuorumFailures),
+		WriteAcks:           atomic.LoadInt64(&dm.metrics.writeAcks),
+		WriteAttempts:       atomic.LoadInt64(&dm.metrics.writeAttempts),
 	}
 }
 

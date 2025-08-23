@@ -234,9 +234,10 @@ Planned next steps (roadmap excerpts): network transport abstraction, quorum rea
 | Merkle anti-entropy | Implemented (pull-based) |
 | Merkle performance metrics | Implemented (fetch/build/diff nanos) |
 | Remote-only key enumeration fallback | Implemented with optional cap (`WithDistListKeysCap`) |
-| Delete semantics (tombstones) | Implemented (no compaction yet) |
-| Tombstone compaction / TTL | Planned |
-| Quorum read/write consistency | Partially scaffolded (consistency levels enum) |
+| Delete semantics (tombstones) | Implemented |
+| Tombstone compaction / TTL | Implemented |
+| Quorum read consistency | Implemented |
+| Quorum write consistency | Implemented (acks enforced) |
 | Failure detection / heartbeat | Experimental heartbeat present |
 | Membership changes / dynamic rebalancing | Not yet |
 | Network transport (HTTP partial) | Basic HTTP management + fetch merkle/keys; full RPC TBD |
