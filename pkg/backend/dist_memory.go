@@ -1458,8 +1458,9 @@ func (dm *DistMemory) getWithConsistencyParallel(ctx context.Context, key string
 	needed := dm.requiredAcks(len(owners), dm.readConsistency)
 
 	type res struct {
-		it *cache.Item
-		ok bool
+		owner cluster.NodeID
+		it    *cache.Item
+		ok    bool
 	}
 
 	ch := make(chan res, len(owners))
@@ -1467,27 +1468,39 @@ func (dm *DistMemory) getWithConsistencyParallel(ctx context.Context, key string
 	ctxFetch, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	for idx, oid := range owners { // launch all
-		go func() {
-			it, ok := dm.fetchOwner(ctxFetch, key, idx, oid)
-			ch <- res{it: it, ok: ok}
-		}()
+	for idx, oid := range owners { // launch all with proper capture (Go <1.22 style)
+		idxLocal, oidLocal := idx, oid
+		go func(i int, o cluster.NodeID) {
+			it, ok := dm.fetchOwner(ctxFetch, key, i, o)
+			ch <- res{owner: o, it: it, ok: ok}
+		}(idxLocal, oidLocal)
 	}
 
 	acks := 0
 
 	var chosen *cache.Item
+
+	staleOwners := make([]cluster.NodeID, 0, len(owners))
+
 	for range owners {
-		r := <-ch
-		if r.ok {
-			chosen = dm.chooseNewer(chosen, r.it)
+		resp := <-ch
+		if !resp.ok {
+			continue
+		}
 
-			acks++
-			if acks >= needed && chosen != nil { // early satisfied
-				cancel()
+		prev := chosen
 
-				break
-			}
+		chosen = dm.chooseNewer(chosen, resp.it)
+		acks++
+
+		if prev != nil && chosen != prev { // newer version found, mark new owner for targeted check (mirrors sequential path semantics)
+			staleOwners = append(staleOwners, resp.owner)
+		}
+
+		if acks >= needed && chosen != nil { // early satisfied
+			cancel()
+
+			break
 		}
 	}
 
@@ -1495,6 +1508,10 @@ func (dm *DistMemory) getWithConsistencyParallel(ctx context.Context, key string
 		return nil, false
 	}
 
+	// targeted repairs for owners involved in version advancement (best-effort)
+	dm.repairStaleOwners(ctx, key, chosen, staleOwners)
+
+	// full repair across all owners to ensure convergence
 	dm.repairReplicas(ctx, key, chosen, owners)
 
 	return chosen, true
