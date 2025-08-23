@@ -2,8 +2,11 @@ package backend
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"hash/fnv"
+	"math/big"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -48,6 +51,27 @@ type DistMemory struct {
 	readConsistency  ConsistencyLevel
 	writeConsistency ConsistencyLevel
 	versionCounter   uint64 // global monotonic for this node (lamport-like)
+
+	// hinted handoff
+	hintTTL        time.Duration
+	hintReplayInt  time.Duration
+	hintMaxPerNode int
+	hintsMu        sync.Mutex
+	hints          map[string][]hintedEntry // nodeID -> queue
+	hintStopCh     chan struct{}
+
+	// parallel reads
+	parallelReads bool
+
+	// simple gossip
+	gossipInterval time.Duration
+	gossipStopCh   chan struct{}
+}
+
+// hintedEntry represents a deferred replica write.
+type hintedEntry struct {
+	item   *cache.Item
+	expire time.Time
 }
 
 // ConsistencyLevel defines read/write consistency semantics.
@@ -143,6 +167,35 @@ func WithDistVirtualNodes(n int) DistMemoryOption {
 	}
 }
 
+// WithDistHintTTL sets TTL for hinted handoff entries.
+func WithDistHintTTL(d time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.hintTTL = d }
+}
+
+// WithDistHintReplayInterval sets how often to attempt replay of hints.
+func WithDistHintReplayInterval(d time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.hintReplayInt = d }
+}
+
+// WithDistHintMaxPerNode caps number of queued hints per target node.
+func WithDistHintMaxPerNode(n int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if n > 0 {
+			dm.hintMaxPerNode = n
+		}
+	}
+}
+
+// WithDistParallelReads enables parallel quorum/all read fan-out.
+func WithDistParallelReads(enable bool) DistMemoryOption {
+	return func(dm *DistMemory) { dm.parallelReads = enable }
+}
+
+// WithDistGossipInterval enables simple membership gossip at provided interval.
+func WithDistGossipInterval(d time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) { dm.gossipInterval = d }
+}
+
 // WithDistNode identity (id optional; derived from address if empty). Address used for future RPC.
 func WithDistNode(id, address string) DistMemoryOption {
 	return func(dm *DistMemory) {
@@ -177,6 +230,8 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 	dm.initMembershipIfNeeded()
 	dm.tryStartHTTP(ctx)
 	dm.startHeartbeatIfEnabled(ctx)
+	dm.startHintReplayIfEnabled(ctx)
+	dm.startGossipIfEnabled()
 
 	return dm, nil
 }
@@ -225,6 +280,10 @@ func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) {
 
 	if dm.readConsistency == ConsistencyOne {
 		return dm.getOne(ctx, key, owners)
+	}
+
+	if dm.parallelReads {
+		return dm.getWithConsistencyParallel(ctx, key, owners)
 	}
 
 	return dm.getWithConsistency(ctx, key, owners)
@@ -451,6 +510,10 @@ type distMetrics struct {
 	versionConflicts    int64 // times a newer version (or tie-broken origin) replaced previous candidate
 	versionTieBreaks    int64 // subset of conflicts decided by origin tie-break
 	readPrimaryPromote  int64 // times read path skipped unreachable primary and promoted next owner
+	hintedQueued        int64 // hints queued
+	hintedReplayed      int64 // hints successfully replayed
+	hintedExpired       int64 // hints expired before delivery
+	hintedDropped       int64 // hints dropped due to non-not-found transport errors
 }
 
 // DistMetrics snapshot.
@@ -468,6 +531,10 @@ type DistMetrics struct {
 	VersionConflicts    int64
 	VersionTieBreaks    int64
 	ReadPrimaryPromote  int64
+	HintedQueued        int64
+	HintedReplayed      int64
+	HintedExpired       int64
+	HintedDropped       int64
 }
 
 // Metrics returns a snapshot of distributed metrics.
@@ -486,6 +553,10 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		VersionConflicts:    atomic.LoadInt64(&dm.metrics.versionConflicts),
 		VersionTieBreaks:    atomic.LoadInt64(&dm.metrics.versionTieBreaks),
 		ReadPrimaryPromote:  atomic.LoadInt64(&dm.metrics.readPrimaryPromote),
+		HintedQueued:        atomic.LoadInt64(&dm.metrics.hintedQueued),
+		HintedReplayed:      atomic.LoadInt64(&dm.metrics.hintedReplayed),
+		HintedExpired:       atomic.LoadInt64(&dm.metrics.hintedExpired),
+		HintedDropped:       atomic.LoadInt64(&dm.metrics.hintedDropped),
 	}
 }
 
@@ -493,6 +564,14 @@ func (dm *DistMemory) Metrics() DistMetrics {
 func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 	if dm.stopCh != nil {
 		close(dm.stopCh)
+	}
+
+	if dm.hintStopCh != nil {
+		close(dm.hintStopCh)
+	}
+
+	if dm.gossipStopCh != nil {
+		close(dm.gossipStopCh)
 	}
 
 	if dm.httpServer != nil {
@@ -730,18 +809,277 @@ func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid c
 // replicateTo sends writes to replicas (best-effort) returning ack count.
 func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replicas []cluster.NodeID) int { //nolint:ireturn
 	acks := 0
-
 	for _, oid := range replicas {
 		if oid == dm.localNode.ID {
 			continue
 		}
 
-		if dm.transport != nil && dm.transport.ForwardSet(ctx, string(oid), item, false) == nil {
-			acks++
+		if dm.transport != nil {
+			err := dm.transport.ForwardSet(ctx, string(oid), item, false)
+			if err == nil {
+				acks++
+
+				continue
+			}
+
+			if errors.Is(err, sentinel.ErrBackendNotFound) { // queue hint for unreachable replica
+				dm.queueHint(string(oid), item)
+			}
 		}
 	}
 
 	return acks
+}
+
+// getWithConsistencyParallel performs parallel owner fan-out until quorum/all reached.
+func (dm *DistMemory) getWithConsistencyParallel(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+	needed := dm.requiredAcks(len(owners), dm.readConsistency)
+
+	type res struct {
+		it *cache.Item
+		ok bool
+	}
+
+	ch := make(chan res, len(owners))
+
+	ctxFetch, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	for idx, oid := range owners { // launch all
+		go func() {
+			it, ok := dm.fetchOwner(ctxFetch, key, idx, oid)
+			ch <- res{it: it, ok: ok}
+		}()
+	}
+
+	acks := 0
+
+	var chosen *cache.Item
+	for range owners {
+		r := <-ch
+		if r.ok {
+			chosen = dm.chooseNewer(chosen, r.it)
+
+			acks++
+			if acks >= needed && chosen != nil { // early satisfied
+				cancel()
+
+				break
+			}
+		}
+	}
+
+	if acks < needed || chosen == nil {
+		return nil, false
+	}
+
+	dm.repairReplicas(ctx, key, chosen, owners)
+
+	return chosen, true
+}
+
+// --- Hinted handoff implementation ---.
+func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) {
+	if dm.hintTTL <= 0 { // disabled
+		return
+	}
+
+	dm.hintsMu.Lock()
+
+	if dm.hints == nil {
+		dm.hints = make(map[string][]hintedEntry)
+	}
+
+	queueHints := dm.hints[nodeID]
+	if dm.hintMaxPerNode > 0 && len(queueHints) >= dm.hintMaxPerNode { // drop oldest
+		queueHints = queueHints[1:]
+	}
+
+	cloned := *item
+
+	queueHints = append(queueHints, hintedEntry{item: &cloned, expire: time.Now().Add(dm.hintTTL)})
+	dm.hints[nodeID] = queueHints
+	dm.hintsMu.Unlock()
+	atomic.AddInt64(&dm.metrics.hintedQueued, 1)
+}
+
+func (dm *DistMemory) startHintReplayIfEnabled(ctx context.Context) {
+	if dm.hintReplayInt <= 0 || dm.hintTTL <= 0 {
+		return
+	}
+
+	dm.hintStopCh = make(chan struct{})
+	go dm.hintReplayLoop(ctx)
+}
+
+func (dm *DistMemory) hintReplayLoop(ctx context.Context) { //nolint:ireturn
+	ticker := time.NewTicker(dm.hintReplayInt)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			dm.replayHints(ctx)
+		case <-dm.hintStopCh:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (dm *DistMemory) replayHints(ctx context.Context) { //nolint:ireturn
+	if dm.transport == nil {
+		return
+	}
+
+	now := time.Now()
+
+	dm.hintsMu.Lock()
+
+	for nodeID, q := range dm.hints {
+		out := q[:0]
+		for _, hint := range q {
+			if now.After(hint.expire) { // expired
+				atomic.AddInt64(&dm.metrics.hintedExpired, 1)
+
+				continue
+			}
+
+			err := dm.transport.ForwardSet(ctx, nodeID, hint.item, false) // best-effort
+			if err == nil {                                               // success
+				atomic.AddInt64(&dm.metrics.hintedReplayed, 1)
+
+				continue
+			}
+
+			if errors.Is(err, sentinel.ErrBackendNotFound) { // keep
+				out = append(out, hint)
+
+				continue
+			}
+
+			atomic.AddInt64(&dm.metrics.hintedDropped, 1)
+		}
+
+		if len(out) == 0 {
+			delete(dm.hints, nodeID)
+		} else {
+			dm.hints[nodeID] = out
+		}
+	}
+
+	dm.hintsMu.Unlock()
+}
+
+// --- Simple gossip (in-process only) ---.
+func (dm *DistMemory) startGossipIfEnabled() { //nolint:ireturn
+	if dm.gossipInterval <= 0 {
+		return
+	}
+
+	dm.gossipStopCh = make(chan struct{})
+	go dm.gossipLoop()
+}
+
+func (dm *DistMemory) gossipLoop() { //nolint:ireturn
+	ticker := time.NewTicker(dm.gossipInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			dm.runGossipTick()
+		case <-dm.gossipStopCh:
+			return
+		}
+	}
+}
+
+func (dm *DistMemory) runGossipTick() { //nolint:ireturn
+	if dm.membership == nil || dm.transport == nil {
+		return
+	}
+
+	peers := dm.membership.List()
+	if len(peers) <= 1 {
+		return
+	}
+
+	var candidates []*cluster.Node
+	for _, n := range peers {
+		if n.ID != dm.localNode.ID {
+			candidates = append(candidates, n)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	// secure random selection (not strictly required but avoids G404 warning)
+	n := len(candidates)
+
+	idxBig, err := rand.Int(rand.Reader, big.NewInt(int64(n))) // #nosec G404 - cryptographic randomness acceptable here
+	if err != nil {
+		return
+	}
+
+	target := candidates[idxBig.Int64()]
+
+	ip, ok := dm.transport.(*InProcessTransport)
+	if !ok {
+		return
+	}
+
+	remote, ok2 := ip.backends[string(target.ID)]
+	if !ok2 {
+		return
+	}
+
+	snapshot := dm.membership.List()
+	remote.acceptGossip(snapshot)
+}
+
+func (dm *DistMemory) acceptGossip(nodes []*cluster.Node) { //nolint:ireturn
+	if dm.membership == nil {
+		return
+	}
+
+	for _, node := range nodes {
+		if node.ID == dm.localNode.ID {
+			continue
+		}
+
+		existing := false
+		for _, cur := range dm.membership.List() {
+			if cur.ID == node.ID {
+				existing = true
+
+				if node.Incarnation > cur.Incarnation {
+					dm.membership.Upsert(&cluster.Node{
+						ID:          node.ID,
+						Address:     node.Address,
+						State:       node.State,
+						Incarnation: node.Incarnation,
+						LastSeen:    time.Now(),
+					})
+				}
+
+				break
+			}
+		}
+
+		if !existing {
+			dm.membership.Upsert(&cluster.Node{
+				ID:          node.ID,
+				Address:     node.Address,
+				State:       node.State,
+				Incarnation: node.Incarnation,
+				LastSeen:    time.Now(),
+			})
+		}
+	}
 }
 
 // chooseNewer picks the item with higher version; on version tie uses lexicographically smaller Origin as winner.
