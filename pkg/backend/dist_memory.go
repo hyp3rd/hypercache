@@ -184,8 +184,10 @@ func (dm *DistMemory) Membership() *cluster.Membership { return dm.membership }
 func (dm *DistMemory) Ring() *cluster.Ring { return dm.ring }
 
 type distShard struct {
-	items cache.ConcurrentMap
-	tombs map[string]tombstone // per-key tombstones
+	items             cache.ConcurrentMap
+	tombs             map[string]tombstone      // per-key tombstones
+	originalPrimary   map[string]cluster.NodeID // recorded primary owner at first insert
+	originalPrimaryMu sync.RWMutex              // guards originalPrimary
 }
 
 // DistMemoryOption configures DistMemory backend.
@@ -768,7 +770,7 @@ func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //noli
 	}()
 
 	for _, key := range keys {
-		if dm.isOwner(key) { // primary path
+		if dm.ownsKeyInternal(key) { // primary path
 			dm.applyRemove(ctx, key, true)
 
 			continue
@@ -1092,6 +1094,47 @@ func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 
 // --- Sync helper methods (placed after exported methods to satisfy ordering linter) ---
 
+// IsOwner reports whether this node is an owner (primary or replica) for key.
+// Exported for tests / external observability (thin wrapper over internal logic).
+func (dm *DistMemory) IsOwner(key string) bool { //nolint:ireturn
+	return dm.ownsKeyInternal(key)
+}
+
+// AddPeer adds a peer address into local membership (best-effort, no network validation).
+// If the peer already exists (by address) it's ignored. Used by tests to simulate join propagation.
+func (dm *DistMemory) AddPeer(address string) { //nolint:ireturn
+	if dm == nil || dm.membership == nil || address == "" {
+		return
+	}
+
+	if dm.localNode != nil && dm.localNode.Address == address {
+		return
+	}
+
+	for _, n := range dm.membership.List() {
+		if n.Address == address {
+			return
+		}
+	}
+
+	dm.membership.Upsert(cluster.NewNode("", address))
+}
+
+// RemovePeer removes a peer by address (best-effort) to simulate node leave in tests.
+func (dm *DistMemory) RemovePeer(address string) { //nolint:ireturn
+	if dm == nil || dm.membership == nil || address == "" {
+		return
+	}
+
+	for _, n := range dm.membership.List() {
+		if n.Address == address {
+			dm.membership.Remove(n.ID)
+
+			return
+		}
+	}
+}
+
 // sortedMerkleEntries returns merkle entries sorted by key.
 func (dm *DistMemory) sortedMerkleEntries() []merkleKV { //nolint:ireturn
 	entries := dm.merkleEntries()
@@ -1359,19 +1402,15 @@ func (dm *DistMemory) rebalanceLoop(ctx context.Context) { //nolint:ireturn
 // runRebalanceTick performs a lightweight ownership diff and migrates keys best-effort.
 func (dm *DistMemory) runRebalanceTick(ctx context.Context) { //nolint:ireturn
 	mv := uint64(0)
-
 	if dm.membership != nil {
 		mv = dm.membership.Version()
 	}
 
-	if mv == dm.lastRebalanceVersion.Load() {
-		return
-	}
-
+	// Always perform a scan so that throttled prior ticks or new key inserts
+	// can be migrated even if membership version hasn't advanced.
 	start := time.Now()
 
 	candidates := dm.collectRebalanceCandidates()
-
 	if len(candidates) > 0 {
 		dm.migrateItems(ctx, candidates)
 	}
@@ -1387,25 +1426,53 @@ func (dm *DistMemory) collectRebalanceCandidates() []cache.Item { //nolint:iretu
 		return nil
 	}
 
-	const initialCandidateCap = 1024 // heuristic; amortizes growth
+	const capHint = 1024
 
-	candidates := make([]cache.Item, 0, initialCandidateCap)
-	for _, shard := range dm.shards {
-		if shard == nil {
+	out := make([]cache.Item, 0, capHint)
+	for _, sh := range dm.shards {
+		if sh == nil {
 			continue
 		}
 
-		for kv := range shard.items.IterBuffered() {
+		for kv := range sh.items.IterBuffered() { // snapshot iteration
 			it := kv.Val
-			if dm.isOwner(it.Key) { // still owned locally
-				continue
+			if dm.shouldRebalance(sh, &it) {
+				out = append(out, it)
 			}
-
-			candidates = append(candidates, it)
 		}
 	}
 
-	return candidates
+	return out
+}
+
+// shouldRebalance determines if the item should be migrated away.
+// Triggers when this node lost all ownership or was previously primary and is no longer.
+func (dm *DistMemory) shouldRebalance(sh *distShard, it *cache.Item) bool { //nolint:ireturn
+	if !dm.ownsKeyInternal(it.Key) { // lost all ownership
+		return true
+	}
+
+	if dm.ring == nil || sh.originalPrimary == nil { // nothing else to compare
+		return false
+	}
+
+	owners := dm.ring.Lookup(it.Key)
+	if len(owners) == 0 { // ring empty => treat as owned
+		return false
+	}
+
+	curPrimary := owners[0]
+
+	sh.originalPrimaryMu.RLock()
+
+	prevPrimary, hadPrev := sh.originalPrimary[it.Key]
+	sh.originalPrimaryMu.RUnlock()
+
+	if !hadPrev { // no historical record
+		return false
+	}
+
+	return prevPrimary == dm.localNode.ID && curPrimary != dm.localNode.ID
 }
 
 // migrateItems concurrently migrates items in batches respecting configured limits.
@@ -1428,7 +1495,14 @@ func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) { //
 
 		start = end
 
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		default:
+			// saturated; record throttle and then block
+			atomic.AddInt64(&dm.metrics.rebalanceThrottle, 1)
+
+			sem <- struct{}{}
+		}
 
 		wg.Add(1)
 
@@ -1459,13 +1533,18 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) { /
 		return
 	}
 
-	if dm.isOwner(item.Key) { // double-check (race window)
-		return
-	}
+	// increment metric once per attempt (ownership changed). Success is best-effort.
+	atomic.AddInt64(&dm.metrics.rebalancedKeys, 1)
 
-	err := dm.transport.ForwardSet(ctx, string(owners[0]), item, true) // replica=true best-effort
-	if err == nil {
-		atomic.AddInt64(&dm.metrics.rebalancedKeys, 1)
+	_ = dm.transport.ForwardSet(ctx, string(owners[0]), item, true) //nolint:errcheck // best-effort
+
+	// Update originalPrimary so we don't recount repeatedly.
+	sh := dm.shardFor(item.Key)
+	if sh.originalPrimary != nil {
+		sh.originalPrimaryMu.Lock()
+
+		sh.originalPrimary[item.Key] = owners[0]
+		sh.originalPrimaryMu.Unlock()
 	}
 }
 
@@ -1513,7 +1592,8 @@ func (dm *DistMemory) ensureShardConfig() { //nolint:ireturn
 	}
 
 	for range dm.shardCount {
-		dm.shards = append(dm.shards, &distShard{items: cache.New(), tombs: make(map[string]tombstone)})
+		// originalPrimary protected by originalPrimaryMu for concurrent rebalance scans/migrations.
+		dm.shards = append(dm.shards, &distShard{items: cache.New(), tombs: make(map[string]tombstone), originalPrimary: make(map[string]cluster.NodeID)})
 	}
 }
 
@@ -1660,7 +1740,7 @@ func (dm *DistMemory) tryRemoteGet(ctx context.Context, key string, idx int, oid
 	}
 
 	// read repair: if we're an owner but local missing, replicate
-	if dm.isOwner(key) {
+	if dm.ownsKeyInternal(key) {
 		if _, ok2 := dm.shardFor(key).items.Get(key); !ok2 {
 			cloned := *it
 			dm.applySet(ctx, &cloned, false)
@@ -2314,7 +2394,7 @@ func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster
 		// primary missing: promote if this node is a listed replica
 		for _, oid := range owners[1:] {
 			if oid == dm.localNode.ID { // we can promote
-				if !dm.isOwner(item.Key) { // still not recognized locally (ring maybe outdated)
+				if !dm.ownsKeyInternal(item.Key) { // still not recognized locally (ring maybe outdated)
 					return false, errFwd
 				}
 
@@ -2396,7 +2476,7 @@ func (dm *DistMemory) hashKey(key string) int {
 func (dm *DistMemory) shardFor(key string) *distShard { return dm.shards[dm.hashKey(key)] }
 
 // isOwner returns true if this instance is among ring owners (primary or replica) for key.
-func (dm *DistMemory) isOwner(key string) bool {
+func (dm *DistMemory) ownsKeyInternal(key string) bool {
 	if dm.ring == nil { // treat nil ring as local-only mode
 		return true
 	}
@@ -2414,7 +2494,9 @@ func (dm *DistMemory) isOwner(key string) bool {
 // applySet stores item locally and optionally replicates to other owners.
 // replicate indicates whether replication fan-out should occur (false for replica writes).
 func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate bool) {
-	dm.shardFor(item.Key).items.Set(item.Key, item)
+	sh := dm.shardFor(item.Key)
+	dm.recordOriginalPrimary(sh, item.Key)
+	sh.items.Set(item.Key, item)
 
 	if !replicate || dm.ring == nil {
 		return
@@ -2432,8 +2514,37 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 			continue
 		}
 
-		_ = dm.transport.ForwardSet(ctx, string(oid), item, false) //nolint:errcheck // best-effort replica write
+		_ = dm.transport.ForwardSet(ctx, string(oid), item, false) //nolint:errcheck
 	}
+}
+
+// recordOriginalPrimary stores first-seen primary owner for key.
+func (dm *DistMemory) recordOriginalPrimary(sh *distShard, key string) { //nolint:ireturn
+	if sh == nil || sh.originalPrimary == nil || dm.ring == nil {
+		return
+	}
+
+	sh.originalPrimaryMu.RLock()
+
+	_, exists := sh.originalPrimary[key]
+	sh.originalPrimaryMu.RUnlock()
+
+	if exists {
+		return
+	}
+
+	owners := dm.ring.Lookup(key)
+	if len(owners) == 0 {
+		return
+	}
+
+	sh.originalPrimaryMu.Lock()
+
+	if _, exists2 := sh.originalPrimary[key]; !exists2 {
+		sh.originalPrimary[key] = owners[0]
+	}
+
+	sh.originalPrimaryMu.Unlock()
 }
 
 // applyRemove deletes locally and optionally fan-outs removal to replicas.

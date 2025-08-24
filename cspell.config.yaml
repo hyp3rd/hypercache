@@ -60,6 +60,7 @@ words:
   - memprofile
   - Merkle
   - Mgmt
+  - mrand
   - msgpack
   - mvdan
   - nestif
@@ -73,6 +74,7 @@ words:
   - Prealloc
   - recvcheck
   - sarif
+  - skeys
   - SLRU
   - staticcheck
   - stdlib

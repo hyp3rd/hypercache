@@ -224,6 +224,28 @@ Current capabilities:
 
 Planned next steps (roadmap excerpts): network transport abstraction, quorum reads/writes, versioning (vector clocks or lamport), failure detection / node states, rebalancing & anti‑entropy sync.
 
+#### Rebalancing & Ownership Migration (Experimental Phase 3)
+
+The DistMemory backend includes an experimental periodic rebalancer that:
+
+- Scans local shards each tick (interval configurable via `WithDistRebalanceInterval`).
+- Collects candidate keys when this node either (a) is no longer an owner (primary or replica) or (b) was the recorded primary and the current primary changed.
+- Migrates candidates in batches (`WithDistRebalanceBatchSize`) with bounded parallelism (`WithDistRebalanceMaxConcurrent`).
+- Uses a semaphore; saturation increments the `RebalanceThrottle` metric.
+
+Migration is best‑effort (fire‑and‑forget forward of the item to the new primary); failures are not yet retried or queued. Owner set diffing currently focuses on primary changes and full ownership loss; replica-only adjustments are future work.
+
+Metrics (via management or `Metrics()`):
+
+| Metric | Description |
+|--------|-------------|
+| RebalancedKeys | Count of attempted key forwards due to ownership change. |
+| RebalanceBatches | Number of migration batches executed. |
+| RebalanceThrottle | Times migration concurrency limiter saturated. |
+| RebalanceLastNanos | Duration (ns) of last rebalance scan. |
+
+Test helpers `AddPeer` and `RemovePeer` simulate join / leave events that trigger redistribution in integration tests (`dist_rebalance_*.go`).
+
 ### Roadmap / PRD Progress Snapshot
 
 | Area | Status |
