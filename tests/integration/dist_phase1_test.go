@@ -19,13 +19,16 @@ func allocatePort(tb testing.TB) string {
 	if err != nil {
 		tb.Fatalf("listen: %v", err)
 	}
+
 	addr := l.Addr().String()
+
 	_ = l.Close()
+
 	return addr
 }
 
 // TestDistPhase1BasicQuorum is a scaffolding test verifying three-node quorum Set/Get over HTTP transport.
-func TestDistPhase1BasicQuorum(t *testing.T) { //nolint:tparallel
+func TestDistPhase1BasicQuorum(t *testing.T) {
 	ctx := context.Background()
 
 	addrA := allocatePort(t)
@@ -47,6 +50,7 @@ func TestDistPhase1BasicQuorum(t *testing.T) { //nolint:tparallel
 		if err != nil {
 			t.Fatalf("new dist memory: %v", err)
 		}
+
 		return bm.(*backend.DistMemory)
 	}
 
@@ -61,7 +65,9 @@ func TestDistPhase1BasicQuorum(t *testing.T) { //nolint:tparallel
 
 	// Perform a write expecting replication across all three nodes
 	item := &cache.Item{Key: "k1", Value: []byte("v1"), Expiration: 0, Version: 1, Origin: "A", LastUpdated: time.Now()}
-	if err := nodeA.Set(ctx, item); err != nil {
+
+	err := nodeA.Set(ctx, item)
+	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
@@ -82,8 +88,10 @@ func TestDistPhase1BasicQuorum(t *testing.T) { //nolint:tparallel
 				goto Done
 			}
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
+
 	if it, ok := nodeC.Get(ctx, "k1"); !ok {
 		// Not fatal yet; we only created scaffolding – mark skip for now.
 		t.Skipf("hint replay not yet observable; will be validated after full wiring (missing item)")
@@ -92,6 +100,7 @@ func TestDistPhase1BasicQuorum(t *testing.T) { //nolint:tparallel
 			t.Skipf("value mismatch after wait")
 		}
 	}
+
 Done:
 
 	fmt.Println("phase1 basic quorum scaffolding complete")
@@ -104,22 +113,28 @@ func valueOK(v any) bool { //nolint:ireturn
 		if string(x) == "v1" {
 			return true
 		}
+
 		if s := string(x); s == "djE=" { // base64 of v1
 			if b, err := base64.StdEncoding.DecodeString(s); err == nil && string(b) == "v1" {
 				return true
 			}
 		}
+
 		return false
+
 	case string:
 		if x == "v1" {
 			return true
 		}
+
 		if x == "djE=" { // base64 form
 			if b, err := base64.StdEncoding.DecodeString(x); err == nil && string(b) == "v1" {
 				return true
 			}
 		}
+
 		return false
+
 	case json.RawMessage:
 		// could be "v1" or base64 inside quotes
 		if len(x) == 0 {
@@ -127,10 +142,13 @@ func valueOK(v any) bool { //nolint:ireturn
 		}
 		// try as string literal
 		var s string
-		if err := json.Unmarshal(x, &s); err == nil {
+
+		err := json.Unmarshal(x, &s)
+		if err == nil {
 			if s == "v1" {
 				return true
 			}
+
 			if s == "djE=" {
 				if b, err2 := base64.StdEncoding.DecodeString(s); err2 == nil && string(b) == "v1" {
 					return true
@@ -139,16 +157,19 @@ func valueOK(v any) bool { //nolint:ireturn
 		}
 		// fall back to raw compare
 		return string(x) == "v1" || string(x) == "\"v1\""
+
 	default:
 		s := fmt.Sprintf("%v", x)
 		if s == "v1" || s == "\"v1\"" {
 			return true
 		}
+
 		if s == "djE=" {
 			if b, err := base64.StdEncoding.DecodeString(s); err == nil && string(b) == "v1" {
 				return true
 			}
 		}
+
 		return false
 	}
 }

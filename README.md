@@ -278,7 +278,7 @@ Required acknowledgements are computed at runtime from the ring's current replic
 
 #### Hinted Handoff
 
-When a replica is unreachable during a write, a hint (deferred write) is enqueued locally keyed by the target node ID. Hints have a TTL (`WithDistHintTTL`) and are replayed on an interval (`WithDistHintReplayInterval`). Limits can be applied per node (`WithDistHintMaxPerNode`). Expired hints are dropped; delivered hints increment replay counters. Metrics exposed via the management endpoint allow monitoring queued, replayed, expired, and dropped hints.
+When a replica is unreachable during a write, a hint (deferred write) is enqueued locally keyed by the target node ID. Hints have a TTL (`WithDistHintTTL`) and are replayed on an interval (`WithDistHintReplayInterval`). Limits can be applied per node (`WithDistHintMaxPerNode`) as well as globally across all nodes (`WithDistHintMaxTotal` total entries, `WithDistHintMaxBytes` approximate bytes). Expired hints are dropped; delivered hints increment replay counters; globally capped drops increment a separate metric. Metrics exposed via the management endpoint allow monitoring queued, replayed, expired, dropped (transport errors), and globally dropped hints along with current approximate queued bytes.
 
 Test helper methods for forcing a replay cycle (`StartHintReplayForTest`, `ReplayHintsForTest`, `HintedQueueSize`) are compiled only under the `test` build tag to keep production binaries clean.
 
@@ -290,7 +290,7 @@ go test -tags test ./...
 
 #### Build Tags
 
-The repository uses a `//go:build test` tag to include auxiliary instrumentation and helpers exclusively in test builds (e.g. hinted handoff queue inspection). Production builds omit these symbols automatically.
+The repository uses a `//go:build test` tag to include auxiliary instrumentation and helpers exclusively in test builds (e.g. hinted handoff queue inspection). Production builds omit these symbols automatically. Heartbeat peer sampling (`WithDistHeartbeatSample`) and membership state metrics (suspect/dead counters) are part of the experimental failure detection added in Phase 2.
 
 #### Metrics Snapshot
 

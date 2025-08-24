@@ -22,6 +22,7 @@ words:
   - daixiang
   - Decr
   - depguard
+  - distconfig
   - errcheck
   - ewrap
   - excludeonly

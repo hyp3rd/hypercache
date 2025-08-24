@@ -40,6 +40,7 @@ func TestWriteQuorumSuccess(t *testing.T) {
 	transport.Register(dc)
 
 	item := &cache.Item{Key: "k1", Value: "v1"}
+
 	err := a.Set(ctx, item)
 	if err != nil { // should succeed with quorum (all up)
 		t.Fatalf("expected success, got %v", err)
@@ -50,6 +51,7 @@ func TestWriteQuorumSuccess(t *testing.T) {
 	if metrics.WriteAttempts < 1 {
 		t.Fatalf("expected WriteAttempts >=1, got %d", metrics.WriteAttempts)
 	}
+
 	if metrics.WriteQuorumFailures != 0 {
 		t.Fatalf("unexpected WriteQuorumFailures: %d", metrics.WriteQuorumFailures)
 	}
@@ -77,6 +79,7 @@ func TestWriteQuorumFailure(t *testing.T) {
 	// Create three nodes but only register two with transport to force ALL failure.
 	na, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("A", "A"), backend.WithDistMembership(m, cluster.NewNode("A", "A")))...)
 	nb, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("B", "B"), backend.WithDistMembership(m, cluster.NewNode("B", "B")))...)
+
 	_, _ = backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("C", "C"), backend.WithDistMembership(m, cluster.NewNode("C", "C")))...)
 
 	da := any(na).(*backend.DistMemory)
@@ -89,11 +92,13 @@ func TestWriteQuorumFailure(t *testing.T) {
 
 	// Find a key whose owners include all three nodes (replication=3 ensures this) – just brute force until order stable.
 	key := "quorum-all-fail"
-	for i := 0; i < 50; i++ { // try some keys to ensure A is primary sometimes; not strictly required
+	for i := range 50 { // try some keys to ensure A is primary sometimes; not strictly required
 		candidate := fmt.Sprintf("quorum-all-fail-%d", i)
+
 		owners := da.Ring().Lookup(candidate)
 		if len(owners) == 3 && string(owners[0]) == "A" { // prefer A primary for clarity
 			key = candidate
+
 			break
 		}
 	}
@@ -104,6 +109,7 @@ func TestWriteQuorumFailure(t *testing.T) {
 	if !errors.Is(err, sentinel.ErrQuorumFailed) {
 		// Provide ring owners for debugging.
 		owners := da.Ring().Lookup(key)
+
 		ids := make([]string, 0, len(owners))
 		for _, o := range owners {
 			ids = append(ids, string(o))
@@ -116,6 +122,7 @@ func TestWriteQuorumFailure(t *testing.T) {
 	if metrics.WriteQuorumFailures < 1 {
 		t.Fatalf("expected WriteQuorumFailures >=1, got %d", metrics.WriteQuorumFailures)
 	}
+
 	if metrics.WriteAttempts < 1 { // should have attempted at least once
 		t.Fatalf("expected WriteAttempts >=1, got %d", metrics.WriteAttempts)
 	}
