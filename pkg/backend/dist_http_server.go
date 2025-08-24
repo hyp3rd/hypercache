@@ -46,7 +46,33 @@ func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error { //no
 }
 
 func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) { //nolint:ireturn
+	// legacy path
 	s.app.Post("/internal/cache/set", func(fctx fiber.Ctx) error { // small handler
+		var req httpSetRequest
+
+		body := fctx.Body()
+
+		unmarshalErr := json.Unmarshal(body, &req)
+		if unmarshalErr != nil { // separated to satisfy noinlineerr
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": unmarshalErr.Error()})
+		}
+
+		it := &cache.Item{ // LastUpdated set to now for replicated writes
+			Key:         req.Key,
+			Value:       req.Value,
+			Expiration:  time.Duration(req.Expiration) * time.Millisecond,
+			Version:     req.Version,
+			Origin:      req.Origin,
+			LastUpdated: time.Now(),
+		}
+
+		dm.applySet(ctx, it, req.Replicate)
+
+		return fctx.JSON(httpSetResponse{})
+	})
+
+	// canonical path per roadmap
+	s.app.Post("/internal/set", func(fctx fiber.Ctx) error { // small handler
 		var req httpSetRequest
 
 		body := fctx.Body()
@@ -72,7 +98,27 @@ func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) { //no
 }
 
 func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) { //nolint:ireturn
+	// legacy path
 	s.app.Get("/internal/cache/get", func(fctx fiber.Ctx) error {
+		key := fctx.Query("key")
+		if key == "" {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
+		}
+
+		owners := dm.lookupOwners(key)
+		if len(owners) == 0 {
+			return fctx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not owner"})
+		}
+
+		if it, ok := dm.shardFor(key).items.Get(key); ok {
+			return fctx.JSON(httpGetResponse{Found: true, Item: it})
+		}
+
+		return fctx.JSON(httpGetResponse{Found: false})
+	})
+
+	// canonical path per roadmap
+	s.app.Get("/internal/get", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
 			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
@@ -92,7 +138,25 @@ func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) { //noli
 }
 
 func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { //nolint:ireturn
+	// legacy path
 	s.app.Delete("/internal/cache/remove", func(fctx fiber.Ctx) error {
+		key := fctx.Query("key")
+		if key == "" {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
+		}
+
+		replicate, parseErr := strconv.ParseBool(fctx.Query("replicate", "false"))
+		if parseErr != nil {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid replicate"})
+		}
+
+		dm.applyRemove(ctx, key, replicate)
+
+		return fctx.SendStatus(fiber.StatusOK)
+	})
+
+	// canonical path per roadmap
+	s.app.Delete("/internal/del", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
 			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})

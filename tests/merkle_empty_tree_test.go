@@ -27,6 +27,7 @@ func TestMerkleEmptyTrees(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync empty: %v", err)
 	}
+
 	err = db.SyncWith(ctx, string(da.LocalNodeID()))
 	if err != nil {
 		t.Fatalf("sync empty reverse: %v", err)

@@ -23,7 +23,7 @@ hook() {
 
 	# run the pre-commit hook
 	pushd "${root_dir}" || exit
-	go test -v -cover ./... || exit 1
+	go test -tags test -v -timeout 5m -cover ./... || exit 1
 	popd >/dev/null || exit
 }
 

@@ -234,9 +234,10 @@ Planned next steps (roadmap excerpts): network transport abstraction, quorum rea
 | Merkle anti-entropy | Implemented (pull-based) |
 | Merkle performance metrics | Implemented (fetch/build/diff nanos) |
 | Remote-only key enumeration fallback | Implemented with optional cap (`WithDistListKeysCap`) |
-| Delete semantics (tombstones) | Implemented (no compaction yet) |
-| Tombstone compaction / TTL | Planned |
-| Quorum read/write consistency | Partially scaffolded (consistency levels enum) |
+| Delete semantics (tombstones) | Implemented |
+| Tombstone compaction / TTL | Implemented |
+| Quorum read consistency | Implemented |
+| Quorum write consistency | Implemented (acks enforced) |
 | Failure detection / heartbeat | Experimental heartbeat present |
 | Membership changes / dynamic rebalancing | Not yet |
 | Network transport (HTTP partial) | Basic HTTP management + fetch merkle/keys; full RPC TBD |
@@ -264,6 +265,50 @@ defer hc.Stop(context.Background())
 ```
 
 Note: DistMemory is not a production distributed cache; it is a stepping stone towards a networked, failure‑aware implementation.
+
+#### Consistency & Quorum Semantics
+
+DistMemory currently supports three consistency levels configurable independently for reads and writes:
+
+- ONE: Return after the primary (or first reachable owner) succeeds.
+- QUORUM: Majority of owners (floor(R/2)+1) must acknowledge.
+- ALL: Every owner must acknowledge; any unreachable replica causes failure.
+
+Required acknowledgements are computed at runtime from the ring's current replication factor. For writes, the primary applies locally then synchronously fans out to remaining owners; for reads, it queries owners until the required number of successful responses is achieved (promoting next owner if a primary is unreachable). Read‑repair occurs when a later owner returns a newer version than the local primary copy.
+
+#### Hinted Handoff
+
+When a replica is unreachable during a write, a hint (deferred write) is enqueued locally keyed by the target node ID. Hints have a TTL (`WithDistHintTTL`) and are replayed on an interval (`WithDistHintReplayInterval`). Limits can be applied per node (`WithDistHintMaxPerNode`). Expired hints are dropped; delivered hints increment replay counters. Metrics exposed via the management endpoint allow monitoring queued, replayed, expired, and dropped hints.
+
+Test helper methods for forcing a replay cycle (`StartHintReplayForTest`, `ReplayHintsForTest`, `HintedQueueSize`) are compiled only under the `test` build tag to keep production binaries clean.
+
+To run tests that rely on these helpers:
+
+```bash
+go test -tags test ./...
+```
+
+#### Build Tags
+
+The repository uses a `//go:build test` tag to include auxiliary instrumentation and helpers exclusively in test builds (e.g. hinted handoff queue inspection). Production builds omit these symbols automatically.
+
+#### Metrics Snapshot
+
+The `/dist/metrics` endpoint (and `DistMemory.Metrics()` API) expose counters for forwarding operations, replica fan‑out, read‑repair, hinted handoff lifecycle, quorum write attempts/acks/failures, Merkle sync timings, tombstone activity, and heartbeat probes. These are reset only on process restart.
+
+#### Future Evolution
+
+Planned enhancements toward a production‑grade distributed backend include:
+
+- Real network transport (HTTP/JSON → gRPC) for data plane operations.
+- Gossip‑based membership & failure detection (alive/suspect/dead) with automatic ring rebuild.
+- Rebalancing & key range handoff on join/leave events.
+- Incremental & adaptive anti‑entropy (Merkle diff scheduling, deletions reconciliation).
+- Advanced versioning (hybrid logical clocks or vector clocks) and conflict resolution strategies.
+- Client library for direct owner routing (avoiding extra network hops).
+- Optional compression, TLS/mTLS security, auth middleware.
+
+Until these land, DistMemory should be treated as an experimental playground rather than a fault‑tolerant cluster.
 
 Examples can be too broad for a readme, refer to the [examples](./__examples/README.md) directory for a more comprehensive overview.
 
