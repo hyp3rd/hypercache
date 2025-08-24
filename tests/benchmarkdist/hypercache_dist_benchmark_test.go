@@ -31,8 +31,10 @@ func BenchmarkDistMemory_Set(b *testing.B) {
 	transport.Register(d3)
 
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ { // standard Go benchmark loop
+
+	for i := range b.N { // standard Go benchmark loop
 		it := &cache.Item{Key: "key-" + strconv.Itoa(i), Value: "v"}
+
 		_ = n1.Set(ctx, it)
 	}
 }
@@ -60,10 +62,12 @@ func BenchmarkDistMemory_Get(b *testing.B) {
 
 	// seed one key to read repeatedly (avoid measuring Set cost)
 	seed := &cache.Item{Key: "hot", Value: "v"}
+
 	_ = n1.Set(ctx, seed)
 
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ { // standard Go benchmark loop
+
+	for range b.N { // standard Go benchmark loop
 		_, _ = n1.Get(ctx, "hot")
 	}
 }

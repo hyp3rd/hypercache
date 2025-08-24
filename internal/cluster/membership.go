@@ -12,6 +12,7 @@ type Membership struct {
 	mu    sync.RWMutex
 	nodes map[NodeID]*Node
 	ring  *Ring
+	ver   MembershipVersion
 }
 
 // NewMembership creates a new membership container bound to a ring.
@@ -25,11 +26,15 @@ func (m *Membership) Upsert(n *Node) {
 	m.nodes[n.ID] = n
 
 	nodes := make([]*Node, 0, len(m.nodes))
-	for _, v := range m.nodes {
-		nodes = append(nodes, v)
+	for _, v := range m.nodes { // exclude dead nodes from ring ownership
+		if v.State != NodeDead {
+			nodes = append(nodes, v)
+		}
 	}
 
+	m.ver.Next()
 	m.mu.Unlock()
+
 	m.ring.Build(nodes)
 }
 
@@ -63,11 +68,15 @@ func (m *Membership) Remove(id NodeID) bool { //nolint:ireturn
 	delete(m.nodes, id)
 
 	nodes := make([]*Node, 0, len(m.nodes))
-	for _, v := range m.nodes { // collect snapshot
-		nodes = append(nodes, v)
+	for _, v := range m.nodes { // exclude dead nodes
+		if v.State != NodeDead {
+			nodes = append(nodes, v)
+		}
 	}
 
+	m.ver.Next()
 	m.mu.Unlock()
+
 	m.ring.Build(nodes)
 
 	return true
@@ -83,9 +92,14 @@ func (m *Membership) Mark(id NodeID, state NodeState) bool { //nolint:ireturn
 		n.Incarnation++
 
 		n.LastSeen = time.Now()
+
+		m.ver.Next()
 	}
 
 	m.mu.Unlock()
 
 	return ok
 }
+
+// Version returns current membership version.
+func (m *Membership) Version() uint64 { return m.ver.Get() }

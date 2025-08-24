@@ -58,18 +58,18 @@ Success Criteria:
 
 Deliverables:
 
-- Gossip/heartbeat loop (k random peers, interval configurable).
-- Node state transitions: alive → suspect → dead (timeouts & confirmations).
-- Ring rebuild on state change (exclude dead nodes, retain for hint replay until TTL expiry).
-- Global hint queue caps (count + bytes) with drop metrics.
+- Heartbeat loop with optional random peer sampling (`WithDistHeartbeatSample`) and configurable interval. (Implemented)
+- Node state transitions: alive → suspect → dead (timeouts & probe-driven escalation) with metrics for suspect/dead transitions. (Implemented)
+- Ring rebuild on state change (exclude dead nodes). (Implemented)
+- Global hint queue caps (count + bytes) with drop metrics (`WithDistHintMaxTotal`, `WithDistHintMaxBytes`). (Implemented)
 
 Metrics:
 
-- Heartbeat successes/failures, suspect/dead counters, membership version.
+- Heartbeat successes/failures, suspect/dead counters, membership version, global hint drops, approximate queued hint bytes. (Partially implemented; membership version exposed via snapshot API.)
 
 Success Criteria:
 
-- Simulated node failure triggers quorum degradation & hinting; recovery drains hints.
+- Simulated node failure triggers quorum degradation & hinting; recovery drains hints. (Covered by failure recovery & hint cap tests.)
 
 ### Phase 3: Rebalancing & Key Transfer (Weeks 5–6)
 

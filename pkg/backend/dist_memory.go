@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"hash"
 	"hash/fnv"
@@ -12,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	mrand "math/rand"
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
@@ -60,6 +63,9 @@ type DistMemory struct {
 	hbDeadAfter    time.Duration
 	stopCh         chan struct{}
 
+	// heartbeat sampling (Phase 2)
+	hbSampleSize int // number of random peers to probe each tick (0=probe all)
+
 	// consistency / versioning (initial)
 	readConsistency  ConsistencyLevel
 	writeConsistency ConsistencyLevel
@@ -69,8 +75,12 @@ type DistMemory struct {
 	hintTTL        time.Duration
 	hintReplayInt  time.Duration
 	hintMaxPerNode int
+	hintMaxTotal   int   // global cap on total queued hints (0 = unlimited)
+	hintMaxBytes   int64 // approximate total bytes cap across all hints (0 = unlimited)
 	hintsMu        sync.Mutex
 	hints          map[string][]hintedEntry // nodeID -> queue
+	hintTotal      int                      // current total hints queued (under hintsMu)
+	hintBytes      int64                    // approximate bytes of queued hints (under hintsMu)
 	hintStopCh     chan struct{}
 
 	// parallel reads
@@ -113,6 +123,7 @@ var errUnexpectedBackendType = errors.New("backend: unexpected backend type") //
 type hintedEntry struct {
 	item   *cache.Item
 	expire time.Time
+	size   int64 // approximate bytes for global cap accounting
 }
 
 // tombstone marks a delete intent with version ordering to prevent resurrection.
@@ -369,6 +380,11 @@ func WithDistTransport(t DistTransport) DistMemoryOption {
 	return func(dm *DistMemory) { dm.transport = t }
 }
 
+// WithDistHeartbeatSample sets how many random peers to probe per heartbeat tick (0=all).
+func WithDistHeartbeatSample(k int) DistMemoryOption { //nolint:ireturn
+	return func(dm *DistMemory) { dm.hbSampleSize = k }
+}
+
 // SetTransport sets the transport post-construction (testing helper).
 func (dm *DistMemory) SetTransport(t DistTransport) { dm.transport = t }
 
@@ -415,6 +431,24 @@ func WithDistHintMaxPerNode(n int) DistMemoryOption {
 	return func(dm *DistMemory) {
 		if n > 0 {
 			dm.hintMaxPerNode = n
+		}
+	}
+}
+
+// WithDistHintMaxTotal sets a global cap on total queued hints across all nodes.
+func WithDistHintMaxTotal(n int) DistMemoryOption { //nolint:ireturn
+	return func(dm *DistMemory) {
+		if n > 0 {
+			dm.hintMaxTotal = n
+		}
+	}
+}
+
+// WithDistHintMaxBytes sets an approximate byte cap for all queued hints.
+func WithDistHintMaxBytes(b int64) DistMemoryOption { //nolint:ireturn
+	return func(dm *DistMemory) {
+		if b > 0 {
+			dm.hintMaxBytes = b
 		}
 	}
 }
@@ -803,6 +837,8 @@ type distMetrics struct {
 	replicaGetMiss      int64
 	heartbeatSuccess    int64
 	heartbeatFailure    int64
+	nodesSuspect        int64 // number of times a node transitioned to suspect
+	nodesDead           int64 // number of times a node transitioned to dead/pruned
 	nodesRemoved        int64
 	versionConflicts    int64 // times a newer version (or tie-broken origin) replaced previous candidate
 	versionTieBreaks    int64 // subset of conflicts decided by origin tie-break
@@ -811,6 +847,8 @@ type distMetrics struct {
 	hintedReplayed      int64 // hints successfully replayed
 	hintedExpired       int64 // hints expired before delivery
 	hintedDropped       int64 // hints dropped due to non-not-found transport errors
+	hintedGlobalDropped int64 // hints dropped due to global caps (count/bytes)
+	hintedBytes         int64 // approximate total bytes currently queued (best-effort)
 	merkleSyncs         int64 // merkle sync operations completed
 	merkleKeysPulled    int64 // keys applied during sync
 	merkleBuildNanos    int64 // last build duration (ns)
@@ -835,6 +873,8 @@ type DistMetrics struct {
 	ReplicaGetMiss      int64
 	HeartbeatSuccess    int64
 	HeartbeatFailure    int64
+	NodesSuspect        int64
+	NodesDead           int64
 	NodesRemoved        int64
 	VersionConflicts    int64
 	VersionTieBreaks    int64
@@ -843,6 +883,8 @@ type DistMetrics struct {
 	HintedReplayed      int64
 	HintedExpired       int64
 	HintedDropped       int64
+	HintedGlobalDropped int64
+	HintedBytes         int64
 	MerkleSyncs         int64
 	MerkleKeysPulled    int64
 	MerkleBuildNanos    int64
@@ -877,6 +919,8 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		ReplicaGetMiss:      atomic.LoadInt64(&dm.metrics.replicaGetMiss),
 		HeartbeatSuccess:    atomic.LoadInt64(&dm.metrics.heartbeatSuccess),
 		HeartbeatFailure:    atomic.LoadInt64(&dm.metrics.heartbeatFailure),
+		NodesSuspect:        atomic.LoadInt64(&dm.metrics.nodesSuspect),
+		NodesDead:           atomic.LoadInt64(&dm.metrics.nodesDead),
 		NodesRemoved:        atomic.LoadInt64(&dm.metrics.nodesRemoved),
 		VersionConflicts:    atomic.LoadInt64(&dm.metrics.versionConflicts),
 		VersionTieBreaks:    atomic.LoadInt64(&dm.metrics.versionTieBreaks),
@@ -885,6 +929,8 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		HintedReplayed:      atomic.LoadInt64(&dm.metrics.hintedReplayed),
 		HintedExpired:       atomic.LoadInt64(&dm.metrics.hintedExpired),
 		HintedDropped:       atomic.LoadInt64(&dm.metrics.hintedDropped),
+		HintedGlobalDropped: atomic.LoadInt64(&dm.metrics.hintedGlobalDropped),
+		HintedBytes:         atomic.LoadInt64(&dm.metrics.hintedBytes),
 		MerkleSyncs:         atomic.LoadInt64(&dm.metrics.merkleSyncs),
 		MerkleKeysPulled:    atomic.LoadInt64(&dm.metrics.merkleKeysPulled),
 		MerkleBuildNanos:    atomic.LoadInt64(&dm.metrics.merkleBuildNanos),
@@ -898,6 +944,23 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		WriteQuorumFailures: atomic.LoadInt64(&dm.metrics.writeQuorumFailures),
 		WriteAcks:           atomic.LoadInt64(&dm.metrics.writeAcks),
 		WriteAttempts:       atomic.LoadInt64(&dm.metrics.writeAttempts),
+	}
+}
+
+// DistMembershipSnapshot returns lightweight membership view (states & version).
+func (dm *DistMemory) DistMembershipSnapshot() map[string]any { //nolint:ireturn
+	if dm.membership == nil {
+		return nil
+	}
+
+	counts := map[string]int{"alive": 0, "suspect": 0, "dead": 0}
+	for _, n := range dm.membership.List() {
+		counts[n.State.String()]++
+	}
+
+	return map[string]any{
+		"version": dm.membership.Version(),
+		"counts":  counts,
 	}
 }
 
@@ -1583,10 +1646,12 @@ func (dm *DistMemory) getWithConsistencyParallel(ctx context.Context, key string
 }
 
 // --- Hinted handoff implementation ---.
-func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) {
-	if dm.hintTTL <= 0 { // disabled
+func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced complexity
+	if dm.hintTTL <= 0 {
 		return
 	}
+
+	size := dm.approxHintSize(item)
 
 	dm.hintsMu.Lock()
 
@@ -1594,17 +1659,73 @@ func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) {
 		dm.hints = make(map[string][]hintedEntry)
 	}
 
-	queueHints := dm.hints[nodeID]
-	if dm.hintMaxPerNode > 0 && len(queueHints) >= dm.hintMaxPerNode { // drop oldest
-		queueHints = queueHints[1:]
+	queue := dm.hints[nodeID]
+
+	if dm.hintMaxPerNode > 0 && len(queue) >= dm.hintMaxPerNode { // drop oldest
+		dropped := queue[0]
+
+		queue = queue[1:]
+
+		dm.adjustHintAccounting(-1, -dropped.size)
+	}
+
+	if (dm.hintMaxTotal > 0 && dm.hintTotal >= dm.hintMaxTotal) || (dm.hintMaxBytes > 0 && dm.hintBytes+size > dm.hintMaxBytes) {
+		dm.hintsMu.Unlock()
+		atomic.AddInt64(&dm.metrics.hintedGlobalDropped, 1)
+
+		return
 	}
 
 	cloned := *item
 
-	queueHints = append(queueHints, hintedEntry{item: &cloned, expire: time.Now().Add(dm.hintTTL)})
-	dm.hints[nodeID] = queueHints
+	queue = append(queue, hintedEntry{item: &cloned, expire: time.Now().Add(dm.hintTTL), size: size})
+	dm.hints[nodeID] = queue
+	dm.adjustHintAccounting(1, size)
 	dm.hintsMu.Unlock()
+
 	atomic.AddInt64(&dm.metrics.hintedQueued, 1)
+	atomic.StoreInt64(&dm.metrics.hintedBytes, dm.hintBytes)
+}
+
+// approxHintSize estimates the size of a hinted item for global caps.
+func (dm *DistMemory) approxHintSize(item *cache.Item) int64 { // receiver retained for symmetry; may use config later
+	_ = dm // acknowledge receiver intentionally (satisfy lint under current rule set)
+
+	if item == nil {
+		return 0
+	}
+
+	var total int64
+
+	total += int64(len(item.Key))
+
+	switch v := item.Value.(type) {
+	case string:
+		total += int64(len(v))
+	case []byte:
+		total += int64(len(v))
+	default:
+		b, err := json.Marshal(v)
+		if err == nil {
+			total += int64(len(b))
+		}
+	}
+
+	return total
+}
+
+// adjustHintAccounting mutates counters; call with lock held.
+func (dm *DistMemory) adjustHintAccounting(countDelta int, bytesDelta int64) {
+	dm.hintTotal += countDelta
+	dm.hintBytes += bytesDelta
+
+	if dm.hintTotal < 0 {
+		dm.hintTotal = 0
+	}
+
+	if dm.hintBytes < 0 {
+		dm.hintBytes = 0
+	}
 }
 
 func (dm *DistMemory) startHintReplayIfEnabled(ctx context.Context) {
@@ -1632,7 +1753,7 @@ func (dm *DistMemory) hintReplayLoop(ctx context.Context) { //nolint:ireturn
 	}
 }
 
-func (dm *DistMemory) replayHints(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) replayHints(ctx context.Context) { // reduced cognitive complexity
 	if dm.transport == nil {
 		return
 	}
@@ -1641,29 +1762,19 @@ func (dm *DistMemory) replayHints(ctx context.Context) { //nolint:ireturn
 
 	dm.hintsMu.Lock()
 
-	for nodeID, q := range dm.hints {
-		out := q[:0]
-		for _, hint := range q {
-			if now.After(hint.expire) { // expired
-				atomic.AddInt64(&dm.metrics.hintedExpired, 1)
+	for nodeID, queue := range dm.hints {
+		out := queue[:0]
 
-				continue
+		for _, hintEntry := range queue { // renamed for clarity
+			action := dm.processHint(ctx, nodeID, hintEntry, now)
+			switch action { // 0 keep, 1 remove
+			case 0:
+				out = append(out, hintEntry)
+			case 1:
+				dm.adjustHintAccounting(-1, -hintEntry.size)
+			default: // defensive future-proofing
+				out = append(out, hintEntry)
 			}
-
-			err := dm.transport.ForwardSet(ctx, nodeID, hint.item, false) // best-effort
-			if err == nil {                                               // success
-				atomic.AddInt64(&dm.metrics.hintedReplayed, 1)
-
-				continue
-			}
-
-			if errors.Is(err, sentinel.ErrBackendNotFound) { // keep
-				out = append(out, hint)
-
-				continue
-			}
-
-			atomic.AddInt64(&dm.metrics.hintedDropped, 1)
 		}
 
 		if len(out) == 0 {
@@ -1673,7 +1784,32 @@ func (dm *DistMemory) replayHints(ctx context.Context) { //nolint:ireturn
 		}
 	}
 
+	atomic.StoreInt64(&dm.metrics.hintedBytes, dm.hintBytes)
 	dm.hintsMu.Unlock()
+}
+
+// processHint returns 0=keep,1=remove.
+func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hintedEntry, now time.Time) int {
+	if now.After(entry.expire) {
+		atomic.AddInt64(&dm.metrics.hintedExpired, 1)
+
+		return 1
+	}
+
+	err := dm.transport.ForwardSet(ctx, nodeID, entry.item, false)
+	if err == nil {
+		atomic.AddInt64(&dm.metrics.hintedReplayed, 1)
+
+		return 1
+	}
+
+	if errors.Is(err, sentinel.ErrBackendNotFound) { // keep – backend still absent
+		return 0
+	}
+
+	atomic.AddInt64(&dm.metrics.hintedDropped, 1)
+
+	return 1
 }
 
 // --- Simple gossip (in-process only) ---.
@@ -2124,6 +2260,19 @@ func (dm *DistMemory) runHeartbeatTick(ctx context.Context) { //nolint:ireturn
 	now := time.Now()
 
 	peers := dm.membership.List()
+	// optional sampling
+	if dm.hbSampleSize > 0 && dm.hbSampleSize < len(peers) {
+		// Fisher–Yates partial shuffle for first sampleCount elements
+		sampleCount := dm.hbSampleSize
+		for i := range sampleCount { // Go 1.22 int range form
+			j := i + mrand.Intn(len(peers)-i) //nolint:gosec // math/rand acceptable for sampling
+
+			peers[i], peers[j] = peers[j], peers[i]
+		}
+
+		peers = peers[:sampleCount]
+	}
+
 	for _, node := range peers { // rename for clarity
 		if node.ID == dm.localNode.ID {
 			continue
@@ -2140,6 +2289,7 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 	if dm.hbDeadAfter > 0 && elapsed > dm.hbDeadAfter { // prune dead
 		if dm.membership.Remove(node.ID) {
 			atomic.AddInt64(&dm.metrics.nodesRemoved, 1)
+			atomic.AddInt64(&dm.metrics.nodesDead, 1)
 		}
 
 		return
@@ -2147,6 +2297,7 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 
 	if dm.hbSuspectAfter > 0 && elapsed > dm.hbSuspectAfter && node.State == cluster.NodeAlive { // suspect
 		dm.membership.Mark(node.ID, cluster.NodeSuspect)
+		atomic.AddInt64(&dm.metrics.nodesSuspect, 1)
 	}
 
 	ctxHealth, cancel := context.WithTimeout(ctx, dm.hbInterval/2)
@@ -2159,6 +2310,7 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 
 		if node.State == cluster.NodeAlive { // escalate
 			dm.membership.Mark(node.ID, cluster.NodeSuspect)
+			atomic.AddInt64(&dm.metrics.nodesSuspect, 1)
 		}
 
 		return
