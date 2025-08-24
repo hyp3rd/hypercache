@@ -99,7 +99,15 @@ type DistMemory struct {
 	tombstoneTTL      time.Duration
 	tombstoneSweepInt time.Duration
 	tombStopCh        chan struct{}
+
+	// originalConfig retains the originating configuration (if constructed via config constructor)
+	originalConfig any
+
+	// latency histograms for core ops (Phase 1)
+	latency *distLatencyCollector
 }
+
+var errUnexpectedBackendType = errors.New("backend: unexpected backend type") // stable error (no dynamic wrapping needed)
 
 // hintedEntry represents a deferred replica write.
 type hintedEntry struct {
@@ -446,7 +454,13 @@ func WithDistSeeds(addresses []string) DistMemoryOption {
 
 // NewDistMemory creates a new DistMemory backend.
 func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[DistMemory], error) {
-	dm := &DistMemory{shardCount: defaultDistShardCount, replication: 1, readConsistency: ConsistencyOne, writeConsistency: ConsistencyQuorum}
+	dm := &DistMemory{
+		shardCount:       defaultDistShardCount,
+		replication:      1,
+		readConsistency:  ConsistencyOne,
+		writeConsistency: ConsistencyQuorum,
+		latency:          newDistLatencyCollector(),
+	}
 	for _, opt := range opts {
 		opt(dm)
 	}
@@ -461,6 +475,88 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 	dm.startTombstoneSweeper()
 
 	return dm, nil
+}
+
+// NewDistMemoryWithConfig builds a DistMemory from an external dist.Config shape without introducing a direct import here.
+// Accepts a generic 'cfg' to avoid adding a dependency layer; expects exported fields matching internal/dist Config.
+func NewDistMemoryWithConfig(ctx context.Context, cfg any, opts ...DistMemoryOption) (IBackend[DistMemory], error) { //nolint:ireturn
+	type minimalConfig struct { // external mirror subset
+		NodeID           string
+		BindAddr         string
+		AdvertiseAddr    string
+		Seeds            []string
+		Replication      int
+		VirtualNodes     int
+		ReadConsistency  int
+		WriteConsistency int
+		HintTTL          time.Duration
+		HintReplay       time.Duration
+		HintMaxPerNode   int
+	}
+
+	var mc minimalConfig
+	if asserted, ok := cfg.(minimalConfig); ok { // best-effort copy
+		mc = asserted
+	}
+
+	derived := distOptionsFromMinimal(mc)
+
+	all := make([]DistMemoryOption, 0, len(derived)+len(opts))
+
+	all = append(all, derived...)
+	all = append(all, opts...)
+
+	dmIface, err := NewDistMemory(ctx, all...)
+	if err != nil {
+		return nil, err
+	}
+
+	dm, ok := dmIface.(*DistMemory)
+	if !ok {
+		return nil, errUnexpectedBackendType
+	}
+
+	dm.originalConfig = cfg
+
+	return dm, nil
+}
+
+// distOptionsFromMinimal converts a minimalConfig into DistMemoryOptions (pure helper for lint complexity reduction).
+func distOptionsFromMinimal(mc struct {
+	NodeID, BindAddr, AdvertiseAddr   string
+	Seeds                             []string
+	Replication, VirtualNodes         int
+	ReadConsistency, WriteConsistency int
+	HintTTL, HintReplay               time.Duration
+	HintMaxPerNode                    int
+},
+) []DistMemoryOption { //nolint:ireturn
+	var opts []DistMemoryOption
+
+	add := func(cond bool, opt DistMemoryOption) { // helper reduces complexity in parent
+		if cond {
+			opts = append(opts, opt)
+		}
+	}
+
+	add(mc.NodeID != "" || mc.AdvertiseAddr != "", WithDistNode(mc.NodeID, mc.AdvertiseAddr))
+
+	if len(mc.Seeds) > 0 { // seeds need copy; keep single conditional here
+		cp := make([]string, len(mc.Seeds))
+		copy(cp, mc.Seeds)
+
+		opts = append(opts, WithDistSeeds(cp))
+	}
+
+	add(mc.Replication > 0, WithDistReplication(mc.Replication))
+	add(mc.VirtualNodes > 0, WithDistVirtualNodes(mc.VirtualNodes))
+	add(mc.ReadConsistency >= 0 && mc.ReadConsistency <= int(ConsistencyQuorum), WithDistReadConsistency(ConsistencyLevel(mc.ReadConsistency)))
+	add(mc.WriteConsistency >= 0 && mc.WriteConsistency <= int(ConsistencyQuorum), WithDistWriteConsistency(ConsistencyLevel(mc.WriteConsistency)))
+	add(mc.HintTTL > 0, WithDistHintTTL(mc.HintTTL))
+	add(mc.HintReplay > 0, WithDistHintReplayInterval(mc.HintReplay))
+	add(mc.HintMaxPerNode > 0, WithDistHintMaxPerNode(mc.HintMaxPerNode))
+
+	return opts
 }
 
 // ensureShardConfig initializes shards respecting configured shardCount.
@@ -494,6 +590,13 @@ func (dm *DistMemory) Count(_ context.Context) int {
 
 // Get fetches item.
 func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) { //nolint:ireturn
+	start := time.Now()
+	defer func() {
+		if dm.latency != nil {
+			dm.latency.observe(opGet, time.Since(start))
+		}
+	}()
+
 	if dm.readConsistency == ConsistencyOne { // fast local path
 		if it, ok := dm.shardFor(key).items.Get(key); ok {
 			return it, true
@@ -524,6 +627,11 @@ func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolin
 	}
 
 	start := time.Now()
+	defer func() {
+		if dm.latency != nil {
+			dm.latency.observe(opSet, time.Since(start))
+		}
+	}()
 
 	atomic.AddInt64(&dm.metrics.writeAttempts, 1)
 
@@ -559,8 +667,6 @@ func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolin
 		return sentinel.ErrQuorumFailed
 	}
 
-	_ = start // placeholder in case we later expose latency histogram
-
 	return nil
 }
 
@@ -582,6 +688,13 @@ func (dm *DistMemory) List(_ context.Context, _ ...IFilter) ([]*cache.Item, erro
 
 // Remove deletes keys.
 func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //nolint:ireturn
+	start := time.Now()
+	defer func() {
+		if dm.latency != nil {
+			dm.latency.observe(opRemove, time.Since(start))
+		}
+	}()
+
 	for _, key := range keys {
 		if dm.isOwner(key) { // primary path
 			dm.applyRemove(ctx, key, true)
@@ -677,90 +790,7 @@ func (dm *DistMemory) DebugOwners(key string) []cluster.NodeID {
 	return dm.ring.Lookup(key)
 }
 
-// DistTransport defines forwarding operations needed by DistMemory.
-type DistTransport interface {
-	ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error
-	ForwardGet(ctx context.Context, nodeID string, key string) (*cache.Item, bool, error)
-	ForwardRemove(ctx context.Context, nodeID string, key string, replicate bool) error
-	Health(ctx context.Context, nodeID string) error
-	FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error)
-}
-
-// InProcessTransport implements DistTransport for multiple DistMemory instances in the same process.
-type InProcessTransport struct{ backends map[string]*DistMemory }
-
-// NewInProcessTransport creates a new empty transport.
-func NewInProcessTransport() *InProcessTransport {
-	return &InProcessTransport{backends: map[string]*DistMemory{}}
-}
-
-// Register adds backends; safe to call multiple times.
-func (t *InProcessTransport) Register(b *DistMemory) {
-	if b != nil {
-		t.backends[string(b.localNode.ID)] = b
-	}
-}
-
-// Unregister removes a backend (simulate failure in tests).
-func (t *InProcessTransport) Unregister(id string) { delete(t.backends, id) }
-
-// ForwardSet forwards a set operation to the specified backend node.
-func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error { //nolint:ireturn
-	b, ok := t.backends[nodeID]
-	if !ok {
-		return sentinel.ErrBackendNotFound
-	}
-	// direct apply bypasses ownership check (already routed)
-	b.applySet(ctx, item, replicate)
-
-	return nil
-}
-
-// ForwardGet forwards a get operation to the specified backend node.
-func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID string, key string) (*cache.Item, bool, error) { //nolint:ireturn
-	b, ok := t.backends[nodeID]
-	if !ok {
-		return nil, false, sentinel.ErrBackendNotFound
-	}
-
-	it, ok2 := b.shardFor(key).items.Get(key)
-	if !ok2 {
-		return nil, false, nil
-	}
-
-	return it, true, nil
-}
-
-// ForwardRemove forwards a remove operation to the specified backend node.
-func (t *InProcessTransport) ForwardRemove(ctx context.Context, nodeID string, key string, replicate bool) error { //nolint:ireturn
-	b, ok := t.backends[nodeID]
-	if !ok {
-		return sentinel.ErrBackendNotFound
-	}
-
-	b.applyRemove(ctx, key, replicate)
-
-	return nil
-}
-
-// Health implements DistTransport.Health for in-process transport (always healthy if registered).
-func (t *InProcessTransport) Health(_ context.Context, nodeID string) error { //nolint:ireturn
-	if _, ok := t.backends[nodeID]; !ok {
-		return sentinel.ErrBackendNotFound
-	}
-
-	return nil
-}
-
-// FetchMerkle returns a snapshot Merkle tree of the target backend.
-func (t *InProcessTransport) FetchMerkle(_ context.Context, nodeID string) (*MerkleTree, error) { //nolint:ireturn
-	b, ok := t.backends[nodeID]
-	if !ok {
-		return nil, sentinel.ErrBackendNotFound
-	}
-
-	return b.BuildMerkleTree(), nil
-}
+// Transport interfaces & in-process implementation are defined in dist_transport.go
 
 // distMetrics holds internal counters (best-effort, not atomic snapshot consistent).
 type distMetrics struct {
@@ -871,22 +901,39 @@ func (dm *DistMemory) Metrics() DistMetrics {
 	}
 }
 
+// LatencyHistograms returns a snapshot of latency bucket counts per operation (ns buckets; last bucket +Inf).
+func (dm *DistMemory) LatencyHistograms() map[string][]uint64 { //nolint:ireturn
+	if dm.latency == nil {
+		return nil
+	}
+
+	return dm.latency.snapshot()
+}
+
 // Stop stops heartbeat loop if running.
 func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 	if dm.stopCh != nil {
 		close(dm.stopCh)
+
+		dm.stopCh = nil
 	}
 
 	if dm.hintStopCh != nil {
 		close(dm.hintStopCh)
+
+		dm.hintStopCh = nil
 	}
 
 	if dm.gossipStopCh != nil {
 		close(dm.gossipStopCh)
+
+		dm.gossipStopCh = nil
 	}
 
 	if dm.autoSyncStopCh != nil {
 		close(dm.autoSyncStopCh)
+
+		dm.autoSyncStopCh = nil
 	}
 
 	if dm.httpServer != nil {

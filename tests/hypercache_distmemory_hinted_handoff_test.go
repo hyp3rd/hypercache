@@ -1,3 +1,5 @@
+//go:build test
+
 package tests
 
 import (
@@ -98,5 +100,17 @@ func TestHintedHandoffReplay(t *testing.T) {
 
 	if !found {
 		t.Fatalf("replica did not receive hinted handoff value")
+	}
+
+	// metrics assertions for hinted handoff (at least one queued & replayed, none dropped)
+	ms := p.Metrics()
+	if ms.HintedQueued < 1 {
+		t.Fatalf("expected HintedQueued >=1, got %d", ms.HintedQueued)
+	}
+	if ms.HintedReplayed < 1 {
+		t.Fatalf("expected HintedReplayed >=1, got %d", ms.HintedReplayed)
+	}
+	if ms.HintedDropped != 0 {
+		t.Fatalf("expected no HintedDropped, got %d", ms.HintedDropped)
 	}
 }

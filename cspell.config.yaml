@@ -36,6 +36,7 @@ words:
   - gerr
   - gitversion
   - GITVERSION
+  - goarch
   - goccy
   - gochecknoglobals
   - gofiber

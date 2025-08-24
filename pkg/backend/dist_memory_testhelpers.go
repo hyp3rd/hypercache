@@ -2,7 +2,58 @@
 
 package backend
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+// DisableHTTPForTest stops the internal HTTP server and clears transport (testing helper).
+func (dm *DistMemory) DisableHTTPForTest(ctx context.Context) { //nolint:ireturn
+	if dm.httpServer != nil {
+		err := dm.httpServer.stop(ctx)
+		if err != nil {
+			_ = err
+		} // ignored best-effort
+
+		dm.httpServer = nil
+	}
+
+	dm.transport = nil
+}
+
+// EnableHTTPForTest restarts HTTP server & transport if nodeAddr is set (testing helper).
+func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) { //nolint:ireturn
+	if dm.httpServer != nil || dm.nodeAddr == "" {
+		return
+	}
+
+	server := newDistHTTPServer(dm.nodeAddr)
+
+	err := server.start(ctx, dm)
+	if err != nil {
+		return
+	}
+
+	dm.httpServer = server
+
+	resolver := func(nodeID string) (string, bool) {
+		if dm.membership != nil {
+			for _, n := range dm.membership.List() {
+				if string(n.ID) == nodeID {
+					return "http://" + n.Address, true
+				}
+			}
+		}
+
+		if dm.localNode != nil && string(dm.localNode.ID) == nodeID {
+			return "http://" + dm.localNode.Address, true
+		}
+
+		return "", false
+	}
+
+	dm.transport = NewDistHTTPTransport(2*time.Second, resolver)
+}
 
 // HintedQueueSize returns number of queued hints for a node (testing helper).
 func (dm *DistMemory) HintedQueueSize(nodeID string) int { //nolint:ireturn

@@ -60,7 +60,8 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 		return ewrap.Wrap(err, "marshal set request")
 	}
 
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/internal/cache/set", bytes.NewReader(payloadBytes))
+	// prefer canonical endpoint; legacy /internal/cache/set still served
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/internal/set", bytes.NewReader(payloadBytes))
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
 	}
@@ -97,7 +98,8 @@ func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID, key string) 
 		return nil, false, sentinel.ErrBackendNotFound
 	}
 
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/internal/cache/get?key=%s", base, key), nil)
+	// prefer canonical endpoint
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/internal/get?key=%s", base, key), nil)
 	if err != nil {
 		return nil, false, ewrap.Wrap(err, errMsgNewRequest)
 	}
@@ -185,7 +187,8 @@ func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID, key strin
 		return sentinel.ErrBackendNotFound
 	}
 
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/internal/cache/remove?key=%s&replicate=%t", base, key, replicate), nil)
+	// prefer canonical endpoint
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/internal/del?key=%s&replicate=%t", base, key, replicate), nil)
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
 	}
