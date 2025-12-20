@@ -8,7 +8,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	v2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestDistMemoryVersionTieBreak ensures that when versions are equal the lexicographically smaller origin wins.
@@ -61,14 +61,14 @@ func TestDistMemoryVersionTieBreak(t *testing.T) { //nolint:paralleltest
 	}
 
 	// primary write to establish version=1 origin=b1
-	err := b1.Set(context.Background(), &v2.Item{Key: key, Value: "v1"})
+	err := b1.Set(context.Background(), &cache.Item{Key: key, Value: "v1"})
 	if err != nil {
 		t.Fatalf("initial set: %v", err)
 	}
 
 	// Inject a fake item on b2 with SAME version but lexicographically larger origin so it should lose.
 	b2.DebugDropLocal(key)
-	b2.DebugInject(&v2.Item{Key: key, Value: "alt", Version: 1, Origin: "zzzz"})
+	b2.DebugInject(&cache.Item{Key: key, Value: "alt", Version: 1, Origin: "zzzz"})
 
 	// Quorum read through b3 triggers selection + repair.
 	it, ok := b3.Get(context.Background(), key)

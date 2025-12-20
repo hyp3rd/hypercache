@@ -8,7 +8,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	v2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestHintGlobalCaps ensures global hint caps (count & bytes) drop excess hints.
@@ -48,7 +48,7 @@ func TestHintGlobalCaps(t *testing.T) { //nolint:paralleltest
 	for i := range 30 {
 		key := "cap-key-" + strconv.Itoa(i)
 
-		_ = b1.Set(ctx, &v2.Item{Key: key, Value: "value-payload-xxxxxxxxxxxxxxxx"})
+		_ = b1.Set(ctx, &cache.Item{Key: key, Value: "value-payload-xxxxxxxxxxxxxxxx"})
 	}
 
 	// allow brief time for fan-out attempts

@@ -9,7 +9,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	v2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestDistFailureRecovery simulates node failure causing suspect->dead transition, hint queuing, and later recovery with hint replay.
@@ -55,14 +55,14 @@ func TestDistFailureRecovery(t *testing.T) { //nolint:paralleltest
 		t.Fatalf("could not find deterministic key ordering")
 	}
 
-	_ = b1.Set(ctx, &v2.Item{Key: key, Value: "v1"})
+	_ = b1.Set(ctx, &cache.Item{Key: key, Value: "v1"})
 
 	// Simulate b2 failure (unregister from transport) so further replica writes queue hints.
 	transport.Unregister(string(n2.ID))
 
 	// Generate writes that should attempt to replicate and thus queue hints for n2.
 	for range 8 { // a few writes to ensure some dropped into hints
-		_ = b1.Set(ctx, &v2.Item{Key: key, Value: "v1-update"})
+		_ = b1.Set(ctx, &cache.Item{Key: key, Value: "v1-update"})
 
 		time.Sleep(5 * time.Millisecond)
 	}

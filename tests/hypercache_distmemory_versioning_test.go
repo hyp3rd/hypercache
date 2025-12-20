@@ -10,7 +10,7 @@ import (
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	v2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestDistMemoryVersioningQuorum ensures higher version wins and quorum enforcement works.
@@ -64,7 +64,7 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 	}
 
 	// Write key via primary.
-	item1 := &v2.Item{Key: key, Value: "v1"}
+	item1 := &cache.Item{Key: key, Value: "v1"}
 
 	err := b1.Set(context.Background(), item1)
 	if err != nil {
@@ -72,7 +72,7 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 	}
 
 	// Simulate a concurrent stale write from another node with lower version (manual injection on b2).
-	itemStale := &v2.Item{Key: key, Value: "v0", Version: 0, Origin: "zzz"}
+	itemStale := &cache.Item{Key: key, Value: "v0", Version: 0, Origin: "zzz"}
 	b2.DebugDropLocal(key)
 	b2.DebugInject(itemStale)
 
@@ -94,7 +94,7 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 	// Simulate reduced acks: unregister one replica and perform write requiring quorum (2 of 3).
 	transport.Unregister(string(n3.ID))
 
-	item2 := &v2.Item{Key: key, Value: "v2"}
+	item2 := &cache.Item{Key: key, Value: "v2"}
 
 	err = b1.Set(context.Background(), item2)
 	if err != nil && !errors.Is(err, sentinel.ErrQuorumFailed) {

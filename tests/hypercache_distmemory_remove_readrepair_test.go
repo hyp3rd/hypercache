@@ -6,7 +6,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	v2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // helper to build two-node replicated cluster.
@@ -46,7 +46,7 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 		t.Fatalf("no owners")
 	}
 
-	item := &v2.Item{Key: key, Value: "val"}
+	item := &cache.Item{Key: key, Value: "val"}
 
 	err := item.Valid()
 	if err != nil {
@@ -104,7 +104,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 		t.Fatalf("no owners")
 	}
 
-	item := &v2.Item{Key: key, Value: "val"}
+	item := &cache.Item{Key: key, Value: "val"}
 
 	err := item.Valid()
 	if err != nil {
