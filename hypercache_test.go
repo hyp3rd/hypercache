@@ -13,13 +13,13 @@ import (
 
 func TestHyperCache_New(t *testing.T) {
 	// Test that an error is returned when the capacity is negative
-	_, err := NewInMemoryWithDefaults(-1)
+	_, err := NewInMemoryWithDefaults(context.TODO(), -1)
 	if err == nil {
 		t.Error("Expected an error when capacity is negative, got nil")
 	}
 
 	// Test that a new HyperCache is returned when the capacity is 0
-	cache, err := NewInMemoryWithDefaults(0)
+	cache, err := NewInMemoryWithDefaults(context.TODO(), 0)
 	if err != nil {
 		t.Errorf("Unexpected error when capacity is 0: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestHyperCache_New(t *testing.T) {
 	}
 
 	// Test that a new HyperCache is returned when the capacity is positive
-	cache, err = NewInMemoryWithDefaults(10)
+	cache, err = NewInMemoryWithDefaults(context.TODO(), 10)
 	if err != nil {
 		t.Errorf("Unexpected error when capacity is positive: %v", err)
 	}
@@ -41,14 +41,14 @@ func TestHyperCache_New(t *testing.T) {
 
 func TestHyperCache_WithStatsCollector(t *testing.T) {
 	// Test with default stats collector
-	cache, err := NewInMemoryWithDefaults(10)
+	cache, err := NewInMemoryWithDefaults(context.TODO(), 10)
 	assert.Nil(t, err)
 	assert.NotNil(t, cache.StatsCollector)
 }
 
 func TestHyperCache_WithExpirationInterval(t *testing.T) {
 	// Test with default expiration interval
-	cache, err := NewInMemoryWithDefaults(10)
+	cache, err := NewInMemoryWithDefaults(context.TODO(), 10)
 	assert.Nil(t, err)
 	assert.Equal(t, 30*time.Minute, cache.expirationInterval)
 
@@ -71,7 +71,7 @@ func TestHyperCache_WithExpirationInterval(t *testing.T) {
 
 func TestHyperCache_WithEvictionInterval(t *testing.T) {
 	// Test with default eviction interval
-	cache, err := NewInMemoryWithDefaults(10)
+	cache, err := NewInMemoryWithDefaults(context.TODO(), 10)
 	assert.Nil(t, err)
 	assert.Equal(t, 10*time.Minute, cache.evictionInterval)
 
@@ -94,7 +94,7 @@ func TestHyperCache_WithEvictionInterval(t *testing.T) {
 
 func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
 	// Test with default max eviction count
-	cache, err := NewInMemoryWithDefaults(10)
+	cache, err := NewInMemoryWithDefaults(context.TODO(), 10)
 	assert.Nil(t, err)
 	assert.Equal(t, uint(10), cache.maxEvictionCount)
 

@@ -76,7 +76,7 @@ type HyperCache[T backend.IBackendConstrain] struct {
 //   - The expiration interval is set to 30 minutes.
 //   - The capacity of the in-memory backend is set to 0 items (no limitations) unless specified.
 //   - The maximum cache size in bytes is set to 0 (no limitations).
-func NewInMemoryWithDefaults(capacity int) (*HyperCache[backend.InMemory], error) {
+func NewInMemoryWithDefaults(ctx context.Context, capacity int) (*HyperCache[backend.InMemory], error) {
 	// Initialize the configuration
 	config := NewConfig[backend.InMemory](constants.InMemoryBackend)
 	// Set the default options
@@ -92,8 +92,6 @@ func NewInMemoryWithDefaults(capacity int) (*HyperCache[backend.InMemory], error
 	}
 
 	hcm := GetDefaultManager()
-
-	ctx := context.Background()
 
 	// Initialize the cache
 	hyperCache, err := New(ctx, hcm, config)

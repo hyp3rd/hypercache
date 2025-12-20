@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/pkg/middleware"
 )
 
@@ -17,8 +18,11 @@ const (
 func main() {
 	var svc hypercache.Service
 
-	hyperCache, err := hypercache.NewInMemoryWithDefaults(cacheCapacity)
-	defer hyperCache.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultTimeout*2)
+	defer cancel()
+
+	hyperCache, err := hypercache.NewInMemoryWithDefaults(ctx, cacheCapacity)
+	defer hyperCache.Stop(ctx)
 
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -42,16 +46,15 @@ func main() {
 			return middleware.NewStatsCollectorMiddleware(next, statsCollector)
 		},
 	)
-	defer svc.Stop()
 
-	err = svc.Set(context.TODO(), "key string", "value any", 0)
+	err = svc.Set(ctx, "key string", "value any", 0)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 
-	key, ok := svc.Get(context.TODO(), "key string")
+	key, ok := svc.Get(ctx, "key string")
 	if !ok {
 		fmt.Fprintln(os.Stdout, "key not found")
 
@@ -61,13 +64,13 @@ func main() {
 	fmt.Fprintln(os.Stdout, key)
 
 	for i := range 10 {
-		err := svc.Set(context.TODO(), fmt.Sprintf("key%v", i), fmt.Sprintf("val%v", i), 0)
+		err := svc.Set(ctx, fmt.Sprintf("key%v", i), fmt.Sprintf("val%v", i), 0)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}
 
-	items, errs := svc.GetMultiple(context.TODO(), "key1", "key7", "key9", "key9999")
+	items, errs := svc.GetMultiple(ctx, "key1", "key7", "key9", "key9999")
 	for k, e := range errs {
 		fmt.Fprintf(os.Stderr, "error fetching item %s: %s\n", k, e)
 	}
@@ -76,7 +79,7 @@ func main() {
 		fmt.Fprintln(os.Stdout, k, v)
 	}
 
-	val, err := svc.GetOrSet(context.TODO(), "key9999", "val9999", 0)
+	val, err := svc.GetOrSet(ctx, "key9999", "val9999", 0)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 
@@ -85,8 +88,15 @@ func main() {
 
 	fmt.Fprintln(os.Stdout, val)
 
-	err = svc.Remove(context.TODO(), "key9999", "key1")
+	err = svc.Remove(ctx, "key9999", "key1")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
+
+	// defer func() {
+	// 	err := svc.Stop(ctx)
+	// 	if err != nil {
+	// 		fmt.Fprintln(os.Stderr, err)
+	// 	}
+	// }()
 }

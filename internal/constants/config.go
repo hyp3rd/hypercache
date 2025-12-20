@@ -6,7 +6,8 @@ package constants
 import "time"
 
 const (
-
+	// DefaultTimeout is the default timeout duration for cache operations.
+	DefaultTimeout = 5 * time.Second
 	// DefaultExpirationInterval is the default duration for cache item expiration.
 	// Items in the cache will be considered expired after this duration if not
 	// explicitly set otherwise.

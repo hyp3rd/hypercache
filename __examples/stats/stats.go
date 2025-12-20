@@ -17,6 +17,8 @@ const (
 )
 
 func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultTimeout)
+	defer cancel()
 	// Create a new HyperCache with a capacity of 100
 	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
@@ -30,14 +32,14 @@ func main() {
 	}
 
 	// Create a new HyperCache with a capacity of 10
-	hyperCache, err := hypercache.New(hypercache.GetDefaultManager(), config)
+	hyperCache, err := hypercache.New(ctx, hypercache.GetDefaultManager(), config)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 
 		return
 	}
 	// Stop the cache when the program exits
-	defer hyperCache.Stop()
+	defer hyperCache.Stop(ctx)
 
 	fmt.Fprintln(os.Stdout, "Adding 300 items to the cache")
 	// Add 300 items to the cache

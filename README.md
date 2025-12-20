@@ -28,9 +28,9 @@ It ships with a default [histogram stats collector](./stats/stats.go) and severa
 - Thread-safe & lock‑optimized (sharded map + worker pool)
 - High-performance (low allocations on hot paths, pooled items, serializer‑aware sizing)
 - Multiple backends (extensible):
-    1. [In-memory](./pkg/backend/inmemory.go)
-    2. [Redis](./pkg/backend/redis.go)
-    3. [Redis Cluster](./pkg/backend/redis_cluster.go)
+            1. [In-memory](./pkg/backend/inmemory.go)
+            1. [Redis](./pkg/backend/redis.go)
+            1. [Redis Cluster](./pkg/backend/redis_cluster.go)
 - Item expiration & proactive expiration triggering (debounced/coalesced)
 - Background or proactive (interval = 0) eviction using pluggable algorithms
 - Manual, non-blocking eviction triggering (`TriggerEviction()`)
@@ -139,10 +139,10 @@ Note: ARC is experimental and isn’t included in the default registry. If you c
 
 ## API
 
-`NewInMemoryWithDefaults(capacity)` is the quickest way to start:
+`NewInMemoryWithDefaults(ctx, capacity)` is the quickest way to start:
 
 ```golang
-cache, err := hypercache.NewInMemoryWithDefaults(100)
+cache, err := hypercache.NewInMemoryWithDefaults(context.Background(), 100)
 if err != nil {
     // handle error
 }
@@ -242,8 +242,10 @@ The DistMemory backend includes an experimental periodic rebalancer that:
 - Uses a semaphore; saturation increments the `RebalanceThrottle` metric.
 
 Migration is best‑effort (fire‑and‑forget forward of the item to the new primary); failures are not yet retried or queued. Owner set diffing now covers:
-    - Primary change & full ownership loss (migrate off this node).
-    - Replica-only additions (push current value to newly added replicas; capped by `WithDistReplicaDiffMaxPerTick`).
+
+- Primary change & full ownership loss (migrate off this node).
+- Replica-only additions (push current value to newly added replicas; capped by `WithDistReplicaDiffMaxPerTick`).
+
 Replica removal cleanup (actively dropping data from nodes no longer replicas) is pending.
 
 Metrics (via management or `Metrics()`):

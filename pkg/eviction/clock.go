@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	"github.com/hyp3rd/hypercache/pkg/cache"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // ClockAlgorithm is an in-memory cache with the Clock algorithm.

@@ -35,7 +35,7 @@ jobs:
       - name: Modules
         run: go mod download
       - name: Test (race + coverage)
-        run: go test -race -coverprofile=coverage.out ./...
+        run: RUN_INTEGRATION_TEST=yes go test -race -coverprofile=coverage.out ./...
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v5
         with:

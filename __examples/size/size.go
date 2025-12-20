@@ -51,6 +51,9 @@ func generateRandomUsers() []user {
 }
 
 func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultTimeout*2)
+	defer cancel()
+
 	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
 
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
@@ -64,7 +67,7 @@ func main() {
 	}
 
 	// Create a new HyperCache with a capacity of 10
-	cache, err := hypercache.New(hypercache.GetDefaultManager(), config)
+	cache, err := hypercache.New(ctx, hypercache.GetDefaultManager(), config)
 	if err != nil {
 		panic(err)
 	}
