@@ -25,12 +25,14 @@ func TestDistRebalanceReplicaDiffThrottle(t *testing.T) {
 	}
 
 	nodeA := mustDistNode(t, ctx, "A", addrA, []string{addrB}, base...)
+
 	nodeB := mustDistNode(t, ctx, "B", addrB, []string{addrA}, base...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
 	// Seed multiple keys.
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		k := cacheKey(i)
+
 		_ = nodeA.Set(ctx, &cache.Item{Key: k, Value: []byte("x"), Version: 1, Origin: "A", LastUpdated: time.Now()})
 	}
 
@@ -38,8 +40,10 @@ func TestDistRebalanceReplicaDiffThrottle(t *testing.T) {
 
 	// Add third node with replication=3 so it becomes new replica for many keys.
 	addrC := allocatePort(t)
+
 	nodeC := mustDistNode(t, ctx, "C", addrC, []string{addrA, addrB}, append(base, backend.WithDistReplication(3))...)
 	defer func() { _ = nodeC.Stop(ctx) }()
+
 	nodeA.AddPeer(addrC)
 	nodeB.AddPeer(addrC)
 

@@ -1,5 +1,3 @@
-// Package eviction - LRU discards the least recently used entry first.
-// Doubly linked list keeps MRU at head and LRU at tail; access moves node to head.
 package eviction
 
 import (

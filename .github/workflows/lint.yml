@@ -1,0 +1,57 @@
+---
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Load project settings
+        id: settings
+        run: |
+          set -a
+          source .project-settings.env
+          set +a
+          echo "go_version=${GO_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "gci_prefix=${GCI_PREFIX:-github.com/hyp3rd/hypercache}" >> "$GITHUB_OUTPUT"
+          echo "golangci_lint_version=${GOLANGCI_LINT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "proto_enabled=${PROTO_ENABLED:-true}" >> "$GITHUB_OUTPUT"
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "${{ steps.settings.outputs.go_version }}"
+          check-latest: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ steps.settings.outputs.go_version }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ steps.settings.outputs.go_version }}-
+      - name: Install tools
+        run: |
+          go install github.com/daixiang0/gci@latest
+          go install mvdan.cc/gofumpt@latest
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$(go env GOPATH)/bin" "${{ steps.settings.outputs.golangci_lint_version }}"
+      - name: Modules
+        run: go mod download
+      - name: Tidy check
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      - name: gci
+        run: gci write -s standard -s default -s blank -s dot -s "prefix(${{ steps.settings.outputs.gci_prefix }})" -s localmodule --skip-vendor --skip-generated $(find . -type f -name '*.go' -not -path "./pkg/api/*" -not -path "./vendor/*" -not -path "./.gocache/*" -not -path "./.git/*")
+      - name: gofumpt
+        run: gofumpt -l -w $(find . -type f -name '*.go' -not -path "./pkg/api/*" -not -path "./vendor/*" -not -path "./.gocache/*" -not -path "./.git/*")
+      - name: staticcheck
+        run: staticcheck ./...
+      - name: golangci-lint
+        run: golangci-lint run -v ./...

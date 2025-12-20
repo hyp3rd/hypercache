@@ -15,35 +15,33 @@ ensure_go_module_initialized() {
 # Constants
 # #######################################
 GO_BIN_PATH="$(go env GOPATH)/bin"
-GOLANGCI_LINT_INSTALL_URL="https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh"
-
+GOFILES=$(find . -type f -name '*.go' -not -path "./pkg/api/*" -not -path "./vendor/*" -not -path "./.gocache/*" -not -path "./.git/*")
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 
 if [[ -f "${ROOT_DIR}/.project-settings.env" ]]; then
 	# shellcheck disable=SC1090
 	source "${ROOT_DIR}/.project-settings.env"
 fi
-GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v2.7.2}"
+
+GCI_PREFIX="${GCI_PREFIX:-github.com/hyp3rd/hypercache}"
 
 # #######################################
 # Install dependencies to run the pre-commit hook
 # #######################################
 install_dependencies() {
 	# check if golangci-lint is installed or not
-	if ! command -v golangci-lint >/dev/null 2>&1; then
-		echo "installing golangci-lint ${GOLANGCI_LINT_VERSION}..."
 
-		# binary will be $(go env GOPATH)/bin/golangci-lint
-		curl -sSfL "${GOLANGCI_LINT_INSTALL_URL}" | sh -s -- -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
+	if ! "${GO_BIN_PATH}"/gci --version 2>/dev/null; then
+		echo "installing gci..."
 
-		echo "Installed golangci-lint ${GOLANGCI_LINT_VERSION}"
+		# binary will be $(go env GOPATH)/bin/gci
+		go install github.com/daixiang0/gci@latest
 
-		"$(go env GOPATH)"/bin/golangci-lint --version
+		echo "Installed gci"
 
-		# export the golangci-lint path to the PATH variable
-		export PATH="${GO_BIN_PATH}:${PATH}"
+		"$(go env GOPATH)"/bin/gci --version
 	else
-		echo "golangci-lint is already installed"
+		echo "gci is already installed"
 	fi
 }
 
@@ -60,20 +58,23 @@ hook() {
 	# run the pre-commit hook
 	pushd "${root_dir}" || exit
 
-	echo "Running golangci-lint..."
-	golangci-lint run --build-tags test ./... || exit 1
+	echo "Running gci..."
+
+	for file in ${GOFILES}; do
+		"${GO_BIN_PATH}"/gci write -s standard -s default -s blank -s dot -s "prefix(${GCI_PREFIX})" -s localmodule --skip-vendor --skip-generated "${file}" || exit 1
+	done
 
 	popd >/dev/null || exit
 }
 
 cat <<EOF
-golangci-lint hook
+gci hook
 =============================================================================
 
-This hook ensures and runs golangci-lint on the project.
+This hook ensures and runs gci on the project.
 It should be installed and run as a pre-commit hook.
 
-If golangci-lint finds any errors it will prevent the commit.
+If gci finds any errors it will prevent the commit.
 =============================================================================
 
 EOF

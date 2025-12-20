@@ -1,4 +1,3 @@
-// Package middleware contains service middlewares for hypercache.
 package middleware
 
 import (
@@ -178,7 +177,11 @@ func (mw OTelTracingMiddleware) Stop(ctx context.Context) error {
 func (mw OTelTracingMiddleware) GetStats() stats.Stats { return mw.next.GetStats() }
 
 // startSpan starts a span with common and provided attributes.
-func (mw OTelTracingMiddleware) startSpan(ctx context.Context, name string, attributes ...attribute.KeyValue) (context.Context, trace.Span) {
+func (mw OTelTracingMiddleware) startSpan(
+	ctx context.Context,
+	name string,
+	attributes ...attribute.KeyValue,
+) (context.Context, trace.Span) {
 	ctx, span := mw.tracer.Start(ctx, name, trace.WithSpanKind(trace.SpanKindInternal))
 	if len(mw.commonAttrs) > 0 {
 		span.SetAttributes(mw.commonAttrs...)

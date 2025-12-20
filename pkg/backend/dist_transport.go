@@ -10,8 +10,8 @@ import (
 // DistTransport defines forwarding operations needed by DistMemory.
 type DistTransport interface {
 	ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error
-	ForwardGet(ctx context.Context, nodeID string, key string) (*cache.Item, bool, error)
-	ForwardRemove(ctx context.Context, nodeID string, key string, replicate bool) error
+	ForwardGet(ctx context.Context, nodeID, key string) (*cache.Item, bool, error)
+	ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error
 	Health(ctx context.Context, nodeID string) error
 	FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error)
 }
@@ -47,7 +47,7 @@ func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item
 }
 
 // ForwardGet forwards a get operation to the specified backend node.
-func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID string, key string) (*cache.Item, bool, error) { //nolint:ireturn
+func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID, key string) (*cache.Item, bool, error) { //nolint:ireturn
 	b, ok := t.backends[nodeID]
 	if !ok {
 		return nil, false, sentinel.ErrBackendNotFound
@@ -62,7 +62,7 @@ func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID string, key st
 }
 
 // ForwardRemove forwards a remove operation.
-func (t *InProcessTransport) ForwardRemove(ctx context.Context, nodeID string, key string, replicate bool) error { //nolint:ireturn
+func (t *InProcessTransport) ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error { //nolint:ireturn
 	b, ok := t.backends[nodeID]
 	if !ok {
 		return sentinel.ErrBackendNotFound

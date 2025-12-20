@@ -1,5 +1,3 @@
-// Package middleware provides various middleware implementations for the hypercache service.
-// This package includes stats middleware that collects and reports cache operation statistics.
 package middleware
 
 import (

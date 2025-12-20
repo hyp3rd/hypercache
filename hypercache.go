@@ -193,7 +193,7 @@ func castBackend[T backend.IBackendConstrain](bi any) (backend.IBackend[T], erro
 	return nil, sentinel.ErrInvalidBackendType
 }
 
-func resolveInMemoryBackend[T backend.IBackendConstrain](ctx context.Context, constructor any, cfgAny any) (backend.IBackend[T], error) {
+func resolveInMemoryBackend[T backend.IBackendConstrain](ctx context.Context, constructor, cfgAny any) (backend.IBackend[T], error) {
 	inMemCtor, ok := constructor.(InMemoryBackendConstructor)
 	if !ok {
 		return nil, sentinel.ErrInvalidBackendType
@@ -212,7 +212,7 @@ func resolveInMemoryBackend[T backend.IBackendConstrain](ctx context.Context, co
 	return castBackend[T](bi)
 }
 
-func resolveRedisBackend[T backend.IBackendConstrain](ctx context.Context, constructor any, cfgAny any) (backend.IBackend[T], error) {
+func resolveRedisBackend[T backend.IBackendConstrain](ctx context.Context, constructor, cfgAny any) (backend.IBackend[T], error) {
 	redisCtor, ok := constructor.(RedisBackendConstructor)
 	if !ok {
 		return nil, sentinel.ErrInvalidBackendType
@@ -231,7 +231,7 @@ func resolveRedisBackend[T backend.IBackendConstrain](ctx context.Context, const
 	return castBackend[T](bi)
 }
 
-func resolveDistMemoryBackend[T backend.IBackendConstrain](ctx context.Context, constructor any, cfgAny any) (backend.IBackend[T], error) {
+func resolveDistMemoryBackend[T backend.IBackendConstrain](ctx context.Context, constructor, cfgAny any) (backend.IBackend[T], error) {
 	distCtor, ok := constructor.(DistMemoryBackendConstructor)
 	if !ok {
 		return nil, sentinel.ErrInvalidBackendType
@@ -250,7 +250,7 @@ func resolveDistMemoryBackend[T backend.IBackendConstrain](ctx context.Context, 
 	return castBackend[T](bi)
 }
 
-func resolveRedisClusterBackend[T backend.IBackendConstrain](ctx context.Context, constructor any, cfgAny any) (backend.IBackend[T], error) {
+func resolveRedisClusterBackend[T backend.IBackendConstrain](ctx context.Context, constructor, cfgAny any) (backend.IBackend[T], error) {
 	clusterCtor, ok := constructor.(RedisClusterBackendConstructor)
 	if !ok {
 		return nil, sentinel.ErrInvalidBackendType
@@ -508,7 +508,8 @@ func (hyperCache *HyperCache[T]) expirationLoop(ctx context.Context) {
 	})
 }
 
-// evictionLoop is a function that runs in a separate goroutine and evicts items from the cache based on the cache's capacity and the max eviction count.
+// evictionLoop is a function that runs in a separate goroutine and evicts items from the cache based on the cache's capacity and the max
+// eviction count.
 // The eviction is determined by the eviction algorithm.
 func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 	// Enqueue the eviction loop in the worker pool to avoid blocking the main goroutine if the eviction loop is slow
@@ -574,7 +575,8 @@ func (hyperCache *HyperCache[T]) evictItem(ctx context.Context) (string, bool) {
 	return key, true
 }
 
-// Set adds an item to the cache with the given key and value. If an item with the same key already exists, it updates the value of the existing item.
+// Set adds an item to the cache with the given key and value. If an item with the same key already exists, it updates the value of the
+// existing item.
 // If the expiration duration is greater than zero, the item will expire after the specified duration.
 // If capacity is reached:
 //   - when evictionInterval == 0 we evict immediately
@@ -647,7 +649,8 @@ func (hyperCache *HyperCache[T]) Get(ctx context.Context, key string) (any, bool
 	return item.Value, true
 }
 
-// GetWithInfo retrieves the item with the given key from the cache returning the `Item` object and a boolean indicating if the item was found.
+// GetWithInfo retrieves the item with the given key from the cache returning the `Item` object and a boolean indicating if the item was
+// found.
 func (hyperCache *HyperCache[T]) GetWithInfo(ctx context.Context, key string) (*cache.Item, bool) {
 	item, ok := hyperCache.backend.Get(ctx, key)
 	// Check if the item has expired if it exists, if so, trigger the expiration loop
@@ -670,7 +673,8 @@ func (hyperCache *HyperCache[T]) GetWithInfo(ctx context.Context, key string) (*
 	return item, true
 }
 
-// GetOrSet retrieves the item with the given key. If the item is not found, it adds the item to the cache with the given value and expiration duration.
+// GetOrSet retrieves the item with the given key. If the item is not found, it adds the item to the cache with the given value and
+// expiration duration.
 // If the capacity of the cache is reached, leverage the eviction algorithm.
 func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error) {
 	// if the item is found, return the value
@@ -1007,7 +1011,7 @@ func (hyperCache *HyperCache[T]) DistMembershipSnapshot() (members []struct {
 	Address     string
 	State       string
 	Incarnation uint64
-}, replication int, vnodes int,
+}, replication, vnodes int,
 ) { //nolint:ireturn
 	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
 		membership := dm.Membership()

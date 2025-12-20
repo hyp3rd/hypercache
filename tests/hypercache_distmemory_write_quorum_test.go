@@ -77,10 +77,16 @@ func TestWriteQuorumFailure(t *testing.T) {
 	}
 
 	// Create three nodes but only register two with transport to force ALL failure.
-	na, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("A", "A"), backend.WithDistMembership(m, cluster.NewNode("A", "A")))...)
-	nb, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("B", "B"), backend.WithDistMembership(m, cluster.NewNode("B", "B")))...)
+	na, _ := backend.NewDistMemory(
+		ctx,
+		append(opts, backend.WithDistNode("A", "A"), backend.WithDistMembership(m, cluster.NewNode("A", "A")))...)
+	nb, _ := backend.NewDistMemory(
+		ctx,
+		append(opts, backend.WithDistNode("B", "B"), backend.WithDistMembership(m, cluster.NewNode("B", "B")))...)
 
-	_, _ = backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("C", "C"), backend.WithDistMembership(m, cluster.NewNode("C", "C")))...)
+	_, _ = backend.NewDistMemory(
+		ctx,
+		append(opts, backend.WithDistNode("C", "C"), backend.WithDistMembership(m, cluster.NewNode("C", "C")))...)
 
 	da := any(na).(*backend.DistMemory)
 	db := any(nb).(*backend.DistMemory)

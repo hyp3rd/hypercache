@@ -1,14 +1,44 @@
 version: "0.2"
-ignorePaths: []
+ignorePaths:
+  - go.mod
+  - go.sum
+  - Makefile
+  - .golangci-lint.yml
+  - .golangci.yaml
+  - .pre-commit-config.yaml
+  - .project-settings.env
+  - Dockerfile
+  - .gitignore
+  - .dockerignore
+  - "*.pb.*"
+  - "*.sql"
+  - "*.svg"
+  - docker/*
+  - "*.excalidraw"
+  - .vscode/*
+  - azdo/pipelines/*
+  - scripts/*
+  - .github/workflows/*
+  - .github/*
+  - .idea/*
+  - .DS_Store
+  - "*.hcl"
+  - "*.env"
+  - "*.http"
+  - compose.*.yaml
+  - docs/mkdocs.yml
 dictionaryDefinitions: []
 dictionaries: []
 words:
   - acks
   - backpressure
+  - benchmarkdist
   - benchmem
   - benchtime
+  - bufbuild
   - cacheerrors
   - cachev
+  - calledback
   - cand
   - CAWOLFU
   - Cbor
@@ -21,14 +51,20 @@ words:
   - cyclop
   - daixiang
   - Decr
+  - dels
   - depguard
+  - derr
   - distconfig
+  - EDITMSG
+  - elif
   - errcheck
   - ewrap
+  - excalidraw
   - excludeonly
   - exhaustruct
   - Fanout
   - fctx
+  - ferr
   - forcetypeassert
   - Fprintf
   - Fprintln
@@ -38,17 +74,25 @@ words:
   - gitversion
   - GITVERSION
   - goarch
+  - gocache
   - goccy
   - gochecknoglobals
   - gofiber
   - GOFILES
   - gofumpt
   - goimports
+  - golangci
   - golines
   - GOPATH
   - gosec
+  - GOTOOLCHAIN
+  - govulncheck
   - honnef
   - hreq
+  - hypercache
+  - idxs
+  - Iface
+  - ineff
   - ints
   - ireturn
   - Itemm
@@ -57,32 +101,53 @@ words:
   - LFUDA
   - localmodule
   - logrus
+  - longbridgeapp
   - memprofile
   - Merkle
   - Mgmt
+  - mkdocs
   - mrand
+  - mset
   - msgpack
   - mvdan
   - nestif
   - Newf
+  - noinlineerr
   - nolint
   - nonamedreturns
   - nosec
   - NOVENDOR
   - paralleltest
   - Pipeliner
+  - popd
   - Prealloc
+  - protoc
+  - pushd
   - recvcheck
+  - rediscluster
+  - repls
+  - Repls
+  - rerr
   - sarif
+  - securego
+  - sess
+  - shamaton
+  - shellcheck
   - skeys
   - SLRU
   - staticcheck
   - stdlib
   - strfnv
   - strs
+  - sval
+  - thelper
+  - toplevel
+  - tparallel
   - ugorji
   - unmarshals
+  - upserted
   - varnamelen
+  - vettool
   - vnode
   - vnodes
   - wrapcheck

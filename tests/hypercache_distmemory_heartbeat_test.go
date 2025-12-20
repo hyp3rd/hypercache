@@ -95,6 +95,7 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 		for _, n := range membership.List() {
 			if n.ID == n2.ID {
 				foundN2 = true
+
 				if n.State == cluster.NodeSuspect {
 					sawSuspect = true
 				}

@@ -1,6 +1,3 @@
-// Package eviction - Clock algorithm keeps a circular buffer ("hand") of pages and gives each
-// page a second chance by decrementing an access count before eviction. The hand advances until
-// it finds a page with zero access count, which is then evicted.
 package eviction
 
 import (

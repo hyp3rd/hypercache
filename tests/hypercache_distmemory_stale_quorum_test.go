@@ -7,7 +7,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	cachev2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	v2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestDistMemoryStaleQuorum ensures quorum read returns newest version and repairs stale replicas.
@@ -20,9 +20,24 @@ func TestDistMemoryStaleQuorum(t *testing.T) {
 	n2 := cluster.NewNode("", "n2:0")
 	n3 := cluster.NewNode("", "n3:0")
 
-	b1i, _ := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n1), backend.WithDistTransport(transport), backend.WithDistReadConsistency(backend.ConsistencyQuorum))
-	b2i, _ := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport), backend.WithDistReadConsistency(backend.ConsistencyQuorum))
-	b3i, _ := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n3), backend.WithDistTransport(transport), backend.WithDistReadConsistency(backend.ConsistencyQuorum))
+	b1i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b2i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b3i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
 
 	b1 := b1i.(*backend.DistMemory) //nolint:forcetypeassert
 	b2 := b2i.(*backend.DistMemory) //nolint:forcetypeassert
@@ -41,7 +56,7 @@ func TestDistMemoryStaleQuorum(t *testing.T) {
 
 	// Write initial version via primary
 	primary := owners[0]
-	item := &cachev2.Item{Key: key, Value: "v1"}
+	item := &v2.Item{Key: key, Value: "v1"}
 
 	_ = item.Valid()
 	if primary == b1.LocalNodeID() {
@@ -56,7 +71,7 @@ func TestDistMemoryStaleQuorum(t *testing.T) {
 	// Pick owners[1] as ahead replica
 	aheadID := owners[1]
 	ahead := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[aheadID]
-	ahead.DebugInject(&cachev2.Item{Key: key, Value: "v2", Version: 5, Origin: string(ahead.LocalNodeID()), LastUpdated: time.Now()})
+	ahead.DebugInject(&v2.Item{Key: key, Value: "v2", Version: 5, Origin: string(ahead.LocalNodeID()), LastUpdated: time.Now()})
 
 	// Drop local copy on owners[2] to simulate stale/missing
 	lagID := owners[2]

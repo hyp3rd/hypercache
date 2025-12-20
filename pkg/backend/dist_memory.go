@@ -9,12 +9,12 @@ import (
 	"hash"
 	"hash/fnv"
 	"math/big"
+	mrand "math/rand"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	mrand "math/rand"
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
@@ -315,10 +315,7 @@ func (dm *DistMemory) BuildMerkleTree() *MerkleTree { //nolint:ireturn
 	leaves := make([][]byte, 0, (len(entries)+chunkSize-1)/chunkSize)
 
 	for i := 0; i < len(entries); i += chunkSize {
-		end := i + chunkSize
-		if end > len(entries) {
-			end = len(entries)
-		}
+		end := min(i+chunkSize, len(entries))
 
 		hasher.Reset()
 
@@ -652,8 +649,14 @@ func distOptionsFromMinimal(mc struct {
 
 	add(mc.Replication > 0, WithDistReplication(mc.Replication))
 	add(mc.VirtualNodes > 0, WithDistVirtualNodes(mc.VirtualNodes))
-	add(mc.ReadConsistency >= 0 && mc.ReadConsistency <= int(ConsistencyQuorum), WithDistReadConsistency(ConsistencyLevel(mc.ReadConsistency)))
-	add(mc.WriteConsistency >= 0 && mc.WriteConsistency <= int(ConsistencyQuorum), WithDistWriteConsistency(ConsistencyLevel(mc.WriteConsistency)))
+	add(
+		mc.ReadConsistency >= 0 && mc.ReadConsistency <= int(ConsistencyQuorum),
+		WithDistReadConsistency(ConsistencyLevel(mc.ReadConsistency)),
+	)
+	add(
+		mc.WriteConsistency >= 0 && mc.WriteConsistency <= int(ConsistencyQuorum),
+		WithDistWriteConsistency(ConsistencyLevel(mc.WriteConsistency)),
+	)
 	add(mc.HintTTL > 0, WithDistHintTTL(mc.HintTTL))
 	add(mc.HintReplay > 0, WithDistHintReplayInterval(mc.HintReplay))
 	add(mc.HintMaxPerNode > 0, WithDistHintMaxPerNode(mc.HintMaxPerNode))
@@ -1219,17 +1222,20 @@ func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, ent
 }
 
 // applyMerkleDiffs fetches and adopts keys for differing Merkle chunks.
-func (dm *DistMemory) applyMerkleDiffs(ctx context.Context, nodeID string, entries []merkleKV, diffs []int, chunkSize int) { //nolint:ireturn
+func (dm *DistMemory) applyMerkleDiffs(
+	ctx context.Context,
+	nodeID string,
+	entries []merkleKV,
+	diffs []int,
+	chunkSize int,
+) { //nolint:ireturn
 	for _, ci := range diffs {
 		start := ci * chunkSize
 		if start >= len(entries) {
 			continue
 		}
 
-		end := start + chunkSize
-		if end > len(entries) {
-			end = len(entries)
-		}
+		end := min(start+chunkSize, len(entries))
 
 		for _, e := range entries[start:end] {
 			dm.fetchAndAdopt(ctx, nodeID, e.k)
@@ -1626,7 +1632,12 @@ func (*DistMemory) computeNewReplicas(sh *distShard, key string, owners []cluste
 	return out
 }
 
-func (dm *DistMemory) sendReplicaDiff(ctx context.Context, it *cache.Item, repls []cluster.NodeID, processed, limit int) int { //nolint:ireturn
+func (dm *DistMemory) sendReplicaDiff(
+	ctx context.Context,
+	it *cache.Item,
+	repls []cluster.NodeID,
+	processed, limit int,
+) int { //nolint:ireturn
 	for _, rid := range repls {
 		if rid == dm.localNode.ID {
 			continue
@@ -1677,7 +1688,9 @@ func (dm *DistMemory) maybeRecordRemoval(sh *distShard, key string) { //nolint:i
 }
 
 // migrateItems concurrently migrates items in batches respecting configured limits.
-func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) { //nolint:ireturn
+//
+//nolint:ireturn,revive
+func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) {
 	if len(items) == 0 {
 		return
 	}
@@ -1687,10 +1700,7 @@ func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) { //
 	var wg sync.WaitGroup
 
 	for start := 0; start < len(items); {
-		end := start + dm.rebalanceBatchSize
-		if end > len(items) {
-			end = len(items)
-		}
+		end := min(start+dm.rebalanceBatchSize, len(items))
 
 		batch := items[start:end]
 
@@ -1705,7 +1715,17 @@ func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) { //
 			sem <- struct{}{}
 		}
 
-		wg.Add(1)
+		batchItems := batch
+		wg.Go(func() {
+			defer func() { <-sem }()
+
+			atomic.AddInt64(&dm.metrics.rebalanceBatches, 1)
+
+			for i := range batchItems {
+				itm := batchItems[i] // value copy
+				dm.migrateIfNeeded(ctx, &itm)
+			}
+		})
 
 		go func(batchItems []cache.Item) {
 			defer wg.Done()
@@ -1931,13 +1951,14 @@ func (dm *DistMemory) lookupOwners(key string) []cluster.NodeID { //nolint:iretu
 
 // requiredAcks computes required acknowledgements for given consistency level.
 func (*DistMemory) requiredAcks(total int, lvl ConsistencyLevel) int { //nolint:ireturn
+	//nolint:revive
 	switch lvl {
 	case ConsistencyAll:
 		return total
 	case ConsistencyQuorum:
 		return (total / 2) + 1
 	case ConsistencyOne:
-		return 1
+		return 1 // identical-switch-branches kept for clarity.
 	default:
 		return 1
 	}
@@ -2148,7 +2169,11 @@ func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replica
 }
 
 // getWithConsistencyParallel performs parallel owner fan-out until quorum/all reached.
-func (dm *DistMemory) getWithConsistencyParallel(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+func (dm *DistMemory) getWithConsistencyParallel(
+	ctx context.Context,
+	key string,
+	owners []cluster.NodeID,
+) (*cache.Item, bool) { //nolint:ireturn
 	needed := dm.requiredAcks(len(owners), dm.readConsistency)
 
 	type res struct {
@@ -2333,6 +2358,7 @@ func (dm *DistMemory) replayHints(ctx context.Context) { // reduced cognitive co
 
 		for _, hintEntry := range queue { // renamed for clarity
 			action := dm.processHint(ctx, nodeID, hintEntry, now)
+			//nolint:revive // identical-switch-branches rule disabled for clarity
 			switch action { // 0 keep, 1 remove
 			case 0:
 				out = append(out, hintEntry)
@@ -2743,10 +2769,8 @@ func (dm *DistMemory) ownsKeyInternal(key string) bool {
 	}
 
 	owners := dm.ring.Lookup(key)
-	for _, id := range owners {
-		if id == dm.localNode.ID {
-			return true
-		}
+	if slices.Contains(owners, dm.localNode.ID) {
+		return true
 	}
 
 	return len(owners) == 0 // empty ring => owner

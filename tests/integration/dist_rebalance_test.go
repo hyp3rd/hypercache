@@ -19,9 +19,27 @@ func TestDistRebalanceJoin(t *testing.T) {
 	addrA := allocatePort(t)
 	addrB := allocatePort(t)
 
-	nodeA := mustDistNode(t, ctx, "A", addrA, []string{addrB}, backend.WithDistReplication(2), backend.WithDistVirtualNodes(32), backend.WithDistRebalanceInterval(100*time.Millisecond))
+	nodeA := mustDistNode(
+		t,
+		ctx,
+		"A",
+		addrA,
+		[]string{addrB},
+		backend.WithDistReplication(2),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistRebalanceInterval(100*time.Millisecond),
+	)
 
-	nodeB := mustDistNode(t, ctx, "B", addrB, []string{addrA}, backend.WithDistReplication(2), backend.WithDistVirtualNodes(32), backend.WithDistRebalanceInterval(100*time.Millisecond))
+	nodeB := mustDistNode(
+		t,
+		ctx,
+		"B",
+		addrB,
+		[]string{addrA},
+		backend.WithDistReplication(2),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistRebalanceInterval(100*time.Millisecond),
+	)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
 	// Write a spread of keys via A.
@@ -30,6 +48,7 @@ func TestDistRebalanceJoin(t *testing.T) {
 		k := cacheKey(i)
 
 		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
+
 		err := nodeA.Set(ctx, it)
 		if err != nil {
 			t.Fatalf("set %s: %v", k, err)
@@ -47,7 +66,16 @@ func TestDistRebalanceJoin(t *testing.T) {
 	// Add third node C.
 	addrC := allocatePort(t)
 
-	nodeC := mustDistNode(t, ctx, "C", addrC, []string{addrA, addrB}, backend.WithDistReplication(2), backend.WithDistVirtualNodes(32), backend.WithDistRebalanceInterval(100*time.Millisecond))
+	nodeC := mustDistNode(
+		t,
+		ctx,
+		"C",
+		addrC,
+		[]string{addrA, addrB},
+		backend.WithDistReplication(2),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistRebalanceInterval(100*time.Millisecond),
+	)
 	defer func() { _ = nodeC.Stop(ctx) }()
 
 	// Manually inject C into A and B membership (simulating gossip propagation delay that doesn't exist yet).
@@ -106,6 +134,7 @@ func TestDistRebalanceThrottle(t *testing.T) {
 		k := cacheKey(i)
 
 		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
+
 		err := nodeA.Set(ctx, it)
 		if err != nil {
 			t.Fatalf("set %s: %v", k, err)
@@ -125,14 +154,22 @@ func TestDistRebalanceThrottle(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond)
 
 	// Expect throttle metric > 0 on some node (A likely source).
-	if a, b, c := nodeA.Metrics().RebalanceThrottle, nodeB.Metrics().RebalanceThrottle, nodeC.Metrics().RebalanceThrottle; a == 0 && b == 0 && c == 0 {
+	if a, b, c := nodeA.Metrics().RebalanceThrottle, nodeB.Metrics().RebalanceThrottle, nodeC.Metrics().RebalanceThrottle; a == 0 &&
+		b == 0 &&
+		c == 0 {
 		t.Fatalf("expected throttle metric to increment (a=%d b=%d c=%d)", a, b, c)
 	}
 }
 
 // Helpers.
 
-func mustDistNode(t *testing.T, ctx context.Context, id, addr string, seeds []string, extra ...backend.DistMemoryOption) *backend.DistMemory {
+func mustDistNode(
+	t *testing.T,
+	ctx context.Context,
+	id, addr string,
+	seeds []string,
+	extra ...backend.DistMemoryOption,
+) *backend.DistMemory {
 	opts := []backend.DistMemoryOption{
 		backend.WithDistNode(id, addr),
 		backend.WithDistSeeds(seeds),

@@ -7,10 +7,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-
-	"github.com/hyp3rd/ewrap"
-
 	fiber "github.com/gofiber/fiber/v3"
+	"github.com/hyp3rd/ewrap"
 
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )

@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/goccy/go-json"
-
 	"github.com/hyp3rd/ewrap"
 )
 
@@ -95,7 +94,7 @@ func (m ConcurrentMap[K, V]) Set(key K, value V) {
 // It is called while lock is held, therefore it MUST NOT
 // try to access other keys in same map, as it can lead to deadlock since
 // Go sync.RWLock is not reentrant.
-type UpsertCb[V any] func(exist bool, valueInMap V, newValue V) V
+type UpsertCb[V any] func(exist bool, valueInMap, newValue V) V
 
 // Upsert Insert or Update - updates existing element or inserts a new one using UpsertCb.
 func (m ConcurrentMap[K, V]) Upsert(key K, value V, cb UpsertCb[V]) V {
@@ -326,7 +325,7 @@ func (m ConcurrentMap[K, V]) Items() map[K]V {
 	return tmp
 }
 
-// IterCb is the iterator callbacalled for every key,value found in
+// IterCb is the iterator calledback for every key,value found in
 // maps. RLock is held for all calls for a given shard
 // therefore callback sess consistent view of a shard,
 // but not across the shards.

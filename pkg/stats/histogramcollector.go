@@ -3,7 +3,6 @@ package stats
 import (
 	"math"
 	"slices"
-	"sort"
 	"sync"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
@@ -84,7 +83,7 @@ func (c *HistogramStatsCollector) Median(stat constants.Stat) float64 {
 		return 0
 	}
 
-	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	slices.Sort(values)
 
 	mid := len(values) / 2
 	if len(values)%2 == 0 {

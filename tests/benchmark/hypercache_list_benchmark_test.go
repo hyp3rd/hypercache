@@ -12,9 +12,7 @@ func BenchmarkHyperCache_List(b *testing.B) {
 	// Create a new HyperCache with a capacity of 100000
 	cache, _ := hypercache.NewInMemoryWithDefaults(100000)
 
-	b.ResetTimer()
-
-	for range b.N {
+	for b.Loop() {
 		// Store a value in the cache with a key and expiration duration
 		cache.Set(context.TODO(), "key", "value", time.Hour)
 	}

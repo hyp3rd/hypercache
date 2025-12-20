@@ -15,27 +15,35 @@ ensure_go_module_initialized() {
 # Run the pre-commit
 # #######################################
 hook() {
-	ensure_go_module_initialized
-
 	# get the root of the project
 	local root_dir
 	root_dir=$(git rev-parse --show-toplevel)
 
-	local toolchain_version="1.25.5"
-	if [[ -f "${root_dir}/.project-settings.env" ]]; then
-		# shellcheck disable=SC1090
-		source "${root_dir}/.project-settings.env"
-		toolchain_version="${GO_VERSION:-${toolchain_version}}"
-	fi
-
 	# run the pre-commit hook
 	pushd "${root_dir}" || exit
-		GOTOOLCHAIN=go${toolchain_version}+auto go test -v -cover ./... || exit 1
+
+	echo "Running go mod verify..."
+
+	go mod verify
+
+	echo "Running go mod tidy..."
+	go mod tidy
+
 	popd >/dev/null || exit
 }
 
-# #######################################
-# Run the pre-commit if the ensure_go_module_initialized() function returns 0
-# #######################################
+cat <<EOF
+go-mod Hook
+=============================================================================
+
+This hook ensures and runs go mod tidy and go mod verify on the project.
+It should be installed and run as a pre-commit hook.
+
+If go mod finds any errors it will prevent the commit.
+=============================================================================
+
+EOF
+
+# run the hook if the go module is initialized
 ensure_go_module_initialized
 hook

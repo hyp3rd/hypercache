@@ -1,6 +1,3 @@
-// Package middleware provides various middleware implementations for the hypercache service.
-// This package includes logging middleware that wraps the hypercache service to provide
-// execution time logging and method call tracing for debugging and monitoring purposes.
 package middleware
 
 import (

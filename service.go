@@ -32,7 +32,8 @@ type crud interface {
 	Get(ctx context.Context, key string) (value any, ok bool)
 	// Set stores a value in the cache using the key and expiration duration
 	Set(ctx context.Context, key string, value any, expiration time.Duration) error
-	// GetOrSet retrieves a value from the cache using the key, if the key does not exist, it will set the value using the key and expiration duration
+	// GetOrSet retrieves a value from the cache using the key, if the key does not exist, it will set the value using the key and
+	// expiration duration
 	GetOrSet(ctx context.Context, key string, value any, expiration time.Duration) (any, error)
 	// GetWithInfo fetches from the cache using the key, and returns the `cache.Item` and a boolean indicating if the key exists
 	GetWithInfo(ctx context.Context, key string) (*cache.Item, bool)

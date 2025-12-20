@@ -25,6 +25,7 @@ func TestDistRebalanceReplicaDiff(t *testing.T) {
 	}
 
 	nodeA := mustDistNode(t, ctx, "A", addrA, []string{addrB}, baseOpts...)
+
 	nodeB := mustDistNode(t, ctx, "B", addrB, []string{addrA}, baseOpts...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
@@ -32,8 +33,10 @@ func TestDistRebalanceReplicaDiff(t *testing.T) {
 	totalKeys := 200
 	for i := range totalKeys {
 		k := cacheKey(i)
+
 		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
-		if err := nodeA.Set(ctx, it); err != nil {
+		err := nodeA.Set(ctx, it)
+		if err != nil {
 			t.Fatalf("set %s: %v", k, err)
 		}
 	}
@@ -44,6 +47,7 @@ func TestDistRebalanceReplicaDiff(t *testing.T) {
 	// Since replication factor is fixed per process instance, we simulate a ring change where C participates
 	// as a replica for some keys (virtual nodes distribution will produce owners including C) by simply adding the peer.
 	addrC := allocatePort(t)
+
 	nodeC := mustDistNode(t, ctx, "C", addrC, []string{addrA, addrB}, append(baseOpts, backend.WithDistReplication(3))...)
 	defer func() { _ = nodeC.Stop(ctx) }()
 
@@ -57,7 +61,7 @@ func TestDistRebalanceReplicaDiff(t *testing.T) {
 
 	// Sample keys and ensure node C has received at least some of them (without being primary necessarily).
 	present := 0
-	for i := 0; i < totalKeys; i++ {
+	for i := range totalKeys {
 		k := cacheKey(i)
 		if nodeC.LocalContains(k) { // presence implies replication happened (either primary migration or replica diff)
 			present++

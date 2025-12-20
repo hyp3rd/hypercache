@@ -55,12 +55,12 @@ type Node struct {
 var ErrInvalidAddress = errors.New("invalid node address")
 
 // NewNode creates a node from address (host:port). If id empty, derive a short hex id using xxhash64.
-func NewNode(id string, addr string) *Node {
+func NewNode(id, addr string) *Node {
 	if id == "" {
 		hv := xxhash.Sum64String(addr)
 
 		b := make([]byte, nodeIDBytes)
-		for i := 0; i < nodeIDBytes; i++ { //nolint:intrange
+		for i := range nodeIDBytes {
 			b[i] = byte(hv >> (byteShift * i))
 		}
 

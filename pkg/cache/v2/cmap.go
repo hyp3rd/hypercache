@@ -1,4 +1,4 @@
-// Package cachev2 provides a high-performance concurrent map implementation optimized for cache operations.
+// Package v2 provides a high-performance concurrent map implementation optimized for cache operations.
 // The implementation uses sharding to minimize lock contention by dividing the map into multiple
 // independent shards, each protected by its own read-write mutex.
 //
@@ -14,12 +14,12 @@
 //
 // Example usage:
 //
-//	cm := cachev2.New()
+//	cm := v2.New()
 //	cm.Set("key", &cache.Item{...})
 //	if item, ok := cm.Get("key"); ok {
 //	    // Process item
 //	}
-package cachev2
+package v2
 
 import (
 	"sync"

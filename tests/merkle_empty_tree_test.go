@@ -12,8 +12,18 @@ func TestMerkleEmptyTrees(t *testing.T) {
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
-	a, _ := backend.NewDistMemory(ctx, backend.WithDistNode("A", "127.0.0.1:9201"), backend.WithDistReplication(1), backend.WithDistMerkleChunkSize(2))
-	b, _ := backend.NewDistMemory(ctx, backend.WithDistNode("B", "127.0.0.1:9202"), backend.WithDistReplication(1), backend.WithDistMerkleChunkSize(2))
+	a, _ := backend.NewDistMemory(
+		ctx,
+		backend.WithDistNode("A", "127.0.0.1:9201"),
+		backend.WithDistReplication(1),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	b, _ := backend.NewDistMemory(
+		ctx,
+		backend.WithDistNode("B", "127.0.0.1:9202"),
+		backend.WithDistReplication(1),
+		backend.WithDistMerkleChunkSize(2),
+	)
 
 	da := any(a).(*backend.DistMemory)
 	db := any(b).(*backend.DistMemory)
