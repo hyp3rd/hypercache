@@ -98,3 +98,4 @@ tags
 .dccache
 cmd/
 bin/
+.github/instructions/instructions.md
