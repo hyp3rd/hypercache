@@ -87,6 +87,7 @@ words:
   - golangci
   - golines
   - GOPATH
+  - goroutines
   - gosec
   - GOTOOLCHAIN
   - govulncheck
@@ -97,6 +98,7 @@ words:
   - idxs
   - Iface
   - ineff
+  - intrange
   - ints
   - ireturn
   - Itemm
@@ -109,6 +111,7 @@ words:
   - maxmemory
   - memprofile
   - Merkle
+  - mfinal
   - Mgmt
   - mkdocs
   - mrand
@@ -117,6 +120,7 @@ words:
   - mvdan
   - nestif
   - Newf
+  - noctx
   - noinlineerr
   - nolint
   - nonamedreturns
@@ -153,6 +157,7 @@ words:
   - ugorji
   - unmarshals
   - upserted
+  - upserts
   - varnamelen
   - vettool
   - vnode

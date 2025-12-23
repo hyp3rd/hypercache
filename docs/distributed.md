@@ -42,9 +42,9 @@ Provide a feature playground to iterate on ownership, replication, consistency, 
 Current migration / replication triggers:
 
 1. Node lost all ownership (no longer primary nor replica) for key (record timestamp for shedding).
-2. Node was previously the recorded primary and current primary changed (increments `RebalancedPrimary`).
-3. New replicas added while we remain primary (replica diff replication, per-tick capped).
-4. Grace-elapsed keys we no longer own are deleted locally (shedding) if `WithDistRemovalGrace` set.
+1. Node was previously the recorded primary and current primary changed (increments `RebalancedPrimary`).
+1. New replicas added while we remain primary (replica diff replication, per-tick capped).
+1. Grace-elapsed keys we no longer own are deleted locally (shedding) if `WithDistRemovalGrace` set.
 
 Limitations:
 
@@ -108,11 +108,11 @@ Configuration knobs:
 ## Near-Term Roadmap Deltas
 
 1. Migration retry queue + success/failure counters.
-2. Incremental / adaptive Merkle scheduling (skip if repeated clean cycles).
-3. Tracing spans (OpenTelemetry) for Set/Get/Repair/Merkle/Rebalance/HintReplay.
-4. Enhanced failure detector (indirect probes, exponential backoff, state gossip).
-5. Client SDK (direct owner routing; bypass proxy hop).
-6. Chaos hooks (latency, drop %, partition segments) for test harness.
+1. Incremental / adaptive Merkle scheduling (skip if repeated clean cycles).
+1. Tracing spans (OpenTelemetry) for Set/Get/Repair/Merkle/Rebalance/HintReplay.
+1. Enhanced failure detector (indirect probes, exponential backoff, state gossip).
+1. Client SDK (direct owner routing; bypass proxy hop).
+1. Chaos hooks (latency, drop %, partition segments) for test harness.
 
 ## Design Trade-offs
 

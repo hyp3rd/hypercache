@@ -21,47 +21,43 @@ Checklist (incremental roadmap – status)
 - [ ] Security (TLS + auth)
 
 1. Node Identity
-Each process: NodeID (uuid or hash of host:port) + AdvertiseAddr + ClusterPort.
-Config example: DistConfig{ NodeID, BindAddr, Seeds []string, ReplicationFactor, VirtualNodes }.
-2. Membership
-Phase 1 (static): Provide full seed list; build ring once. Phase 2 (gossip): Periodic heartbeat (UDP or lightweight TCP ping) + membership state (alive, suspect, dead) using SWIM-like protocol. Data structures:
-
-membership.Map[NodeID] -> {State, Incarnation, Addr, LastHeartbeat}
-event channel for ring rebuild.
-3. Consistent Hashing Ring
-Use virtual nodes (e.g., 100–200 per physical node) hashed into a sorted ring (uint64).
-Key hash -> first vnode clockwise ⇒ primary. Next (R-1) distinct physical nodes ⇒ replicas.
-Rebuild ring atomically when membership changes (copy-on-write).
-4. Replication & Consistency
-Implemented: replication factor (R), consistency levels (ONE / QUORUM / ALL), lamport-like versioning + origin tie-break. Future: vector clocks or HLC.
-5. RPC Transport
-MVP: HTTP JSON
-
-POST /put {key, value, ttl, version}
-GET /get?key=...
-DELETE /del?key=... Internal header: X-HyperCache-NodeID. Later: switch to gRPC or custom binary for performance.
-6. Routing
-Client library can hash & send directly to primary+replicas (better latency). If not, any node accepts request:
-
-If local node not responsible, it forwards (proxy) to primary and aggregates responses.
-7. Failure Detection
-Heartbeat every T (e.g., 1s) to k random peers.
-Missed N heartbeats -> suspect; disseminate.
-Additional misses -> dead; remove from ring (but keep for hinted handoff).
-8. Rebalancing / Handoff
-Implemented (primary-change + lost ownership, push-forward). Planned: replica-only diff, pull-based batch adoption, retry queue.
-9. Anti-Entropy
-Implemented: Merkle tree build/diff/pull, periodic auto-sync. Planned: incremental/adaptive scheduling, deletion reconciliation matrix testing.
-10. Observability
-Implemented endpoints: /cluster/members, /cluster/ring, /dist/metrics, /dist/owners, /internal/merkle, /internal/keys, /health, /stats. Planned: tracing spans, structured logging enrichment.
-11. Data Model Changes
-Item metadata:
-
-Version (uint64 or vector)
-ReplicaSet (optional)
-LastUpdated timestamp
-12. Security (later)
-TLS config + shared secret / mTLS.
+    Each process: NodeID (uuid or hash of host:port) + AdvertiseAddr + ClusterPort.
+    Config example: DistConfig{ NodeID, BindAddr, Seeds []string, ReplicationFactor, VirtualNodes }.
+1. Membership
+    Phase 1 (static): Provide full seed list; build ring once. Phase 2 (gossip): Periodic heartbeat (UDP or lightweight TCP ping) + membership state (alive, suspect, dead) using SWIM-like protocol. Data structures:
+    membership.Map[NodeID] -> {State, Incarnation, Addr, LastHeartbeat}
+    event channel for ring rebuild.
+1. Consistent Hashing Ring
+    Use virtual nodes (e.g., 100–200 per physical node) hashed into a sorted ring (uint64).
+    Key hash -> first vnode clockwise ⇒ primary. Next (R-1) distinct physical nodes ⇒ replicas.
+    Rebuild ring atomically when membership changes (copy-on-write).
+1. Replication & Consistency
+    Implemented: replication factor (R), consistency levels (ONE / QUORUM / ALL), lamport-like versioning + origin tie-break. Future: vector clocks or HLC.
+1. RPC Transport
+    MVP: HTTP JSON
+    POST /put {key, value, ttl, version}
+    GET /get?key=...
+    DELETE /del?key=... Internal header: X-HyperCache-NodeID. Later: switch to gRPC or custom binary for performance.
+1. Routing
+    Client library can hash & send directly to primary+replicas (better latency). If not, any node accepts request:
+    If local node not responsible, it forwards (proxy) to primary and aggregates responses.
+1. Failure Detection
+    Heartbeat every T (e.g., 1s) to k random peers.
+    Missed N heartbeats -> suspect; disseminate.
+    Additional misses -> dead; remove from ring (but keep for hinted handoff).
+1. Rebalancing / Handoff
+    Implemented (primary-change + lost ownership, push-forward). Planned: replica-only diff, pull-based batch adoption, retry queue.
+1. Anti-Entropy
+    Implemented: Merkle tree build/diff/pull, periodic auto-sync. Planned: incremental/adaptive scheduling, deletion reconciliation matrix testing.
+1. Observability
+    Implemented endpoints: /cluster/members, /cluster/ring, /dist/metrics, /dist/owners, /internal/merkle, /internal/keys, /health, /stats. Planned: tracing spans, structured logging enrichment.
+1. Data Model Changes
+    Item metadata:
+    Version (uint64 or vector)
+    ReplicaSet (optional)
+    LastUpdated timestamp
+1. Security (later)
+    TLS config + shared secret / mTLS.
 
 Incremental Coding Plan (first 3 PR-sized steps)
 Step A (Foundations):
