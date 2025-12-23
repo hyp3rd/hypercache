@@ -70,6 +70,10 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	mgmtHTTP *ManagementHTTPServer
 }
 
+type touchBackend interface {
+	Touch(ctx context.Context, key string) bool
+}
+
 // NewInMemoryWithDefaults initializes a new HyperCache with the default configuration.
 // The default configuration is:
 //   - The eviction interval is set to 10 minutes.
@@ -661,7 +665,7 @@ func (hyperCache *HyperCache[T]) Get(ctx context.Context, key string) (any, bool
 	}
 
 	// Update the last access time and access count
-	item.Touch()
+	hyperCache.touchItem(ctx, key, item)
 
 	return item.Value, true
 }
@@ -685,7 +689,7 @@ func (hyperCache *HyperCache[T]) GetWithInfo(ctx context.Context, key string) (*
 	}
 
 	// Update the last access time and access count
-	item.Touch()
+	hyperCache.touchItem(ctx, key, item)
 
 	return item, true
 }
@@ -706,7 +710,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 		}
 
 		// Update the last access time and access count
-		item.Touch()
+		hyperCache.touchItem(ctx, key, item)
 
 		return item.Value, nil
 	}
@@ -779,13 +783,25 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 			// Coalesced/debounced trigger of the expiration loop via channel
 			hyperCache.execTriggerExpiration()
 		} else {
-			item.Touch() // Update the last access time and access count
+			hyperCache.touchItem(ctx, key, item) // Update the last access time and access count
 			// Add the item to the result map
 			result[key] = item.Value
 		}
 	}
 
 	return result, failed
+}
+
+func (hyperCache *HyperCache[T]) touchItem(ctx context.Context, key string, item *cache.Item) {
+	if item == nil {
+		return
+	}
+
+	if toucher, ok := hyperCache.backend.(touchBackend); ok {
+		toucher.Touch(ctx, key)
+	}
+
+	item.Touch()
 }
 
 // List lists the items in the cache that meet the specified criteria.

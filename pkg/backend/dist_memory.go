@@ -702,7 +702,7 @@ func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) {
 	}()
 
 	if dm.readConsistency == ConsistencyOne { // fast local path
-		if it, ok := dm.shardFor(key).items.Get(key); ok {
+		if it, ok := dm.shardFor(key).items.GetCopy(key); ok {
 			return it, true
 		}
 	}
@@ -848,6 +848,11 @@ func (dm *DistMemory) LocalContains(key string) bool {
 	_, ok := dm.shardFor(key).items.Get(key)
 
 	return ok
+}
+
+// Touch updates the last access time and access count for a key.
+func (dm *DistMemory) Touch(_ context.Context, key string) bool { //nolint:ireturn
+	return dm.shardFor(key).items.Touch(key)
 }
 
 // DebugDropLocal removes a key only from the local shard (for tests / read-repair validation).
@@ -1344,8 +1349,10 @@ func (dm *DistMemory) startTombstoneSweeper() { //nolint:ireturn
 		return
 	}
 
-	dm.tombStopCh = make(chan struct{})
-	go func() {
+	stopCh := make(chan struct{})
+
+	dm.tombStopCh = stopCh
+	go func(stopCh <-chan struct{}) {
 		ticker := time.NewTicker(dm.tombstoneSweepInt)
 		defer ticker.Stop()
 
@@ -1359,11 +1366,11 @@ func (dm *DistMemory) startTombstoneSweeper() { //nolint:ireturn
 
 				atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
 
-			case <-dm.tombStopCh:
+			case <-stopCh:
 				return
 			}
 		}
-	}()
+	}(stopCh)
 }
 
 // compactTombstones removes expired tombstones based on TTL, returns count purged.
@@ -1420,12 +1427,14 @@ func (dm *DistMemory) startRebalancerIfEnabled(ctx context.Context) { //nolint:i
 		dm.rebalanceMaxConcurrent = defaultRebalanceMaxConcurrent
 	}
 
-	dm.rebalanceStopCh = make(chan struct{})
+	stopCh := make(chan struct{})
 
-	go dm.rebalanceLoop(ctx)
+	dm.rebalanceStopCh = stopCh
+
+	go dm.rebalanceLoop(ctx, stopCh)
 }
 
-func (dm *DistMemory) rebalanceLoop(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) rebalanceLoop(ctx context.Context, stopCh <-chan struct{}) { //nolint:ireturn
 	ticker := time.NewTicker(dm.rebalanceInterval)
 	defer ticker.Stop()
 
@@ -1433,7 +1442,7 @@ func (dm *DistMemory) rebalanceLoop(ctx context.Context) { //nolint:ireturn
 		select {
 		case <-ticker.C:
 			dm.runRebalanceTick(ctx)
-		case <-dm.rebalanceStopCh:
+		case <-stopCh:
 			return
 		case <-ctx.Done():
 			return
@@ -1688,7 +1697,7 @@ func (dm *DistMemory) maybeRecordRemoval(sh *distShard, key string) { //nolint:i
 
 // migrateItems concurrently migrates items in batches respecting configured limits.
 //
-//nolint:ireturn,revive
+//nolint:ireturn
 func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) {
 	if len(items) == 0 {
 		return
@@ -1725,18 +1734,6 @@ func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) {
 				dm.migrateIfNeeded(ctx, &itm)
 			}
 		})
-
-		go func(batchItems []cache.Item) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			atomic.AddInt64(&dm.metrics.rebalanceBatches, 1)
-
-			for i := range batchItems {
-				itm := batchItems[i] // value copy
-				dm.migrateIfNeeded(ctx, &itm)
-			}
-		}(batch)
 	}
 
 	wg.Wait()
@@ -1934,8 +1931,10 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) { //nolint:ireturn
 // startHeartbeatIfEnabled launches heartbeat loop if configured.
 func (dm *DistMemory) startHeartbeatIfEnabled(ctx context.Context) { //nolint:ireturn
 	if dm.hbInterval > 0 && dm.transport != nil {
-		dm.stopCh = make(chan struct{})
-		go dm.heartbeatLoop(ctx)
+		stopCh := make(chan struct{})
+
+		dm.stopCh = stopCh
+		go dm.heartbeatLoop(ctx, stopCh)
 	}
 }
 
@@ -1984,7 +1983,7 @@ func (dm *DistMemory) tryLocalGet(key string, idx int, oid cluster.NodeID) (*cac
 		return nil, false
 	}
 
-	if it, ok := dm.shardFor(key).items.Get(key); ok {
+	if it, ok := dm.shardFor(key).items.GetCopy(key); ok {
 		if idx > 0 { // promotion
 			atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
 		}
@@ -2115,7 +2114,7 @@ func (dm *DistMemory) repairStaleOwners(
 // fetchOwner attempts to fetch item from given owner (local or remote) updating metrics.
 func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
 	if oid == dm.localNode.ID { // local
-		if it, ok := dm.shardFor(key).items.Get(key); ok {
+		if it, ok := dm.shardFor(key).items.GetCopy(key); ok {
 			return it, true
 		}
 
@@ -2323,11 +2322,13 @@ func (dm *DistMemory) startHintReplayIfEnabled(ctx context.Context) {
 		return
 	}
 
-	dm.hintStopCh = make(chan struct{})
-	go dm.hintReplayLoop(ctx)
+	stopCh := make(chan struct{})
+
+	dm.hintStopCh = stopCh
+	go dm.hintReplayLoop(ctx, stopCh)
 }
 
-func (dm *DistMemory) hintReplayLoop(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) hintReplayLoop(ctx context.Context, stopCh <-chan struct{}) { //nolint:ireturn
 	ticker := time.NewTicker(dm.hintReplayInt)
 	defer ticker.Stop()
 
@@ -2335,7 +2336,7 @@ func (dm *DistMemory) hintReplayLoop(ctx context.Context) { //nolint:ireturn
 		select {
 		case <-ticker.C:
 			dm.replayHints(ctx)
-		case <-dm.hintStopCh:
+		case <-stopCh:
 			return
 		case <-ctx.Done():
 			return
@@ -2409,8 +2410,10 @@ func (dm *DistMemory) startGossipIfEnabled() { //nolint:ireturn
 		return
 	}
 
-	dm.gossipStopCh = make(chan struct{})
-	go dm.gossipLoop()
+	stopCh := make(chan struct{})
+
+	dm.gossipStopCh = stopCh
+	go dm.gossipLoop(stopCh)
 }
 
 // startAutoSyncIfEnabled launches periodic merkle syncs to all other members.
@@ -2423,19 +2426,21 @@ func (dm *DistMemory) startAutoSyncIfEnabled(ctx context.Context) { //nolint:ire
 		return
 	}
 
-	dm.autoSyncStopCh = make(chan struct{})
+	stopCh := make(chan struct{})
+
+	dm.autoSyncStopCh = stopCh
 
 	interval := dm.autoSyncInterval
-	go dm.autoSyncLoop(ctx, interval)
+	go dm.autoSyncLoop(ctx, interval, stopCh)
 }
 
-func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration) { //nolint:ireturn
+func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration, stopCh <-chan struct{}) { //nolint:ireturn
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-dm.autoSyncStopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			dm.runAutoSyncTick(ctx)
@@ -2481,7 +2486,7 @@ func (dm *DistMemory) runAutoSyncTick(ctx context.Context) { //nolint:ireturn
 	atomic.AddInt64(&dm.metrics.autoSyncLoops, 1)
 }
 
-func (dm *DistMemory) gossipLoop() { //nolint:ireturn
+func (dm *DistMemory) gossipLoop(stopCh <-chan struct{}) { //nolint:ireturn
 	ticker := time.NewTicker(dm.gossipInterval)
 	defer ticker.Stop()
 
@@ -2489,7 +2494,7 @@ func (dm *DistMemory) gossipLoop() { //nolint:ireturn
 		select {
 		case <-ticker.C:
 			dm.runGossipTick()
-		case <-dm.gossipStopCh:
+		case <-stopCh:
 			return
 		}
 	}
@@ -2734,7 +2739,7 @@ func (dm *DistMemory) initStandaloneMembership() {
 }
 
 // heartbeatLoop probes peers and updates membership (best-effort experimental).
-func (dm *DistMemory) heartbeatLoop(ctx context.Context) { // reduced cognitive complexity via helpers
+func (dm *DistMemory) heartbeatLoop(ctx context.Context, stopCh <-chan struct{}) { // reduced cognitive complexity via helpers
 	ticker := time.NewTicker(dm.hbInterval)
 	defer ticker.Stop()
 
@@ -2742,7 +2747,7 @@ func (dm *DistMemory) heartbeatLoop(ctx context.Context) { // reduced cognitive 
 		select {
 		case <-ticker.C:
 			dm.runHeartbeatTick(ctx)
-		case <-dm.stopCh:
+		case <-stopCh:
 			return
 		}
 	}

@@ -23,6 +23,7 @@ package v2
 
 import (
 	"sync"
+	"time"
 )
 
 const (
@@ -109,6 +110,43 @@ func (cm *ConcurrentMap) Get(key string) (*Item, bool) {
 	shard.RUnlock()
 
 	return item, ok
+}
+
+// GetCopy retrieves a copy of the item under the given key.
+func (cm *ConcurrentMap) GetCopy(key string) (*Item, bool) {
+	shard := cm.GetShard(key)
+	shard.RLock()
+
+	item, ok := shard.items[key]
+	if !ok {
+		shard.RUnlock()
+
+		return nil, false
+	}
+
+	cloned := *item
+
+	shard.RUnlock()
+
+	return &cloned, true
+}
+
+// Touch updates the last access time and access count for a key.
+func (cm *ConcurrentMap) Touch(key string) bool {
+	shard := cm.GetShard(key)
+
+	shard.Lock()
+	defer shard.Unlock()
+
+	item, ok := shard.items[key]
+	if !ok {
+		return false
+	}
+
+	item.LastAccess = time.Now()
+	item.AccessCount++
+
+	return true
 }
 
 // Has checks if key is present in the map.

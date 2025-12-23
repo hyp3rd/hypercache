@@ -55,12 +55,17 @@ func (cacheBackend *InMemory) Count(_ context.Context) int {
 
 // Get retrieves the item with the given key from the cacheBackend. If the item is not found, it returns nil.
 func (cacheBackend *InMemory) Get(_ context.Context, key string) (*cache.Item, bool) {
-	item, ok := cacheBackend.items.Get(key)
+	item, ok := cacheBackend.items.GetCopy(key)
 	if !ok {
 		return nil, false
 	}
 	// return the item
 	return item, true
+}
+
+// Touch updates the last access time and access count for a key.
+func (cacheBackend *InMemory) Touch(_ context.Context, key string) bool { //nolint:ireturn
+	return cacheBackend.items.Touch(key)
 }
 
 // Set adds a Item to the cache.

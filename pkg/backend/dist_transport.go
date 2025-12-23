@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"sync"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
@@ -17,7 +18,10 @@ type DistTransport interface {
 }
 
 // InProcessTransport implements DistTransport for multiple DistMemory instances in the same process.
-type InProcessTransport struct{ backends map[string]*DistMemory }
+type InProcessTransport struct {
+	mu       sync.RWMutex
+	backends map[string]*DistMemory
+}
 
 // NewInProcessTransport creates a new empty transport.
 func NewInProcessTransport() *InProcessTransport { //nolint:ireturn
@@ -27,16 +31,23 @@ func NewInProcessTransport() *InProcessTransport { //nolint:ireturn
 // Register adds backends; safe to call multiple times.
 func (t *InProcessTransport) Register(b *DistMemory) {
 	if b != nil && b.localNode != nil {
+		t.mu.Lock()
+
 		t.backends[string(b.localNode.ID)] = b
+		t.mu.Unlock()
 	}
 }
 
 // Unregister removes a backend (simulate failure in tests).
-func (t *InProcessTransport) Unregister(id string) { delete(t.backends, id) }
+func (t *InProcessTransport) Unregister(id string) {
+	t.mu.Lock()
+	delete(t.backends, id)
+	t.mu.Unlock()
+}
 
 // ForwardSet forwards a set operation to the specified backend node.
 func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error { //nolint:ireturn
-	b, ok := t.backends[nodeID]
+	b, ok := t.lookup(nodeID)
 	if !ok {
 		return sentinel.ErrBackendNotFound
 	}
@@ -48,12 +59,12 @@ func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item
 
 // ForwardGet forwards a get operation to the specified backend node.
 func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID, key string) (*cache.Item, bool, error) { //nolint:ireturn
-	b, ok := t.backends[nodeID]
+	b, ok := t.lookup(nodeID)
 	if !ok {
 		return nil, false, sentinel.ErrBackendNotFound
 	}
 
-	it, ok2 := b.shardFor(key).items.Get(key)
+	it, ok2 := b.shardFor(key).items.GetCopy(key)
 	if !ok2 {
 		return nil, false, nil
 	}
@@ -63,7 +74,7 @@ func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID, key string) (
 
 // ForwardRemove forwards a remove operation.
 func (t *InProcessTransport) ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error { //nolint:ireturn
-	b, ok := t.backends[nodeID]
+	b, ok := t.lookup(nodeID)
 	if !ok {
 		return sentinel.ErrBackendNotFound
 	}
@@ -75,7 +86,7 @@ func (t *InProcessTransport) ForwardRemove(ctx context.Context, nodeID, key stri
 
 // Health probes a backend.
 func (t *InProcessTransport) Health(_ context.Context, nodeID string) error { //nolint:ireturn
-	if _, ok := t.backends[nodeID]; !ok {
+	if _, ok := t.lookup(nodeID); !ok {
 		return sentinel.ErrBackendNotFound
 	}
 
@@ -84,10 +95,19 @@ func (t *InProcessTransport) Health(_ context.Context, nodeID string) error { //
 
 // FetchMerkle fetches a remote merkle tree.
 func (t *InProcessTransport) FetchMerkle(_ context.Context, nodeID string) (*MerkleTree, error) { //nolint:ireturn
-	b, ok := t.backends[nodeID]
+	b, ok := t.lookup(nodeID)
 	if !ok {
 		return nil, sentinel.ErrBackendNotFound
 	}
 
 	return b.BuildMerkleTree(), nil
+}
+
+func (t *InProcessTransport) lookup(nodeID string) (*DistMemory, bool) {
+	t.mu.RLock()
+
+	b, ok := t.backends[nodeID]
+	t.mu.RUnlock()
+
+	return b, ok
 }
