@@ -9,7 +9,6 @@ import (
 	"hash"
 	"hash/fnv"
 	"math/big"
-	mrand "math/rand"
 	"slices"
 	"sort"
 	"sync"
@@ -2887,7 +2886,7 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 }
 
 // runHeartbeatTick runs one heartbeat iteration (best-effort).
-func (dm *DistMemory) runHeartbeatTick(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) runHeartbeatTick(ctx context.Context) { //nolint:ireturn,revive
 	if dm.transport == nil || dm.membership == nil {
 		return
 	}
@@ -2900,9 +2899,17 @@ func (dm *DistMemory) runHeartbeatTick(ctx context.Context) { //nolint:ireturn
 		// Fisher–Yates partial shuffle for first sampleCount elements
 		sampleCount := dm.hbSampleSize
 		for i := range sampleCount { // Go 1.22 int range form
-			j := i + mrand.Intn(len(peers)-i) //nolint:gosec // math/rand acceptable for sampling
+			swapIndex := i
+			span := len(peers) - i
 
-			peers[i], peers[j] = peers[j], peers[i]
+			if span > 1 {
+				idxBig, err := rand.Int(rand.Reader, big.NewInt(int64(span)))
+				if err == nil {
+					swapIndex = i + int(idxBig.Int64())
+				}
+			}
+
+			peers[i], peers[swapIndex] = peers[swapIndex], peers[i]
 		}
 
 		peers = peers[:sampleCount]

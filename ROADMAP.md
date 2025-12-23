@@ -158,7 +158,7 @@ Success Criteria:
 ## KPIs
 
 | KPI | Target |
-|-----|--------|
+| ----- | -------- |
 | QUORUM Set p95 (3-node HTTP) | < 3x in-process baseline |
 | QUORUM Get p95 | < 2x in-process baseline |
 | Hint Drain Time (single node outage 5m) | < 2m after recovery |
@@ -169,10 +169,10 @@ Success Criteria:
 ## Immediate Next Actions (Short-Term Focus)
 
 1. Implement replica-only ownership diff & migration during rebalance.
-2. Add migration retry queue + metrics (success, failure, retries, drops).
-3. Introduce adaptive Merkle scheduling (skip or backoff after clean cycles).
-4. Instrument tracing spans (placeholders) for distributed operations.
-5. Add chaos hooks (latency / drop %) to transport for resilience tests.
+1. Add migration retry queue + metrics (success, failure, retries, drops).
+1. Introduce adaptive Merkle scheduling (skip or backoff after clean cycles).
+1. Instrument tracing spans (placeholders) for distributed operations.
+1. Add chaos hooks (latency / drop %) to transport for resilience tests.
 
 ---
 

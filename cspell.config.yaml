@@ -90,6 +90,7 @@ words:
   - gosec
   - GOTOOLCHAIN
   - govulncheck
+  - HMAC
   - honnef
   - hreq
   - hypercache
@@ -133,6 +134,7 @@ words:
   - Repls
   - rerr
   - sarif
+  - sectools
   - securego
   - sess
   - shamaton

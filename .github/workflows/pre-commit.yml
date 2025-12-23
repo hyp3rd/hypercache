@@ -45,4 +45,4 @@ jobs:
           go install mvdan.cc/gofumpt@latest
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$(go env GOPATH)/bin" "${{ steps.settings.outputs.golangci_lint_version }}"
       - name: Run pre-commit
-        run: pre-commit run --all-files
+        run: pre-commit run --config .pre-commit-ci-config.yaml --all-files

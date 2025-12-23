@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/ewrap"
+	"github.com/hyp3rd/sectools/pkg/converters"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/introspect"
@@ -285,22 +286,30 @@ func configureEvictionSettings[T backend.IBackendConstrain](hc *HyperCache[T]) {
 	hc.shouldEvict.Store(hc.evictionInterval == 0 && hc.backend.Capacity() > 0)
 
 	if hc.maxEvictionCount == 0 {
-		//nolint:gosec
-		hc.maxEvictionCount = uint(hc.backend.Capacity())
+		maxEvictionCount, err := converters.ToUint(hc.backend.Capacity())
+		if err != nil {
+			hc.maxEvictionCount = 1
+
+			return
+		}
+
+		hc.maxEvictionCount = maxEvictionCount
 	}
 }
 
 // initEvictionAlgorithm initializes the eviction algorithm for the cache.
 func initEvictionAlgorithm[T backend.IBackendConstrain](hc *HyperCache[T]) error {
-	var err error
+	maxEvictionCount, err := converters.ToInt(hc.maxEvictionCount)
+	if err != nil {
+		return err
+	}
+
 	if hc.evictionAlgorithmName == "" {
 		// Use the default eviction algorithm if none is specified
-		//nolint:gosec
-		hc.evictionAlgorithm, err = eviction.NewLRUAlgorithm(int(hc.maxEvictionCount))
+		hc.evictionAlgorithm, err = eviction.NewLRUAlgorithm(maxEvictionCount)
 	} else {
 		// Use the specified eviction algorithm
-		//nolint:gosec
-		hc.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hc.evictionAlgorithmName, int(hc.maxEvictionCount))
+		hc.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hc.evictionAlgorithmName, maxEvictionCount)
 	}
 
 	return err
@@ -544,9 +553,19 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 			hyperCache.StatsCollector.Incr("item_evicted_count", 1)
 		}
 
-		hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count(ctx)))
-		//nolint:gosec
-		hyperCache.StatsCollector.Gauge("evicted_item_count", int64(evictedCount))
+		itemCount, err := converters.ToInt64(hyperCache.backend.Count(ctx))
+		if err != nil {
+			return err
+		}
+
+		hyperCache.StatsCollector.Gauge("item_count", itemCount)
+
+		evictedCount64, err := converters.ToInt64(evictedCount)
+		if err != nil {
+			return err
+		}
+
+		hyperCache.StatsCollector.Gauge("evicted_item_count", evictedCount64)
 
 		return nil
 	})

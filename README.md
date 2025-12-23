@@ -171,7 +171,7 @@ if err != nil {
 ### Advanced options quick reference
 
 | Option | Purpose |
-|--------|---------|
+| -------- | --------- |
 | `WithEvictionInterval` | Periodic eviction loop; set to `0` for proactive per-write eviction. |
 | `WithExpirationInterval` | Periodic scan for expired items. |
 | `WithExpirationTriggerBuffer` | Buffer size for coalesced expiration trigger channel. |
@@ -251,7 +251,7 @@ Replica removal cleanup (actively dropping data from nodes no longer replicas) i
 Metrics (via management or `Metrics()`):
 
 | Metric | Description |
-|--------|-------------|
+| -------- | ------------- |
 | RebalancedKeys | Count of all rebalance-related migrations (primary changes + replica diff replications). |
 | RebalancedPrimary | Count of primary ownership change migrations (subset of RebalancedKeys). |
 | RebalanceBatches | Number of migration batches executed. |
@@ -265,7 +265,7 @@ Test helpers `AddPeer` and `RemovePeer` simulate join / leave events that trigge
 ### Roadmap / PRD Progress Snapshot
 
 | Area | Status |
-|------|--------|
+| ------ | -------- |
 | Core in-process sharding | Done |
 | Replication fan-out | Done |
 | Read-repair | Done |
