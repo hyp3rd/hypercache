@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -e
+
+# ######################################
+# Ensure that a go module is initialized if not, skip the tests
+# #######################################
+ensure_go_module_initialized() {
+	if [[ ! -f go.mod ]]; then
+		echo "go.mod file not found, skipping the tests..."
+		exit 0
+	fi
+}
+
+# #######################################
+# Run the pre-commit
+# #######################################
+hook() {
+	# get the root of the project
+	local root_dir
+	root_dir=$(git rev-parse --show-toplevel)
+
+	# run the pre-commit hook
+	pushd "${root_dir}" || exit
+
+	echo "Running go mod verify..."
+
+	go mod verify
+
+	echo "Running go mod tidy..."
+	go mod tidy
+
+	popd >/dev/null || exit
+}
+
+cat <<EOF
+go-mod Hook
+=============================================================================
+
+This hook ensures and runs go mod tidy and go mod verify on the project.
+It should be installed and run as a pre-commit hook.
+
+If go mod finds any errors it will prevent the commit.
+=============================================================================
+
+EOF
+
+# run the hook if the go module is initialized
+ensure_go_module_initialized
+hook

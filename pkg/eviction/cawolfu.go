@@ -1,4 +1,3 @@
-// Package eviction CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
 package eviction
 
 import (

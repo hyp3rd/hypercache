@@ -5,9 +5,8 @@ import (
 	"net"
 	"strings"
 
-	"github.com/redis/go-redis/v9"
-
 	"github.com/hyp3rd/ewrap"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
 )

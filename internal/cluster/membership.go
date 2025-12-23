@@ -45,7 +45,13 @@ func (m *Membership) List() []*Node {
 
 	out := make([]*Node, 0, len(m.nodes))
 	for _, v := range m.nodes {
-		out = append(out, v)
+		if v == nil {
+			continue
+		}
+
+		cp := *v
+
+		out = append(out, &cp)
 	}
 
 	return out

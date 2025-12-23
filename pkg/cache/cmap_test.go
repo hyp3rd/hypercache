@@ -84,7 +84,7 @@ func TestUpsert(t *testing.T) {
 	key := "test"
 
 	// Insert new value
-	result := cmap.Upsert(key, 10, func(exist bool, valueInMap int, newValue int) int {
+	result := cmap.Upsert(key, 10, func(exist bool, valueInMap, newValue int) int {
 		if !exist {
 			return newValue
 		}
@@ -97,7 +97,7 @@ func TestUpsert(t *testing.T) {
 	}
 
 	// Update existing value
-	result = cmap.Upsert(key, 5, func(exist bool, valueInMap int, newValue int) int {
+	result = cmap.Upsert(key, 5, func(exist bool, valueInMap, newValue int) int {
 		if !exist {
 			return newValue
 		}

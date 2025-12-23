@@ -8,7 +8,6 @@ package serializer
 
 import (
 	"github.com/goccy/go-json"
-
 	"github.com/hyp3rd/ewrap"
 )
 

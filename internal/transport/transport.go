@@ -26,9 +26,9 @@ func (e *RPCError) Error() string { //nolint:ireturn
 // Client defines network transport operations needed by distributed backend.
 // This abstracts over HTTP, gRPC, etc.
 type Client interface {
-	Get(ctx context.Context, node string, key string) ([]byte, bool, error)
-	Set(ctx context.Context, node string, key string, value []byte, expiration time.Duration, replicate bool) error
-	Remove(ctx context.Context, node string, key string, replicate bool) error
+	Get(ctx context.Context, node, key string) ([]byte, bool, error)
+	Set(ctx context.Context, node, key string, value []byte, expiration time.Duration, replicate bool) error
+	Remove(ctx context.Context, node, key string, replicate bool) error
 	Health(ctx context.Context, node string) error
 }
 

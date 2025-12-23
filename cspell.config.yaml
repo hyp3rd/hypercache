@@ -1,14 +1,45 @@
 version: "0.2"
-ignorePaths: []
+ignorePaths:
+  - go.mod
+  - go.sum
+  - Makefile
+  - .golangci-lint.yml
+  - .golangci.yaml
+  - .pre-commit-config.yaml
+  - .project-settings.env
+  - Dockerfile
+  - .gitignore
+  - .dockerignore
+  - "*.pb.*"
+  - "*.sql"
+  - "*.svg"
+  - docker/*
+  - "*.excalidraw"
+  - .vscode/*
+  - azdo/pipelines/*
+  - scripts/*
+  - .github/workflows/*
+  - .github/*
+  - .idea/*
+  - .DS_Store
+  - "*.hcl"
+  - "*.env"
+  - "*.http"
+  - compose.*.yaml
+  - docs/mkdocs.yml
 dictionaryDefinitions: []
 dictionaries: []
 words:
   - acks
   - backpressure
+  - benchmarkdist
   - benchmem
   - benchtime
+  - bitnami
+  - bufbuild
   - cacheerrors
   - cachev
+  - calledback
   - cand
   - CAWOLFU
   - Cbor
@@ -21,14 +52,22 @@ words:
   - cyclop
   - daixiang
   - Decr
+  - dels
   - depguard
+  - derr
   - distconfig
+  - EDITMSG
+  - elif
   - errcheck
   - ewrap
+  - excalidraw
   - excludeonly
   - exhaustruct
   - Fanout
   - fctx
+  - ferr
+  - FLUSHALL
+  - FLUSHDB
   - forcetypeassert
   - Fprintf
   - Fprintln
@@ -38,17 +77,29 @@ words:
   - gitversion
   - GITVERSION
   - goarch
+  - gocache
   - goccy
   - gochecknoglobals
   - gofiber
   - GOFILES
   - gofumpt
   - goimports
+  - golangci
   - golines
   - GOPATH
+  - goroutines
   - gosec
+  - GOTOOLCHAIN
+  - govulncheck
+  - HMAC
   - honnef
   - hreq
+  - hypercache
+  - idxs
+  - Iface
+  - ineff
+  - inmemory
+  - intrange
   - ints
   - ireturn
   - Itemm
@@ -57,30 +108,59 @@ words:
   - LFUDA
   - localmodule
   - logrus
+  - longbridgeapp
+  - maxmemory
   - memprofile
   - Merkle
+  - mfinal
   - Mgmt
+  - mkdocs
+  - mrand
+  - mset
   - msgpack
   - mvdan
   - nestif
   - Newf
+  - noctx
+  - noinlineerr
   - nolint
   - nonamedreturns
   - nosec
   - NOVENDOR
   - paralleltest
   - Pipeliner
+  - popd
   - Prealloc
+  - protoc
+  - pushd
   - recvcheck
+  - rediscluster
+  - repls
+  - Repls
+  - rerr
   - sarif
+  - sectools
+  - securego
+  - sess
+  - shamaton
+  - shellcheck
+  - skeys
   - SLRU
   - staticcheck
   - stdlib
   - strfnv
   - strs
+  - sval
+  - thelper
+  - toplevel
+  - tparallel
+  - traefik
   - ugorji
   - unmarshals
+  - upserted
+  - upserts
   - varnamelen
+  - vettool
   - vnode
   - vnodes
   - wrapcheck

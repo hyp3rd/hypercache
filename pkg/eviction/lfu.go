@@ -1,4 +1,3 @@
-// Package eviction - Least Frequently Used (LFU) eviction algorithm implementation
 package eviction
 
 import (

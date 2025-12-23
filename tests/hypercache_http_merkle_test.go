@@ -8,7 +8,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	cachev2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestHTTPFetchMerkle ensures HTTP transport can fetch a remote Merkle tree and SyncWith works over HTTP.
@@ -63,7 +63,7 @@ func TestHTTPFetchMerkle(t *testing.T) {
 	// ensure membership has both before writes (already upserted in constructors)
 	// write some keys to b1 only
 	for i := range 5 { // direct inject to sidestep replication/forwarding complexity
-		item := &cachev2.Item{Key: httpKey(i), Value: []byte("v"), Version: uint64(i + 1), Origin: "n1", LastUpdated: time.Now()}
+		item := &cache.Item{Key: httpKey(i), Value: []byte("v"), Version: uint64(i + 1), Origin: "n1", LastUpdated: time.Now()}
 		b1.DebugInject(item)
 	}
 	// ensure HTTP merkle endpoint reachable

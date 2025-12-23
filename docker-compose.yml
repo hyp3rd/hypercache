@@ -1,35 +1,28 @@
-version: "3.9"
-
-x-logging: &default-logging
-  options:
-    max-size: "12m"
-    max-file: "5"
-  driver: json-file
-
+---
 services:
   #######################################
   # The redis-store backend caching service.
   #######################################
   redis-store:
     command:
-    - /opt/bitnami/scripts/redis/run.sh
-    - --maxmemory
-    - 256mb
+      - /opt/bitnami/scripts/redis/run.sh
+      - --maxmemory
+      - 256mb
     container_name: redis-store
     environment:
       ALLOW_EMPTY_PASSWORD: "no"
       REDIS_DISABLE_COMMANDS: FLUSHDB,FLUSHALL,CONFIG
       REDIS_PASSWORD: k7oMs2G5bc4mRN45jPZjLBZxuMFrCLahvPn648Zwq1lT41gSYZqapBRnSF2L995FaYcZBz8c7xkKXku94HeReDgdwBu1N4CzgfQ94Z504hjfzrST1u0idVkbXe8ust
     hostname: redis-store
-    image: bitnami/redis:7.2.4
+    image: bitnami/redis:latest
     # networks:
     #   hypercache-redis-store-net: null
     #######################################
-    ports:  # uncomment to be able to bypass traefik
-    - mode: ingress
-      target: 6379
-      published: 6379
-      protocol: tcp
+    ports:
+      - mode: ingress
+        target: 6379
+        published: 6379
+        protocol: tcp
 # Networks section
 networks:
   hypercache-redis-store-net:

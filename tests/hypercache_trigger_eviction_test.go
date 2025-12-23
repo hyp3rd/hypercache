@@ -13,7 +13,7 @@ import (
 
 // Test TriggerEviction when evictionInterval == 0 triggers immediate eviction of overflow item(s).
 func TestHyperCache_TriggerEviction_Immediate(t *testing.T) {
-	hc, err := hypercache.NewInMemoryWithDefaults(1)
+	hc, err := hypercache.NewInMemoryWithDefaults(context.TODO(), 1)
 	assert.Nil(t, err)
 
 	defer hc.Stop(context.TODO())

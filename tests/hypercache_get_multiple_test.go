@@ -67,6 +67,7 @@ func TestGetMultiple(t *testing.T) {
 					backend.WithCapacity[backend.InMemory](10),
 				},
 			}
+
 			hypercache.GetDefaultManager()
 
 			cache, err := hypercache.New(context.TODO(), hypercache.GetDefaultManager(), config)

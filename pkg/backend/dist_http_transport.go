@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-
 	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
@@ -188,7 +187,12 @@ func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID, key strin
 	}
 
 	// prefer canonical endpoint
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/internal/del?key=%s&replicate=%t", base, key, replicate), nil)
+	hreq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodDelete,
+		fmt.Sprintf("%s/internal/del?key=%s&replicate=%t", base, key, replicate),
+		nil,
+	)
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
 	}

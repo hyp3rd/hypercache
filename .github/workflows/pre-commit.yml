@@ -1,0 +1,48 @@
+---
+name: pre-commit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Load project settings
+        id: settings
+        run: |
+          set -a
+          source .project-settings.env
+          set +a
+          echo "go_version=${GO_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "golangci_lint_version=${GOLANGCI_LINT_VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "${{ steps.settings.outputs.go_version }}"
+          check-latest: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ steps.settings.outputs.go_version }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ steps.settings.outputs.go_version }}-
+      - name: Install pre-commit
+        run: pip install pre-commit
+      - name: Install Go tools for hooks
+        run: |
+          go install github.com/daixiang0/gci@latest
+          go install mvdan.cc/gofumpt@latest
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$(go env GOPATH)/bin" "${{ steps.settings.outputs.golangci_lint_version }}"
+      - name: Run pre-commit
+        run: pre-commit run --config .pre-commit-ci-config.yaml --all-files

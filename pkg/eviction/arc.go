@@ -1,4 +1,3 @@
-// Package eviction - Adaptive Replacement Cache (ARC) algorithm implementation.
 package eviction
 
 import (

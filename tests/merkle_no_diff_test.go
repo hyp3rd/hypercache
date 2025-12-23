@@ -14,8 +14,18 @@ func TestMerkleNoDiff(t *testing.T) {
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
-	a, _ := backend.NewDistMemory(ctx, backend.WithDistNode("A", "127.0.0.1:9401"), backend.WithDistReplication(1), backend.WithDistMerkleChunkSize(4))
-	b, _ := backend.NewDistMemory(ctx, backend.WithDistNode("B", "127.0.0.1:9402"), backend.WithDistReplication(1), backend.WithDistMerkleChunkSize(4))
+	a, _ := backend.NewDistMemory(
+		ctx,
+		backend.WithDistNode("A", "127.0.0.1:9401"),
+		backend.WithDistReplication(1),
+		backend.WithDistMerkleChunkSize(4),
+	)
+	b, _ := backend.NewDistMemory(
+		ctx,
+		backend.WithDistNode("B", "127.0.0.1:9402"),
+		backend.WithDistReplication(1),
+		backend.WithDistMerkleChunkSize(4),
+	)
 
 	da := any(a).(*backend.DistMemory)
 	db := any(b).(*backend.DistMemory)

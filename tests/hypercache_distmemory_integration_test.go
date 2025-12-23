@@ -7,7 +7,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	cachev2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestDistMemoryForwardingReplication spins up two DistMemory backends sharing membership and transport
@@ -54,7 +54,7 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 			t.Fatalf("no owners for key %s", k)
 		}
 
-		item := &cachev2.Item{Key: k, Value: k}
+		item := &cache.Item{Key: k, Value: k}
 
 		err := item.Valid()
 		if err != nil {

@@ -28,9 +28,9 @@ It ships with a default [histogram stats collector](./stats/stats.go) and severa
 - Thread-safe & lock‑optimized (sharded map + worker pool)
 - High-performance (low allocations on hot paths, pooled items, serializer‑aware sizing)
 - Multiple backends (extensible):
-    1. [In-memory](./pkg/backend/inmemory.go)
-    2. [Redis](./pkg/backend/redis.go)
-    3. [Redis Cluster](./pkg/backend/redis_cluster.go)
+            1. [In-memory](./pkg/backend/inmemory.go)
+            1. [Redis](./pkg/backend/redis.go)
+            1. [Redis Cluster](./pkg/backend/redis_cluster.go)
 - Item expiration & proactive expiration triggering (debounced/coalesced)
 - Background or proactive (interval = 0) eviction using pluggable algorithms
 - Manual, non-blocking eviction triggering (`TriggerEviction()`)
@@ -139,10 +139,10 @@ Note: ARC is experimental and isn’t included in the default registry. If you c
 
 ## API
 
-`NewInMemoryWithDefaults(capacity)` is the quickest way to start:
+`NewInMemoryWithDefaults(ctx, capacity)` is the quickest way to start:
 
 ```golang
-cache, err := hypercache.NewInMemoryWithDefaults(100)
+cache, err := hypercache.NewInMemoryWithDefaults(context.Background(), 100)
 if err != nil {
     // handle error
 }
@@ -171,7 +171,7 @@ if err != nil {
 ### Advanced options quick reference
 
 | Option | Purpose |
-|--------|---------|
+| -------- | --------- |
 | `WithEvictionInterval` | Periodic eviction loop; set to `0` for proactive per-write eviction. |
 | `WithExpirationInterval` | Periodic scan for expired items. |
 | `WithExpirationTriggerBuffer` | Buffer size for coalesced expiration trigger channel. |
@@ -204,47 +204,90 @@ When using Redis or Redis Cluster, item size accounting uses the configured seri
 
 ### Distributed In‑Process Backend (Experimental)
 
-An experimental in‑process distributed backend `DistMemory` is being developed (feature branch: `feat/distributed-backend`). It simulates a small cluster inside a single process using a consistent hash ring with virtual nodes, replication, forwarding, replication fan‑out, and read‑repair. This is primarily for experimentation before introducing real network transports and dynamic membership.
+The experimental in‑process distributed backend `DistMemory` (feature branch: `feat/distributed-backend`) simulates a small cluster inside a single process using a consistent hash ring with virtual nodes, replication, quorum consistency, forwarding, replica fan‑out, rebalancing, hinted handoff, tombstones and Merkle-based anti‑entropy.
 
-Current capabilities:
+A detailed deep dive lives in [docs/distributed.md](./docs/distributed.md). Below is a concise summary.
+
+Current capabilities (implemented):
 
 - Static membership + ring with configurable replication factor & virtual nodes.
-- Ownership enforcement (non‑owners forward to primary).
-- Replica fan‑out on writes (best‑effort) & replica removals.
-- Read‑repair when a local owner misses but another replica has the key.
-- Basic delete semantics with tombstones: deletions propagate as versioned tombstones preventing
-    resurrection during anti-entropy (tombstone retention is in‑memory, no persistence yet).
-  - Tombstone versioning uses a per-process monotonic counter when no prior item version exists (avoids time-based unsigned casts).
-  - Remote pull sync will infer a tombstone when a key present locally is absent remotely and no local tomb exists (anti-resurrection guard).
-  - DebugInject intentionally clears any existing tombstone for that key (test helper / simulating authoritative resurrection with higher version).
-    - Tombstone TTL + periodic compaction: configure with `WithDistTombstoneTTL` / `WithDistTombstoneSweep`; metrics track active & purged counts.
-- Metrics exposed via management endpoints (`/dist/metrics`, `/dist/owners`, `/cluster/members`, `/cluster/ring`).
-  - Includes Merkle phase timings (fetch/build/diff nanos) and counters for keys pulled during anti-entropy.
-    - Tombstone metrics: `TombstonesActive`, `TombstonesPurged`.
+- Ownership enforcement (non‑owners forward to primary; promotion if primary unreachable).
+- Replica fan‑out on writes + replica removals.
+- Quorum reads & writes (ONE / QUORUM / ALL) with read repair.
+- Hinted handoff (TTL, replay, per-node + global caps, metrics).
+- Delete semantics with versioned tombstones (TTL + compaction, anti‑resurrection guard).
+- Merkle tree anti‑entropy (build/diff/pull) + metrics.
+- Periodic auto Merkle sync (peer cap optional).
+- Heartbeat-based failure detection (alive→suspect→dead) + metrics.
+- Lightweight gossip snapshot exchange (in-process only).
+- Rebalancing (primary change & lost ownership migrations) with batching and concurrency throttling metrics.
+- Latency histograms for Get/Set/Remove.
 
-Planned next steps (roadmap excerpts): network transport abstraction, quorum reads/writes, versioning (vector clocks or lamport), failure detection / node states, rebalancing & anti‑entropy sync.
+Limitations / not yet implemented:
+
+- Replica-only ownership diff migrations.
+- Full gossip-based dynamic membership & indirect probing.
+- Advanced versioning (HLC / vector clocks).
+- Tracing spans for distributed operations.
+- Security (TLS/mTLS, auth) & compression.
+- Persistence / durability (out of scope presently).
+
+#### Rebalancing & Ownership Migration (Experimental Phase 3)
+
+The DistMemory backend includes an experimental periodic rebalancer that:
+
+- Scans local shards each tick (interval configurable via `WithDistRebalanceInterval`).
+- Collects candidate keys when this node either (a) is no longer an owner (primary or replica) or (b) was the recorded primary and the current primary changed.
+- Migrates candidates in batches (`WithDistRebalanceBatchSize`) with bounded parallelism (`WithDistRebalanceMaxConcurrent`).
+- Uses a semaphore; saturation increments the `RebalanceThrottle` metric.
+
+Migration is best‑effort (fire‑and‑forget forward of the item to the new primary); failures are not yet retried or queued. Owner set diffing now covers:
+
+- Primary change & full ownership loss (migrate off this node).
+- Replica-only additions (push current value to newly added replicas; capped by `WithDistReplicaDiffMaxPerTick`).
+
+Replica removal cleanup (actively dropping data from nodes no longer replicas) is pending.
+
+Metrics (via management or `Metrics()`):
+
+| Metric | Description |
+| -------- | ------------- |
+| RebalancedKeys | Count of all rebalance-related migrations (primary changes + replica diff replications). |
+| RebalancedPrimary | Count of primary ownership change migrations (subset of RebalancedKeys). |
+| RebalanceBatches | Number of migration batches executed. |
+| RebalanceThrottle | Times migration concurrency limiter saturated. |
+| RebalanceLastNanos | Duration (ns) of last rebalance scan. |
+| RebalancedReplicaDiff | Count of replica-only diff replications (new replicas seeded). |
+| RebalanceReplicaDiffThrottle | Times replica-only diff processing hit per-tick cap. |
+
+Test helpers `AddPeer` and `RemovePeer` simulate join / leave events that trigger redistribution in integration tests (`dist_rebalance_*.go`).
 
 ### Roadmap / PRD Progress Snapshot
 
 | Area | Status |
-|------|--------|
-| Core in-process sharding | Complete (static ring) |
-| Replication fan-out | Implemented (best-effort) |
-| Read-repair | Implemented |
-| Merkle anti-entropy | Implemented (pull-based) |
-| Merkle performance metrics | Implemented (fetch/build/diff nanos) |
-| Remote-only key enumeration fallback | Implemented with optional cap (`WithDistListKeysCap`) |
-| Delete semantics (tombstones) | Implemented |
-| Tombstone compaction / TTL | Implemented |
-| Quorum read consistency | Implemented |
-| Quorum write consistency | Implemented (acks enforced) |
-| Failure detection / heartbeat | Experimental heartbeat present |
-| Membership changes / dynamic rebalancing | Not yet |
-| Network transport (HTTP partial) | Basic HTTP management + fetch merkle/keys; full RPC TBD |
-| Tracing spans (distributed ops) | Planned |
-| Metrics exposure | Basic + Merkle phase metrics |
-| Persistence | Not in scope yet |
-| Benchmarks & tests | Extensive unit + benchmark coverage |
+| ------ | -------- |
+| Core in-process sharding | Done |
+| Replication fan-out | Done |
+| Read-repair | Done |
+| Quorum consistency (R/W) | Done |
+| Hinted handoff (TTL, replay, caps) | Done |
+| Tombstones (TTL + compaction) | Done |
+| Merkle anti-entropy (pull) | Done |
+| Merkle phase metrics | Done |
+| Auto Merkle background sync | Done |
+| Rebalancing (primary/lost ownership + replica-add diff + shedding) | Partial (shedding grace delete added; future retry/queue) |
+| Failure detection (heartbeat) | Partial (basic) |
+| Lightweight gossip snapshot | Partial |
+| Replica-only migration diff | Planned |
+| Adaptive Merkle scheduling | Planned |
+| Advanced versioning (HLC/vector) | Planned |
+| Client SDK (direct routing) | Planned |
+| Tracing spans | Planned |
+| Security (TLS/auth) | Planned |
+| Compression | Planned |
+| Persistence | Out of scope (current phase) |
+| Chaos / fault injection | Planned |
+| Benchmarks & tests | Ongoing (broad coverage) |
 
 Example minimal setup:
 
@@ -296,19 +339,20 @@ The repository uses a `//go:build test` tag to include auxiliary instrumentation
 
 The `/dist/metrics` endpoint (and `DistMemory.Metrics()` API) expose counters for forwarding operations, replica fan‑out, read‑repair, hinted handoff lifecycle, quorum write attempts/acks/failures, Merkle sync timings, tombstone activity, and heartbeat probes. These are reset only on process restart.
 
-#### Future Evolution
+#### Future Evolution (Selected)
 
-Planned enhancements toward a production‑grade distributed backend include:
+Prioritized next steps (see `docs/distributed.md` for full context):
 
-- Real network transport (HTTP/JSON → gRPC) for data plane operations.
-- Gossip‑based membership & failure detection (alive/suspect/dead) with automatic ring rebuild.
-- Rebalancing & key range handoff on join/leave events.
-- Incremental & adaptive anti‑entropy (Merkle diff scheduling, deletions reconciliation).
-- Advanced versioning (hybrid logical clocks or vector clocks) and conflict resolution strategies.
-- Client library for direct owner routing (avoiding extra network hops).
-- Optional compression, TLS/mTLS security, auth middleware.
+- Replica-only ownership diff & migration (push of newly added replicas implemented; removal/cleanup pending).
+- Migration retry queue & success/failure metrics.
+- Adaptive / incremental Merkle scheduling.
+- Client SDK with direct owner hashing.
+- Tracing spans for distributed ops (Set, Get, Repair, Merkle, Rebalance, HintReplay).
+- Enhanced failure detection (indirect probes, gossip dissemination).
+- Security (TLS/mTLS) + auth middleware.
+- Chaos & latency / fault injection hooks.
 
-Until these land, DistMemory should be treated as an experimental playground rather than a fault‑tolerant cluster.
+DistMemory remains experimental; treat interfaces as unstable until promoted out of the feature branch.
 
 Examples can be too broad for a readme, refer to the [examples](./__examples/README.md) directory for a more comprehensive overview.
 

@@ -16,7 +16,14 @@ ensure_go_module_initialized() {
 # #######################################
 GO_BIN_PATH="$(go env GOPATH)/bin"
 GOLANGCI_LINT_INSTALL_URL="https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh"
-GOLANGCI_LINT_VERSION="v2.4.0"
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+
+if [[ -f "${ROOT_DIR}/.project-settings.env" ]]; then
+	# shellcheck disable=SC1090
+	source "${ROOT_DIR}/.project-settings.env"
+fi
+GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v2.7.2}"
 
 # #######################################
 # Install dependencies to run the pre-commit hook

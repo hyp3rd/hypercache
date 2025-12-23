@@ -11,12 +11,16 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hyp3rd/hypercache"
+	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/pkg/middleware"
 )
 
 // This example shows how to wrap HyperCache with OpenTelemetry middleware.
 func main() {
-	cache, err := hypercache.NewInMemoryWithDefaults(16)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultEvictionInterval)
+	defer cancel()
+
+	cache, err := hypercache.NewInMemoryWithDefaults(ctx, 16)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
@@ -41,10 +45,10 @@ func main() {
 			return mw
 		},
 	)
-	defer svc.Stop()
+	defer svc.Stop(ctx)
 
-	_ = svc.Set(context.Background(), "key", "value", time.Minute)
-	if v, ok := svc.Get(context.Background(), "key"); ok {
+	_ = svc.Set(ctx, "key", "value", time.Minute)
+	if v, ok := svc.Get(ctx, "key"); ok {
 		fmt.Println("got:", v)
 	}
 }

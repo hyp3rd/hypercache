@@ -77,8 +77,10 @@ func (dm *DistMemory) StartHintReplayForTest(ctx context.Context) { //nolint:ire
 		return
 	}
 
-	dm.hintStopCh = make(chan struct{})
-	go dm.hintReplayLoop(ctx)
+	stopCh := make(chan struct{})
+
+	dm.hintStopCh = stopCh
+	go dm.hintReplayLoop(ctx, stopCh)
 }
 
 // ReplayHintsForTest triggers a single synchronous replay cycle (testing helper).

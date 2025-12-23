@@ -10,33 +10,43 @@ This document tracks the evolution of the experimental `DistMemory` backend into
 - **Fail Safe**: Degraded components (one node down) should not cascade failures.
 - **Pluggable**: Transport, membership, serialization, and security are replaceable.
 
-## Current State (Baseline)
+## Current State (Baseline – Updated)
 
 Implemented:
 
 - Consistent hashing ring (virtual nodes) + static membership.
 - Replication factor & read/write consistency (ONE / QUORUM / ALL) with quorum enforcement.
-- Versioning (Lamport-like counter) and read‑repair.
-- Hinted handoff (queue TTL, replay interval, metrics, test-only helpers behind `//go:build test`).
+- Versioning (Lamport-like counter) and read‑repair (targeted + full replica repair).
+- Hinted handoff (TTL, replay interval, per-node & global caps, metrics, test-only helpers).
 - Tombstones with TTL + compaction; anti-resurrection semantics.
-- Merkle tree anti‑entropy (build + diff + pull) with metrics.
+- Merkle tree anti‑entropy (build + diff + pull) with metrics + periodic auto-sync.
 - Management endpoints (`/cluster/*`, `/dist/*`, `/internal/merkle`, `/internal/keys`).
-- Metrics: quorum attempts/failures, replication fan‑out, hinted handoff lifecycle, merkle timings, tombstone counts.
+- Rebalancing (primary change + lost ownership migrations, batch + concurrency throttle metrics).
+- Latency histograms (get/set/remove) snapshot API.
+- Lightweight gossip snapshot exchange (in-process only).
 
-Gaps:
+Partial / In Progress:
 
-- No real network RPC for data path (only in-process transport).
-- Static membership (no gossip / dynamic join-leave / failure states).
-- No key rebalancing / ownership transfer on membership change.
-- Anti-entropy incremental scheduling & delete reconciliation tests incomplete.
-- No client SDK for direct routing.
-- Limited chaos/failure injection; no latency/fault simulation.
-- Security (TLS/auth) absent.
-- Persistence & durability out of scope (future consideration).
+- Failure detection (basic heartbeat, suspect/dead pruning; no indirect probes).
+- Membership diffusion (gossip-lite; no full SWIM).
+- Ownership migration (replica-only diff not yet supported).
+- Adaptive anti-entropy scheduling (fixed interval currently).
+
+Gaps / Planned:
+
+- Replica-only ownership diff migrations.
+- Migration retry queue & success/failure metrics.
+- Incremental / adaptive Merkle scheduling & delete reconciliation matrix tests.
+- Client SDK for direct owner routing.
+- Advanced versioning (HLC / vector clocks).
+- Tracing spans for distributed operations.
+- Security (TLS/mTLS, auth) & compression.
+- Chaos / latency / fault injection hooks.
+- Persistence & durability (future consideration, not current scope).
 
 ## Phase Overview
 
-### Phase 1: Data Plane & DistConfig (Weeks 1–2)
+### Phase 1: Data Plane & DistConfig (Weeks 1–2) – Status: DONE
 
 Deliverables:
 
@@ -54,7 +64,7 @@ Success Criteria:
 
 - Cross-process quorum & hinted handoff tests pass without code changes except wiring config.
 
-### Phase 2: Failure Detection & Dynamic Membership (Weeks 3–4)
+### Phase 2: Failure Detection & Dynamic Membership (Weeks 3–4) – Status: PARTIAL
 
 Deliverables:
 
@@ -71,7 +81,7 @@ Success Criteria:
 
 - Simulated node failure triggers quorum degradation & hinting; recovery drains hints. (Covered by failure recovery & hint cap tests.)
 
-### Phase 3: Rebalancing & Key Transfer (Weeks 5–6)
+### Phase 3: Rebalancing & Key Transfer (Weeks 5–6) – Status: PARTIAL
 
 Deliverables:
 
@@ -88,7 +98,7 @@ Success Criteria:
 
 - Newly joined node receives expected shard of data; leaves do not resurrect deleted keys.
 
-### Phase 4: Anti-Entropy Hardening (Weeks 7–8)
+### Phase 4: Anti-Entropy Hardening (Weeks 7–8) – Status: PENDING
 
 Deliverables:
 
@@ -101,7 +111,7 @@ Success Criteria:
 
 - Injected divergences converge within configured interval (< target).
 
-### Phase 5: Client SDK & Performance (Weeks 9–10)
+### Phase 5: Client SDK & Performance (Weeks 9–10) – Status: PENDING
 
 Deliverables:
 
@@ -113,7 +123,7 @@ Success Criteria:
 
 - QUORUM Get/Set p95 latency improved vs proxy path.
 
-### Phase 6: Security & Observability (Weeks 11–12)
+### Phase 6: Security & Observability (Weeks 11–12) – Status: PENDING
 
 Deliverables:
 
@@ -126,7 +136,7 @@ Success Criteria:
 
 - End-to-end trace present for a Set with replication fan-out.
 
-### Phase 7: Resilience & Chaos (Weeks 13–14)
+### Phase 7: Resilience & Chaos (Weeks 13–14) – Status: PENDING
 
 Deliverables:
 
@@ -148,7 +158,7 @@ Success Criteria:
 ## KPIs
 
 | KPI | Target |
-|-----|--------|
+| ----- | -------- |
 | QUORUM Set p95 (3-node HTTP) | < 3x in-process baseline |
 | QUORUM Get p95 | < 2x in-process baseline |
 | Hint Drain Time (single node outage 5m) | < 2m after recovery |
@@ -156,13 +166,13 @@ Success Criteria:
 | Divergence Convergence Time | < configured sync interval |
 | Quorum Failure Rate (1 node down, QUORUM) | < 2% |
 
-## Immediate Next Actions (Phase 1 Kickoff)
+## Immediate Next Actions (Short-Term Focus)
 
-1. Create `distconfig.go` with DistConfig struct + option to load into DistMemory.
-2. Define HTTP transport interface & request/response schemas.
-3. Implement server handlers (reuse existing serialization & version logic).
-4. Add integration test harness launching 3 HTTP nodes (ephemeral ports) and exercising Set/Get with QUORUM & hinted handoff.
-5. Introduce latency histograms (atomic moving buckets or exposable summary) for RPC.
+1. Implement replica-only ownership diff & migration during rebalance.
+1. Add migration retry queue + metrics (success, failure, retries, drops).
+1. Introduce adaptive Merkle scheduling (skip or backoff after clean cycles).
+1. Instrument tracing spans (placeholders) for distributed operations.
+1. Add chaos hooks (latency / drop %) to transport for resilience tests.
 
 ---
 

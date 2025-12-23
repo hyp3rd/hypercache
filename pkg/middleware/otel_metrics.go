@@ -11,7 +11,7 @@ import (
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/internal/telemetry/attrs"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	"github.com/hyp3rd/hypercache/pkg/cache"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 	"github.com/hyp3rd/hypercache/pkg/stats"
 )
 

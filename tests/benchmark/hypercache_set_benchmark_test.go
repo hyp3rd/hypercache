@@ -13,7 +13,7 @@ import (
 
 func BenchmarkHyperCache_Set(b *testing.B) {
 	// Create a new HyperCache with a capacity of 100000
-	cache, _ := hypercache.NewInMemoryWithDefaults(100000)
+	cache, _ := hypercache.NewInMemoryWithDefaults(context.TODO(), 100000)
 
 	b.ResetTimer()
 

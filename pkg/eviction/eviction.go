@@ -1,3 +1,4 @@
+// Package eviction implements various cache eviction algorithms.
 package eviction
 
 import (

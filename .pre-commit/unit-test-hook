@@ -21,9 +21,16 @@ hook() {
 	local root_dir
 	root_dir=$(git rev-parse --show-toplevel)
 
+	local toolchain_version="1.25.5"
+	if [[ -f "${root_dir}/.project-settings.env" ]]; then
+		# shellcheck disable=SC1090
+		source "${root_dir}/.project-settings.env"
+		toolchain_version="${GO_VERSION:-${toolchain_version}}"
+	fi
+
 	# run the pre-commit hook
 	pushd "${root_dir}" || exit
-	go test -tags test -v -timeout 5m -cover ./... || exit 1
+		GOTOOLCHAIN=go${toolchain_version}+auto go test -v -cover ./... || exit 1
 	popd >/dev/null || exit
 }
 

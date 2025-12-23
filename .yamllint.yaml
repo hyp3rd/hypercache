@@ -12,3 +12,5 @@ rules:
 ignore: |
   .golangci.yaml
   cspell.config.yaml
+  FUNDING.yml
+  codeql.yml

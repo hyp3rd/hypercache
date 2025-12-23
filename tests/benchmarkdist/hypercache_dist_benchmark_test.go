@@ -67,7 +67,7 @@ func BenchmarkDistMemory_Get(b *testing.B) {
 
 	b.ReportAllocs()
 
-	for range b.N { // standard Go benchmark loop
+	for b.Loop() { // standard Go benchmark loop
 		_, _ = n1.Get(ctx, "hot")
 	}
 }

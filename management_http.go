@@ -5,9 +5,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/hyp3rd/ewrap"
-
 	fiber "github.com/gofiber/fiber/v3"
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/stats"
@@ -269,7 +268,11 @@ func (s *ManagementHTTPServer) registerCluster(useAuth func(fiber.Handler) fiber
 	}))
 }
 
-func (s *ManagementHTTPServer) registerControl(ctx context.Context, useAuth func(fiber.Handler) fiber.Handler, hc managementCache) { //nolint:ireturn
+func (s *ManagementHTTPServer) registerControl(
+	ctx context.Context,
+	useAuth func(fiber.Handler) fiber.Handler,
+	hc managementCache,
+) { //nolint:ireturn
 	s.app.Post("/evict", useAuth(func(fiberCtx fiber.Ctx) error {
 		hc.TriggerEviction(ctx)
 

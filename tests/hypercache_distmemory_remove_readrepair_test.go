@@ -6,7 +6,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	cachev2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // helper to build two-node replicated cluster.
@@ -46,7 +46,7 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 		t.Fatalf("no owners")
 	}
 
-	item := &cachev2.Item{Key: key, Value: "val"}
+	item := &cache.Item{Key: key, Value: "val"}
 
 	err := item.Valid()
 	if err != nil {
@@ -104,7 +104,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 		t.Fatalf("no owners")
 	}
 
-	item := &cachev2.Item{Key: key, Value: "val"}
+	item := &cache.Item{Key: key, Value: "val"}
 
 	err := item.Valid()
 	if err != nil {
@@ -143,7 +143,8 @@ func TestDistMemoryReadRepair(t *testing.T) {
 		t.Fatalf("replica still has key after drop")
 	}
 	// issue Get from a non-owner node to trigger forwarding, then verify owners repaired.
-	// choose a requester: use node that is neither primary nor replica if possible; with 2 nodes this means primary forwards to replica or vice versa.
+	// choose a requester: use node that is neither primary nor replica if possible; with 2 nodes this means primary forwards to replica or
+	// vice versa.
 	requester := b1
 	if owners[0] == b1.LocalNodeID() && replica == b2.LocalNodeID() {
 		requester = b2 // request from replica to forward to primary

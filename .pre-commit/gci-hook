@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -e
+
+# ######################################
+# Ensure that a go module is initialized if not, skip the tests
+# #######################################
+ensure_go_module_initialized() {
+	if [[ ! -f go.mod ]]; then
+		echo "go.mod file not found, skipping the tests..."
+		exit 0
+	fi
+}
+
+# #######################################
+# Constants
+# #######################################
+GO_BIN_PATH="$(go env GOPATH)/bin"
+GOFILES=$(find . -type f -name '*.go' -not -path "./pkg/api/*" -not -path "./vendor/*" -not -path "./.gocache/*" -not -path "./.git/*")
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+
+if [[ -f "${ROOT_DIR}/.project-settings.env" ]]; then
+	# shellcheck disable=SC1090
+	source "${ROOT_DIR}/.project-settings.env"
+fi
+
+GCI_PREFIX="${GCI_PREFIX:-github.com/hyp3rd/hypercache}"
+
+# #######################################
+# Install dependencies to run the pre-commit hook
+# #######################################
+install_dependencies() {
+	# check if golangci-lint is installed or not
+
+	if ! "${GO_BIN_PATH}"/gci --version 2>/dev/null; then
+		echo "installing gci..."
+
+		# binary will be $(go env GOPATH)/bin/gci
+		go install github.com/daixiang0/gci@latest
+
+		echo "Installed gci"
+
+		"$(go env GOPATH)"/bin/gci --version
+	else
+		echo "gci is already installed"
+	fi
+}
+
+# #######################################
+# Run the pre-commit
+# #######################################
+hook() {
+	install_dependencies
+
+	# get the root of the project
+	local root_dir
+	root_dir=$(git rev-parse --show-toplevel)
+
+	# run the pre-commit hook
+	pushd "${root_dir}" || exit
+
+	echo "Running gci..."
+
+	for file in ${GOFILES}; do
+		"${GO_BIN_PATH}"/gci write -s standard -s default -s blank -s dot -s "prefix(${GCI_PREFIX})" -s localmodule --skip-vendor --skip-generated "${file}" || exit 1
+	done
+
+	popd >/dev/null || exit
+}
+
+cat <<EOF
+gci hook
+=============================================================================
+
+This hook ensures and runs gci on the project.
+It should be installed and run as a pre-commit hook.
+
+If gci finds any errors it will prevent the commit.
+=============================================================================
+
+EOF
+
+# run the hook if the go module is initialized
+ensure_go_module_initialized
+hook
