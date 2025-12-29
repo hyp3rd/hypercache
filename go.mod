@@ -6,7 +6,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/goccy/go-json v0.10.5
 	github.com/gofiber/fiber/v3 v3.0.0-rc.3
-	github.com/hyp3rd/ewrap v1.3.3
+	github.com/hyp3rd/ewrap v1.3.4
 	github.com/hyp3rd/sectools v1.0.7
 	github.com/longbridgeapp/assert v1.1.0
 	github.com/redis/go-redis/v9 v9.17.2
