@@ -6,8 +6,8 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/goccy/go-json v0.10.5
 	github.com/gofiber/fiber/v3 v3.0.0-rc.3
-	github.com/hyp3rd/ewrap v1.3.3
-	github.com/hyp3rd/sectools v1.0.7
+	github.com/hyp3rd/ewrap v1.3.4
+	github.com/hyp3rd/sectools v1.0.8
 	github.com/longbridgeapp/assert v1.1.0
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/shamaton/msgpack/v2 v2.4.0
@@ -30,7 +30,7 @@ require (
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
-	github.com/tinylib/msgp v1.6.1 // indirect
+	github.com/tinylib/msgp v1.6.3 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.68.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
