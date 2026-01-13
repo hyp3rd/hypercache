@@ -7,7 +7,7 @@ require (
 	github.com/goccy/go-json v0.10.5
 	github.com/gofiber/fiber/v3 v3.0.0-rc.3
 	github.com/hyp3rd/ewrap v1.3.5
-	github.com/hyp3rd/sectools v1.0.10
+	github.com/hyp3rd/sectools v1.1.5
 	github.com/longbridgeapp/assert v1.1.0
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/shamaton/msgpack/v2 v2.4.0
@@ -35,7 +35,7 @@ require (
 	github.com/valyala/fasthttp v1.68.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
