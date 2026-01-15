@@ -1,29 +1,53 @@
 ---
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
-
 name: Go
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+  push:
+    branches: [main]
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - name: Load project settings
+        id: settings
+        run: |
+          set -a
+          source .project-settings.env
+          set +a
+          echo "go_version=${GO_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "gci_prefix=${GCI_PREFIX:-github.com/hyp3rd/hypercache}" >> "$GITHUB_OUTPUT"
+          echo "golangci_lint_version=${GOLANGCI_LINT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "proto_enabled=${PROTO_ENABLED:-true}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6.1.0
         with:
-          go-version: '1.25'
+          go-version: "${{ steps.settings.outputs.go_version }}"
+          check-latest: true
+
+      - name: Cache Go modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ steps.settings.outputs.go_version }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ steps.settings.outputs.go_version }}-
+
+      - name: Modules download
+        run: go mod download
+
+      - name: Tidy check
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Verify
+        run: go mod verify
 
       - name: Build
         run: go build -v ./...
-
-      - name: Test
-        run: go test -v ./...
