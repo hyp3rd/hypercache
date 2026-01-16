@@ -3,6 +3,8 @@ name: gitleaks
 on:
     pull_request:
     push:
+        branches:
+            - main
     workflow_dispatch:
     schedule:
         # run once a day at 4 AM UTC
