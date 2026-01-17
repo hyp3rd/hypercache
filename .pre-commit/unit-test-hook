@@ -21,7 +21,7 @@ hook() {
 	local root_dir
 	root_dir=$(git rev-parse --show-toplevel)
 
-	local toolchain_version="1.25.5"
+	local toolchain_version="1.25.6"
 	if [[ -f "${root_dir}/.project-settings.env" ]]; then
 		# shellcheck disable=SC1090
 		source "${root_dir}/.project-settings.env"

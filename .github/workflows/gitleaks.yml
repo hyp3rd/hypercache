@@ -1,18 +1,21 @@
 ---
 name: gitleaks
+permissions:
+    contents: read
 on:
     pull_request:
     push:
+        branches: [main]
     workflow_dispatch:
     schedule:
-        # run once a day at 4 AM UTC
+        # run once a day at 4 AM
         - cron: "0 4 * * *"
 jobs:
     scan:
         name: gitleaks
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v6
               with:
                   fetch-depth: 0
             - uses: gitleaks/gitleaks-action@v2

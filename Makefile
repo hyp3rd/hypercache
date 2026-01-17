@@ -2,7 +2,7 @@ include .project-settings.env
 
 GOLANGCI_LINT_VERSION ?= v2.7.2
 BUF_VERSION ?= v1.61.0
-GO_VERSION ?= 1.25.5
+GO_VERSION ?= 1.25.6
 GCI_PREFIX ?= github.com/hyp3rd/hypercache
 PROTO_ENABLED ?= true
 
