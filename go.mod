@@ -9,7 +9,7 @@ require (
 	github.com/hyp3rd/ewrap v1.3.7
 	github.com/hyp3rd/sectools v1.2.1
 	github.com/longbridgeapp/assert v1.1.0
-	github.com/redis/go-redis/v9 v9.17.2
+	github.com/redis/go-redis/v9 v9.17.3
 	github.com/shamaton/msgpack/v2 v2.4.0
 	github.com/ugorji/go/codec v1.3.1
 	go.opentelemetry.io/otel v1.39.0
