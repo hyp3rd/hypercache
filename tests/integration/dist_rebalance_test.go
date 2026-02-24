@@ -2,6 +2,9 @@ package integration
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"testing"
 	"time"
@@ -186,6 +189,8 @@ func mustDistNode(
 		t.Fatalf("new dist memory: %v", err)
 	}
 
+	waitForDistNodeHealth(t, addr)
+
 	return bm.(*backend.DistMemory)
 }
 
@@ -221,4 +226,34 @@ func ownedPrimaryCount(dm *backend.DistMemory, keys []string) int {
 	}
 
 	return c
+}
+
+func waitForDistNodeHealth(t *testing.T, addr string) {
+	t.Helper()
+
+	client := &http.Client{Timeout: 100 * time.Millisecond}
+	healthURL := "http://" + addr + "/health"
+	deadline := time.Now().Add(3 * time.Second)
+
+	var lastErr error
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(healthURL)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+
+			lastErr = fmt.Errorf("unexpected status %d", resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("node %s health not ready: %v", addr, lastErr)
 }

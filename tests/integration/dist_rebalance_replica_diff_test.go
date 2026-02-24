@@ -35,6 +35,7 @@ func TestDistRebalanceReplicaDiff(t *testing.T) {
 		k := cacheKey(i)
 
 		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
+
 		err := nodeA.Set(ctx, it)
 		if err != nil {
 			t.Fatalf("set %s: %v", k, err)

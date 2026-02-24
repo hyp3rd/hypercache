@@ -64,6 +64,7 @@ func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest
 	if mfinal.NodesDead == 0 {
 		t.Fatalf("expected at least one dead transition, got 0")
 	}
+
 	// ensure membership version advanced beyond initial additions (>= number of transitions + initial upserts)
 	snap := b1.DistMembershipSnapshot()
 	verAny := snap["version"]

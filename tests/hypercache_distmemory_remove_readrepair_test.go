@@ -52,6 +52,7 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid: %v", err)
 	}
+
 	// write via primary
 	if owners[0] == b1.LocalNodeID() { // local helper we add below
 		err := b1.Set(context.Background(), item)
@@ -64,6 +65,7 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 			t.Fatalf("set: %v", err)
 		}
 	}
+
 	// assert item readable from both nodes
 	if _, ok := b1.Get(context.Background(), key); !ok {
 		t.Fatalf("b1 missing pre-remove")
@@ -72,6 +74,7 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 	if _, ok := b2.Get(context.Background(), key); !ok {
 		t.Fatalf("b2 missing pre-remove")
 	}
+
 	// remove via primary
 	if owners[0] == b1.LocalNodeID() {
 		err := b1.Remove(context.Background(), key)
@@ -110,6 +113,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid: %v", err)
 	}
+
 	// write via primary
 	if owners[0] == b1.LocalNodeID() {
 		err := b1.Set(context.Background(), item)
@@ -122,6 +126,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 			t.Fatalf("set: %v", err)
 		}
 	}
+
 	// determine replica node (owners[1]) and drop local copy there manually
 	if len(owners) < 2 {
 		t.Skip("replication factor <2")
@@ -134,6 +139,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	} else {
 		b2.DebugDropLocal(key)
 	}
+
 	// ensure dropped locally
 	if replica == b1.LocalNodeID() && b1.LocalContains(key) {
 		t.Fatalf("replica still has key after drop")
@@ -142,6 +148,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	if replica == b2.LocalNodeID() && b2.LocalContains(key) {
 		t.Fatalf("replica still has key after drop")
 	}
+
 	// issue Get from a non-owner node to trigger forwarding, then verify owners repaired.
 	// choose a requester: use node that is neither primary nor replica if possible; with 2 nodes this means primary forwards to replica or
 	// vice versa.
@@ -155,6 +162,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	if _, ok := requester.Get(context.Background(), key); !ok {
 		t.Fatalf("get for read-repair failed")
 	}
+
 	// after forwarding, both owners should have key locally again
 	if owners[0] == b1.LocalNodeID() && !b1.LocalContains(key) {
 		t.Fatalf("primary missing after read repair")
@@ -171,6 +179,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 	if replica == b2.LocalNodeID() && !b2.LocalContains(key) {
 		t.Fatalf("replica missing after read repair")
 	}
+
 	// metrics should show at least one read repair
 	var repaired bool
 	if replica == b1.LocalNodeID() {

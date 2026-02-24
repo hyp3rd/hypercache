@@ -102,8 +102,6 @@ func TestDistPhase1BasicQuorum(t *testing.T) {
 	}
 
 Done:
-
-	fmt.Println("phase1 basic quorum scaffolding complete")
 }
 
 // valueOK returns true if the stored value matches logical "v1" across supported encodings.
@@ -140,6 +138,7 @@ func valueOK(v any) bool { //nolint:ireturn
 		if len(x) == 0 {
 			return false
 		}
+
 		// try as string literal
 		var s string
 
@@ -155,6 +154,7 @@ func valueOK(v any) bool { //nolint:ireturn
 				}
 			}
 		}
+
 		// fall back to raw compare
 		return string(x) == "v1" || string(x) == "\"v1\""
 

@@ -46,6 +46,7 @@ func (m *ItemPoolManager) Put(item *Item) {
 	if item == nil {
 		return
 	}
+
 	// Zero the struct to avoid retaining large references across pool reuses
 	*item = Item{}
 	m.pool.Put(item)

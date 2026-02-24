@@ -55,6 +55,7 @@ func TestARC_Delete_RemovesResidentAndGhost(t *testing.T) {
 	if _, ok := arc.Get("a"); ok {
 		t.Fatalf("expected 'a' deleted")
 	}
+
 	// create a ghost by forcing eviction
 	arc.Set("c", 3)
 	arc.Delete("b") // whether resident or ghost, Delete should handle it

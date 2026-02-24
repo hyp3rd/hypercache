@@ -60,6 +60,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 		if e, hasErr := metricsBody["error"]; hasErr {
 			t.Fatalf("/dist/metrics returned error: %v", e)
 		}
+
 		// else fail
 		t.Errorf("/dist/metrics missing ForwardGet field")
 	}
@@ -103,7 +104,7 @@ func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) st
 	for time.Now().Before(deadline) {
 		addr = hc.ManagementHTTPAddress()
 		if addr != "" {
-			resp, err := http.Get("http://" + addr + "/health") //nolint:noctx,gosec
+			resp, err := http.Get("http://" + addr + "/health") //nolint:noctx
 			if err == nil && resp.StatusCode == http.StatusOK {
 				_ = resp.Body.Close()
 

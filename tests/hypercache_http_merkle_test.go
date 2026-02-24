@@ -66,6 +66,7 @@ func TestHTTPFetchMerkle(t *testing.T) {
 		item := &cache.Item{Key: httpKey(i), Value: []byte("v"), Version: uint64(i + 1), Origin: "n1", LastUpdated: time.Now()}
 		b1.DebugInject(item)
 	}
+
 	// ensure HTTP merkle endpoint reachable
 	resp, err := http.Get("http://" + b1.LocalNodeAddr() + "/internal/merkle")
 	if err != nil {

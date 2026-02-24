@@ -92,6 +92,7 @@ func TestDistMemoryStaleQuorum(t *testing.T) {
 	if !ok {
 		t.Fatalf("quorum get failed")
 	}
+
 	// Value stored as interface{} may be string (not []byte) in this test
 	if sval, okCast := got.Value.(string); !okCast || sval != "v2" {
 		t.Fatalf("expected quorum to return newer version v2, got=%v (type %T)", got.Value, got.Value)

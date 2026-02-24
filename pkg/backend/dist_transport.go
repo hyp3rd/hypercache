@@ -51,6 +51,7 @@ func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item
 	if !ok {
 		return sentinel.ErrBackendNotFound
 	}
+
 	// direct apply bypasses ownership check (already routed)
 	b.applySet(ctx, item, replicate)
 

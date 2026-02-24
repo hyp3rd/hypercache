@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,7 +24,6 @@ const (
 // internal constants.
 const (
 	nodeIDBytes = 8
-	byteShift   = 8 // bits per byte for id derivation
 )
 
 func (s NodeState) String() string {
@@ -60,9 +60,7 @@ func NewNode(id, addr string) *Node {
 		hv := xxhash.Sum64String(addr)
 
 		b := make([]byte, nodeIDBytes)
-		for i := range nodeIDBytes {
-			b[i] = byte(hv >> (byteShift * i))
-		}
+		binary.LittleEndian.PutUint64(b, hv)
 
 		id = hex.EncodeToString(b)
 	}

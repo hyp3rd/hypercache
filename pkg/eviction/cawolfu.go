@@ -73,6 +73,7 @@ func (c *CAWOLFU) Evict() (string, bool) {
 
 		return evictedKey, true
 	}
+
 	// If map/list out of sync, forcibly clean up
 	resetCAWOLFUNode(node)
 	c.nodePool.Put(node)
@@ -228,6 +229,7 @@ func (c *CAWOLFU) moveToFront(node *CAWOLFUNode) {
 	if node == nil || node == c.list.head {
 		return
 	}
+
 	// Remove node from its current position
 	if node == c.list.tail {
 		c.list.tail = node.prev
