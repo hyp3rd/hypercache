@@ -839,6 +839,9 @@ func (hyperCache *HyperCache[T]) setItemSize(item *cache.Item) error {
 
 			return nil
 		}
+
+	default:
+		// Fall back to generic size estimation for backends without a serializer.
 	}
 
 	return item.SetSize()

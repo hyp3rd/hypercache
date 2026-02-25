@@ -57,6 +57,7 @@ func (c *distLatencyCollector) observe(op distOp, d time.Duration) {
 			return
 		}
 	}
+
 	// +Inf bucket
 	c.buckets[op][len(latencyBuckets)].Add(1)
 }

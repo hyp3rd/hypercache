@@ -59,6 +59,7 @@ func (cacheBackend *InMemory) Get(_ context.Context, key string) (*cache.Item, b
 	if !ok {
 		return nil, false
 	}
+
 	// return the item
 	return item, true
 }

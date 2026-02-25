@@ -24,6 +24,7 @@ func TestNew(t *testing.T) {
 
 			return
 		}
+
 		// no hasher field in v2 shards
 	}
 }

@@ -1310,6 +1310,7 @@ func (dm *DistMemory) fetchAndAdopt(ctx context.Context, nodeID, key string) {
 		if tomb.version >= it.Version {
 			return
 		}
+
 		// remote has newer version; clear tombstone (key resurrected intentionally)
 		delete(sh.tombs, key)
 		atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())

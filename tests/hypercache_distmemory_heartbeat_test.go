@@ -11,7 +11,7 @@ import (
 
 // TestDistMemoryHeartbeatLiveness spins up three nodes with a fast heartbeat interval
 // and validates suspect -> removal transitions plus success/failure metrics.
-func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tparallel
+func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
 	interval := 30 * time.Millisecond
 	suspectAfter := 2 * interval
 	deadAfter := 4 * interval
@@ -112,6 +112,7 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest,tpara
 	if !sawSuspect {
 		t.Fatalf("node2 never became suspect")
 	}
+
 	// ensure removed
 	for _, n := range membership.List() {
 		if n.ID == n2.ID {

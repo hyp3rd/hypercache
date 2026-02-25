@@ -51,6 +51,7 @@ func (m *ItemPoolManager) Put(it *Item) {
 	if it == nil {
 		return
 	}
+
 	// Zero to avoid retaining references across pool reuses
 	*it = Item{}
 	m.pool.Put(it)

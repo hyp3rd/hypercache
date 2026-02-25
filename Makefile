@@ -1,8 +1,8 @@
 include .project-settings.env
 
-GOLANGCI_LINT_VERSION ?= v2.7.2
-BUF_VERSION ?= v1.61.0
-GO_VERSION ?= 1.25.6
+GOLANGCI_LINT_VERSION ?= v2.10.1
+BUF_VERSION ?= v1.65.0
+GO_VERSION ?= 1.26.0
 GCI_PREFIX ?= github.com/hyp3rd/hypercache
 PROTO_ENABLED ?= true
 
@@ -28,8 +28,7 @@ run-example:
 	go run ./__examples/$(group)/*.go $(ARGS)
 
 update-deps:
-	go get -v -u ./...
-	go mod tidy
+	go get -u -t ./... && go mod tidy -v && go mod verify
 
 prepare-toolchain: prepare-base-tools
 

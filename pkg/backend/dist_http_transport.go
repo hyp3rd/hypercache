@@ -3,9 +3,11 @@ package backend
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -40,11 +42,6 @@ const (
 
 // ForwardSet sends a Set/Replicate request to a remote node.
 func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error { //nolint:ireturn
-	base, ok := t.baseURLFn(nodeID)
-	if !ok {
-		return sentinel.ErrBackendNotFound
-	}
-
 	reqBody := httpSetRequest{
 		Key:        item.Key,
 		Value:      item.Value,
@@ -60,19 +57,31 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 	}
 
 	// prefer canonical endpoint; legacy /internal/cache/set still served
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/internal/set", bytes.NewReader(payloadBytes))
+	hreq, err := t.newNodeRequest(ctx, http.MethodPost, nodeID, "/internal/set", nil, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
 	}
 
 	hreq.Header.Set("Content-Type", "application/json")
 
-	resp, err := t.client.Do(hreq)
+	resp, err := t.doTrusted(hreq)
 	if err != nil {
-		return ewrap.Wrap(err, errMsgDoRequest)
+		return err
 	}
 
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+	defer func() {
+		_, copyErr := io.Copy(io.Discard, resp.Body)
+		if copyErr != nil {
+			// Best-effort drain to keep connections reusable.
+			_ = copyErr
+		}
+
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			// Best-effort close on deferred cleanup.
+			_ = closeErr
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return sentinel.ErrBackendNotFound
@@ -92,23 +101,32 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 
 // ForwardGet fetches a single item from a remote node.
 func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID, key string) (*cache.Item, bool, error) { //nolint:ireturn
-	base, ok := t.baseURLFn(nodeID)
-	if !ok {
-		return nil, false, sentinel.ErrBackendNotFound
-	}
-
 	// prefer canonical endpoint
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/internal/get?key=%s", base, key), nil)
+	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/internal/get", url.Values{
+		"key": {key},
+	}, nil)
 	if err != nil {
 		return nil, false, ewrap.Wrap(err, errMsgNewRequest)
 	}
 
-	resp, err := t.client.Do(hreq)
+	resp, err := t.doTrusted(hreq)
 	if err != nil {
-		return nil, false, ewrap.Wrap(err, errMsgDoRequest)
+		return nil, false, err
 	}
 
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+	defer func() {
+		_, copyErr := io.Copy(io.Discard, resp.Body)
+		if copyErr != nil {
+			// Best-effort drain to keep connections reusable.
+			_ = copyErr
+		}
+
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			// Best-effort close on deferred cleanup.
+			_ = closeErr
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, false, sentinel.ErrBackendNotFound
@@ -181,28 +199,33 @@ func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
 
 // ForwardRemove propagates a delete operation to a remote node.
 func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error { //nolint:ireturn
-	base, ok := t.baseURLFn(nodeID)
-	if !ok {
-		return sentinel.ErrBackendNotFound
-	}
-
 	// prefer canonical endpoint
-	hreq, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodDelete,
-		fmt.Sprintf("%s/internal/del?key=%s&replicate=%t", base, key, replicate),
-		nil,
-	)
+	hreq, err := t.newNodeRequest(ctx, http.MethodDelete, nodeID, "/internal/del", url.Values{
+		"key":       {key},
+		"replicate": {strconv.FormatBool(replicate)},
+	}, nil)
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
 	}
 
-	resp, err := t.client.Do(hreq)
+	resp, err := t.doTrusted(hreq)
 	if err != nil {
-		return ewrap.Wrap(err, errMsgDoRequest)
+		return err
 	}
 
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+	defer func() {
+		_, copyErr := io.Copy(io.Discard, resp.Body)
+		if copyErr != nil {
+			// Best-effort drain to keep connections reusable.
+			_ = copyErr
+		}
+
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			// Best-effort close on deferred cleanup.
+			_ = closeErr
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return sentinel.ErrBackendNotFound
@@ -217,22 +240,29 @@ func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID, key strin
 
 // Health performs a health probe against a remote node.
 func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error { //nolint:ireturn
-	base, ok := t.baseURLFn(nodeID)
-	if !ok {
-		return sentinel.ErrBackendNotFound
-	}
-
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/health", nil)
+	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/health", nil, nil)
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
 	}
 
-	resp, err := t.client.Do(hreq)
+	resp, err := t.doTrusted(hreq)
 	if err != nil {
-		return ewrap.Wrap(err, errMsgDoRequest)
+		return err
 	}
 
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+	defer func() {
+		_, copyErr := io.Copy(io.Discard, resp.Body)
+		if copyErr != nil {
+			// Best-effort drain to keep connections reusable.
+			_ = copyErr
+		}
+
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			// Best-effort close on deferred cleanup.
+			_ = closeErr
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return sentinel.ErrBackendNotFound
@@ -251,22 +281,29 @@ func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*Me
 		return nil, errNoTransport
 	}
 
-	base, ok := t.baseURLFn(nodeID)
-	if !ok {
-		return nil, sentinel.ErrBackendNotFound
-	}
-
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/internal/merkle", nil)
+	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/internal/merkle", nil, nil)
 	if err != nil {
 		return nil, ewrap.Wrap(err, errMsgNewRequest)
 	}
 
-	resp, err := t.client.Do(hreq)
+	resp, err := t.doTrusted(hreq)
 	if err != nil {
-		return nil, ewrap.Wrap(err, errMsgDoRequest)
+		return nil, err
 	}
 
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+	defer func() {
+		_, copyErr := io.Copy(io.Discard, resp.Body)
+		if copyErr != nil {
+			// Best-effort drain to keep connections reusable.
+			_ = copyErr
+		}
+
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			// Best-effort close on deferred cleanup.
+			_ = closeErr
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, sentinel.ErrBackendNotFound
@@ -294,22 +331,29 @@ func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*Me
 
 // ListKeys returns all keys from a remote node (expensive; used for tests / anti-entropy fallback).
 func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]string, error) { //nolint:ireturn
-	base, ok := t.baseURLFn(nodeID)
-	if !ok {
-		return nil, sentinel.ErrBackendNotFound
-	}
-
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/internal/keys", nil)
+	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/internal/keys", nil, nil)
 	if err != nil {
 		return nil, ewrap.Wrap(err, errMsgNewRequest)
 	}
 
-	resp, err := t.client.Do(hreq)
+	resp, err := t.doTrusted(hreq)
 	if err != nil {
-		return nil, ewrap.Wrap(err, errMsgDoRequest)
+		return nil, err
 	}
 
-	defer func() { _ = resp.Body.Close() }() //nolint:errcheck
+	defer func() {
+		_, copyErr := io.Copy(io.Discard, resp.Body)
+		if copyErr != nil {
+			// Best-effort drain to keep connections reusable.
+			_ = copyErr
+		}
+
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			// Best-effort close on deferred cleanup.
+			_ = closeErr
+		}
+	}()
 
 	if resp.StatusCode >= statusThreshold {
 		return nil, ewrap.Newf("list keys status %d", resp.StatusCode)
@@ -327,4 +371,75 @@ func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]stri
 	}
 
 	return body.Keys, nil
+}
+
+func (t *DistHTTPTransport) resolveBaseURL(nodeID string) (*url.URL, error) { //nolint:ireturn
+	if t == nil || t.baseURLFn == nil {
+		return nil, errNoTransport
+	}
+
+	base, ok := t.baseURLFn(nodeID)
+	if !ok {
+		return nil, sentinel.ErrBackendNotFound
+	}
+
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return nil, ewrap.Wrap(err, "parse base url")
+	}
+
+	if !parsed.IsAbs() || parsed.Host == "" {
+		return nil, ewrap.Newf("invalid base url for node %q", nodeID)
+	}
+
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+	default:
+		return nil, ewrap.Newf("unsupported base url scheme %q", parsed.Scheme)
+	}
+
+	return parsed, nil
+}
+
+func (t *DistHTTPTransport) newNodeRequest(
+	ctx context.Context,
+	method, nodeID, endpointPath string,
+	query url.Values,
+	body io.Reader,
+) (*http.Request, error) {
+	base, err := t.resolveBaseURL(nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	target, err := url.JoinPath(base.String(), strings.TrimPrefix(endpointPath, "/"))
+	if err != nil {
+		return nil, ewrap.Wrap(err, "join base url path")
+	}
+
+	targetURL, err := url.Parse(target)
+	if err != nil {
+		return nil, ewrap.Wrap(err, "parse target url")
+	}
+
+	if len(query) > 0 {
+		targetURL.RawQuery = query.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, targetURL.String(), body)
+	if err != nil {
+		return nil, ewrap.Wrap(err, "create new request")
+	}
+
+	return req, nil
+}
+
+func (t *DistHTTPTransport) doTrusted(hreq *http.Request) (*http.Response, error) {
+	// URL is built from the internal cluster resolver and scheme/host validated in newNodeRequest.
+	resp, err := t.client.Do(hreq) // #nosec G704 -- trusted cluster node URL, not user-supplied arbitrary endpoint
+	if err != nil {
+		return nil, ewrap.Wrap(err, errMsgDoRequest)
+	}
+
+	return resp, nil
 }

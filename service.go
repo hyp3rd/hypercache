@@ -56,6 +56,7 @@ func ApplyMiddleware(svc Service, mw ...Middleware) Service {
 	for _, m := range mw {
 		svc = m(svc)
 	}
+
 	// Return the decorated service
 	return svc
 }

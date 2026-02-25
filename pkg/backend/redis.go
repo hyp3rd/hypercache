@@ -40,10 +40,12 @@ func NewRedis(redisOptions ...Option[Redis]) (IBackend[Redis], error) {
 	if rb.rdb == nil {
 		return nil, sentinel.ErrNilClient
 	}
+
 	// Check if the `capacity` is valid
 	if rb.capacity < 0 {
 		return nil, sentinel.ErrInvalidCapacity
 	}
+
 	// Check if the `keysSetName` is empty
 	if rb.keysSetName == "" {
 		rb.keysSetName = constants.RedisBackend
@@ -98,6 +100,7 @@ func (cacheBackend *Redis) Get(ctx context.Context, key string) (*cache.Item, bo
 	if !isMember {
 		return nil, false
 	}
+
 	// Get a transient item from pool, but clone before returning to caller
 	pooled := cacheBackend.itemPoolManager.Get()
 
@@ -110,11 +113,13 @@ func (cacheBackend *Redis) Get(ctx context.Context, key string) (*cache.Item, bo
 
 		return nil, false
 	}
+
 	// Deserialize the item
 	err = cacheBackend.Serializer.Unmarshal(data, pooled)
 	if err != nil {
 		return nil, false
 	}
+
 	// Clone into a new heap object to avoid returning a pooled pointer
 	out := *pooled
 	cacheBackend.itemPoolManager.Put(pooled)
