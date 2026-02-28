@@ -365,6 +365,15 @@ func (hyperCache *HyperCache[T]) startBackgroundJobs(ctx context.Context) {
 		jobsCtx, cancel := context.WithCancel(ctx)
 
 		hyperCache.bgCancel = cancel
+		// Ensure shutdown signaling always drives context cancellation, even when
+		// stop consumers race to read the stop channel.
+		go func(stop <-chan bool, done <-chan struct{}, cancel context.CancelFunc) {
+			select {
+			case <-stop:
+				cancel()
+			case <-done:
+			}
+		}(hyperCache.stop, jobsCtx.Done(), cancel)
 
 		hyperCache.startExpirationRoutine(jobsCtx)
 		hyperCache.startEvictionRoutine(jobsCtx)
@@ -415,6 +424,13 @@ func (hyperCache *HyperCache[T]) handleExpirationSelect(ctx context.Context, tic
 	case <-hyperCache.evictCh:
 		// manual eviction trigger
 		hyperCache.evictionLoop(ctx)
+	case <-ctx.Done():
+		if tick != nil {
+			tick.Stop()
+		}
+
+		return true
+
 	case <-hyperCache.stop:
 		if tick != nil {
 			tick.Stop()
@@ -439,6 +455,11 @@ func (hyperCache *HyperCache[T]) startEvictionRoutine(ctx context.Context) {
 			select {
 			case <-tick.C:
 				hyperCache.evictionLoop(ctx)
+			case <-ctx.Done():
+				tick.Stop()
+
+				return
+
 			case <-hyperCache.stop:
 				tick.Stop()
 
@@ -967,17 +988,16 @@ const (
 
 // Stop function stops the expiration and eviction loops and closes the stop channel.
 func (hyperCache *HyperCache[T]) Stop(ctx context.Context) error {
-	// Stop the expiration and eviction loops
-	wg := sync.WaitGroup{}
-
-	wg.Go(func() {
-		hyperCache.stop <- true
-	})
-
-	wg.Wait()
+	// Best-effort stop signal for listeners that still rely on stop channel.
+	select {
+	case hyperCache.stop <- true:
+	default:
+	}
 
 	if hyperCache.bgCancel != nil {
 		hyperCache.bgCancel()
+
+		hyperCache.bgCancel = nil
 	}
 
 	hyperCache.once = sync.Once{}
@@ -992,8 +1012,6 @@ func (hyperCache *HyperCache[T]) Stop(ctx context.Context) error {
 			// Handle error
 			return err
 		}
-
-		cancel()
 	}
 
 	return nil
