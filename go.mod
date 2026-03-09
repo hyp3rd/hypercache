@@ -12,9 +12,9 @@ require (
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/shamaton/msgpack/v2 v2.4.0
 	github.com/ugorji/go/codec v1.3.1
-	go.opentelemetry.io/otel v1.40.0
-	go.opentelemetry.io/otel/metric v1.40.0
-	go.opentelemetry.io/otel/trace v1.40.0
+	go.opentelemetry.io/otel v1.42.0
+	go.opentelemetry.io/otel/metric v1.42.0
+	go.opentelemetry.io/otel/trace v1.42.0
 )
 
 require (
