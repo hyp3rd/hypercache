@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/goccy/go-json v0.10.5
+	github.com/goccy/go-json v0.10.6
 	github.com/gofiber/fiber/v3 v3.1.0
 	github.com/hyp3rd/ewrap v1.3.7
 	github.com/hyp3rd/sectools v1.2.3
