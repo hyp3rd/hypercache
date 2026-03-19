@@ -2,7 +2,7 @@ package serializer
 
 import (
 	"github.com/hyp3rd/ewrap"
-	"github.com/shamaton/msgpack/v2"
+	"github.com/shamaton/msgpack/v3"
 )
 
 // MsgpackSerializer leverages `msgpack` to serialize the items before storing them in the cache.
