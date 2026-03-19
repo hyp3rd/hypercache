@@ -1,7 +1,7 @@
 package backend
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/hyp3rd/ewrap"
 
@@ -95,7 +95,16 @@ func (f sortByFilter) ApplyFilter(_ string, items []*cache.Item) ([]*cache.Item,
 		return nil, ewrap.Newf("invalid sort field: %s", f.field)
 	}
 
-	sort.Sort(sorter)
+	slices.SortFunc(items, func(a, b *cache.Item) int {
+		switch {
+		case sorter.less(a, b):
+			return -1
+		case sorter.less(b, a):
+			return 1
+		default:
+			return 0
+		}
+	})
 
 	return items, nil
 }

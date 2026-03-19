@@ -10,7 +10,7 @@ import (
 	"hash/fnv"
 	"math/big"
 	"slices"
-	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -307,7 +307,9 @@ func (dm *DistMemory) BuildMerkleTree() *MerkleTree { //nolint:ireturn
 		return &MerkleTree{ChunkSize: chunkSize}
 	}
 
-	sort.Slice(entries, func(i, j int) bool { return entries[i].k < entries[j].k })
+	slices.SortFunc(entries, func(a, b merkleKV) int {
+		return strings.Compare(a.k, b.k)
+	})
 
 	hasher := sha256.New()
 	buf := make([]byte, merkleVersionBytes)
@@ -1182,7 +1184,10 @@ func (dm *DistMemory) RemovePeer(address string) { //nolint:ireturn
 // sortedMerkleEntries returns merkle entries sorted by key.
 func (dm *DistMemory) sortedMerkleEntries() []merkleKV { //nolint:ireturn
 	entries := dm.merkleEntries()
-	sort.Slice(entries, func(i, j int) bool { return entries[i].k < entries[j].k })
+
+	slices.SortFunc(entries, func(a, b merkleKV) int {
+		return strings.Compare(a.k, b.k)
+	})
 
 	return entries
 }

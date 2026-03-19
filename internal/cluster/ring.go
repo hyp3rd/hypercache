@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 
@@ -77,7 +78,17 @@ func (r *Ring) Build(nodes []*Node) {
 		}
 	}
 
-	sort.Slice(vn, func(i, j int) bool { return vn[i].hash < vn[j].hash })
+	slices.SortFunc(vn, func(a, b vnode) int {
+		switch {
+		case a.hash < b.hash:
+			return -1
+		case a.hash > b.hash:
+			return 1
+		default:
+			return 0
+		}
+	})
+
 	r.mu.Lock()
 
 	r.vnodes = vn
