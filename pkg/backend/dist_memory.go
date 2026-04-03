@@ -68,7 +68,7 @@ type DistMemory struct {
 	// consistency / versioning (initial)
 	readConsistency  ConsistencyLevel
 	writeConsistency ConsistencyLevel
-	versionCounter   uint64 // global monotonic for this node (lamport-like)
+	versionCounter   atomic.Uint64 // global monotonic for this node (lamport-like)
 
 	// hinted handoff
 	hintTTL        time.Duration
@@ -394,18 +394,18 @@ func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error { //nol
 	}
 
 	fetchDur := time.Since(startFetch)
-	atomic.StoreInt64(&dm.metrics.merkleFetchNanos, fetchDur.Nanoseconds())
+	dm.metrics.merkleFetchNanos.Store(fetchDur.Nanoseconds())
 
 	startBuild := time.Now()
 	localTree := dm.BuildMerkleTree()
 	buildDur := time.Since(startBuild)
-	atomic.StoreInt64(&dm.metrics.merkleBuildNanos, buildDur.Nanoseconds())
+	dm.metrics.merkleBuildNanos.Store(buildDur.Nanoseconds())
 
 	entries := dm.sortedMerkleEntries()
 	startDiff := time.Now()
 	diffs := localTree.DiffLeafRanges(remoteTree)
 	diffDur := time.Since(startDiff)
-	atomic.StoreInt64(&dm.metrics.merkleDiffNanos, diffDur.Nanoseconds())
+	dm.metrics.merkleDiffNanos.Store(diffDur.Nanoseconds())
 
 	missing := dm.resolveMissingKeys(ctx, nodeID, entries)
 
@@ -419,7 +419,7 @@ func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error { //nol
 		return nil
 	}
 
-	atomic.AddInt64(&dm.metrics.merkleSyncs, 1)
+	dm.metrics.merkleSyncs.Add(1)
 
 	return nil
 }
@@ -739,7 +739,7 @@ func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolin
 		}
 	}()
 
-	atomic.AddInt64(&dm.metrics.writeAttempts, 1)
+	dm.metrics.writeAttempts.Add(1)
 
 	owners := dm.lookupOwners(item.Key)
 	if len(owners) == 0 {
@@ -758,17 +758,17 @@ func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolin
 	}
 
 	// primary path: assign version & timestamp
-	item.Version = atomic.AddUint64(&dm.versionCounter, 1)
+	item.Version = dm.versionCounter.Add(1)
 	item.Origin = string(dm.localNode.ID)
 	item.LastUpdated = time.Now()
 	dm.applySet(ctx, item, false)
 
 	acks := 1 + dm.replicateTo(ctx, item, owners[1:])
-	atomic.AddInt64(&dm.metrics.writeAcks, int64(acks))
+	dm.metrics.writeAcks.Add(int64(acks))
 
 	needed := dm.requiredAcks(len(owners), dm.writeConsistency)
 	if acks < needed {
-		atomic.AddInt64(&dm.metrics.writeQuorumFailures, 1)
+		dm.metrics.writeQuorumFailures.Add(1)
 
 		return sentinel.ErrQuorumFailed
 	}
@@ -778,7 +778,7 @@ func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolin
 
 // --- Consistency helper methods. ---
 
-// List aggregates items (no ordering, then filters applied per interface contract not yet integrated; kept simple).
+// List aggregates items (no ordering, then filters applied per interface contract not yet integrated; kept simple);.
 func (dm *DistMemory) List(_ context.Context, _ ...IFilter) ([]*cache.Item, error) {
 	items := make([]*cache.Item, 0, listPrealloc)
 	for _, s := range dm.shards {
@@ -817,7 +817,7 @@ func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //noli
 			continue
 		}
 
-		atomic.AddInt64(&dm.metrics.forwardRemove, 1)
+		dm.metrics.forwardRemove.Add(1)
 
 		_ = dm.transport.ForwardRemove(ctx, string(owners[0]), key, true) //nolint:errcheck // best-effort
 	}
@@ -905,45 +905,45 @@ func (dm *DistMemory) DebugOwners(key string) []cluster.NodeID {
 
 // distMetrics holds internal counters (best-effort, not atomic snapshot consistent).
 type distMetrics struct {
-	forwardGet                   int64
-	forwardSet                   int64
-	forwardRemove                int64
-	replicaFanoutSet             int64
-	replicaFanoutRemove          int64
-	readRepair                   int64
-	replicaGetMiss               int64
-	heartbeatSuccess             int64
-	heartbeatFailure             int64
-	nodesSuspect                 int64 // number of times a node transitioned to suspect
-	nodesDead                    int64 // number of times a node transitioned to dead/pruned
-	nodesRemoved                 int64
-	versionConflicts             int64 // times a newer version (or tie-broken origin) replaced previous candidate
-	versionTieBreaks             int64 // subset of conflicts decided by origin tie-break
-	readPrimaryPromote           int64 // times read path skipped unreachable primary and promoted next owner
-	hintedQueued                 int64 // hints queued
-	hintedReplayed               int64 // hints successfully replayed
-	hintedExpired                int64 // hints expired before delivery
-	hintedDropped                int64 // hints dropped due to non-not-found transport errors
-	hintedGlobalDropped          int64 // hints dropped due to global caps (count/bytes)
-	hintedBytes                  int64 // approximate total bytes currently queued (best-effort)
-	merkleSyncs                  int64 // merkle sync operations completed
-	merkleKeysPulled             int64 // keys applied during sync
-	merkleBuildNanos             int64 // last build duration (ns)
-	merkleDiffNanos              int64 // last diff duration (ns)
-	merkleFetchNanos             int64 // last remote fetch duration (ns)
-	autoSyncLoops                int64 // number of auto-sync ticks executed
-	tombstonesActive             int64 // approximate active tombstones
-	tombstonesPurged             int64 // cumulative purged tombstones
-	writeQuorumFailures          int64 // number of write operations that failed quorum
-	writeAcks                    int64 // cumulative replica write acks (includes primary)
-	writeAttempts                int64 // total write operations attempted (Set)
-	rebalancedKeys               int64 // keys migrated during rebalancing
-	rebalanceBatches             int64 // number of batches processed
-	rebalanceThrottle            int64 // times rebalance was throttled due to concurrency limits
-	rebalanceLastNanos           int64 // duration of last full rebalance scan (ns)
-	rebalanceReplicaDiff         int64 // number of keys whose value was pushed to newly added replicas (replica-only diff)
-	rebalanceReplicaDiffThrottle int64 // number of times replica diff scan exited early due to per-tick limit
-	rebalancedPrimary            int64 // number of keys whose primary ownership changed (migrations to new primary)
+	forwardGet                   atomic.Int64
+	forwardSet                   atomic.Int64
+	forwardRemove                atomic.Int64
+	replicaFanoutSet             atomic.Int64
+	replicaFanoutRemove          atomic.Int64
+	readRepair                   atomic.Int64
+	replicaGetMiss               atomic.Int64
+	heartbeatSuccess             atomic.Int64
+	heartbeatFailure             atomic.Int64
+	nodesSuspect                 atomic.Int64 // number of times a node transitioned to suspect
+	nodesDead                    atomic.Int64 // number of times a node transitioned to dead/pruned
+	nodesRemoved                 atomic.Int64
+	versionConflicts             atomic.Int64 // times a newer version (or tie-broken origin) replaced previous candidate
+	versionTieBreaks             atomic.Int64 // subset of conflicts decided by origin tie-break
+	readPrimaryPromote           atomic.Int64 // times read path skipped unreachable primary and promoted next owner
+	hintedQueued                 atomic.Int64 // hints queued
+	hintedReplayed               atomic.Int64 // hints successfully replayed
+	hintedExpired                atomic.Int64 // hints expired before delivery
+	hintedDropped                atomic.Int64 // hints dropped due to non-not-found transport errors
+	hintedGlobalDropped          atomic.Int64 // hints dropped due to global caps (count/bytes)
+	hintedBytes                  atomic.Int64 // approximate total bytes currently queued (best-effort)
+	merkleSyncs                  atomic.Int64 // merkle sync operations completed
+	merkleKeysPulled             atomic.Int64 // keys applied during sync
+	merkleBuildNanos             atomic.Int64 // last build duration (ns)
+	merkleDiffNanos              atomic.Int64 // last diff duration (ns)
+	merkleFetchNanos             atomic.Int64 // last remote fetch duration (ns)
+	autoSyncLoops                atomic.Int64 // number of auto-sync ticks executed
+	tombstonesActive             atomic.Int64 // approximate active tombstones
+	tombstonesPurged             atomic.Int64 // cumulative purged tombstones
+	writeQuorumFailures          atomic.Int64 // number of write operations that failed quorum
+	writeAcks                    atomic.Int64 // cumulative replica write acks (includes primary)
+	writeAttempts                atomic.Int64 // total write operations attempted (Set)
+	rebalancedKeys               atomic.Int64 // keys migrated during rebalancing
+	rebalanceBatches             atomic.Int64 // number of batches processed
+	rebalanceThrottle            atomic.Int64 // times rebalance was throttled due to concurrency limits
+	rebalanceLastNanos           atomic.Int64 // duration of last full rebalance scan (ns)
+	rebalanceReplicaDiff         atomic.Int64 // number of keys whose value was pushed to newly added replicas (replica-only diff)
+	rebalanceReplicaDiffThrottle atomic.Int64 // number of times replica diff scan exited early due to per-tick limit
+	rebalancedPrimary            atomic.Int64 // number of keys whose primary ownership changed (migrations to new primary)
 }
 
 // DistMetrics snapshot.
@@ -1024,47 +1024,47 @@ func (dm *DistMemory) Metrics() DistMetrics {
 	}
 
 	return DistMetrics{
-		ForwardGet:                   atomic.LoadInt64(&dm.metrics.forwardGet),
-		ForwardSet:                   atomic.LoadInt64(&dm.metrics.forwardSet),
-		ForwardRemove:                atomic.LoadInt64(&dm.metrics.forwardRemove),
-		ReplicaFanoutSet:             atomic.LoadInt64(&dm.metrics.replicaFanoutSet),
-		ReplicaFanoutRemove:          atomic.LoadInt64(&dm.metrics.replicaFanoutRemove),
-		ReadRepair:                   atomic.LoadInt64(&dm.metrics.readRepair),
-		ReplicaGetMiss:               atomic.LoadInt64(&dm.metrics.replicaGetMiss),
-		HeartbeatSuccess:             atomic.LoadInt64(&dm.metrics.heartbeatSuccess),
-		HeartbeatFailure:             atomic.LoadInt64(&dm.metrics.heartbeatFailure),
-		NodesSuspect:                 atomic.LoadInt64(&dm.metrics.nodesSuspect),
-		NodesDead:                    atomic.LoadInt64(&dm.metrics.nodesDead),
-		NodesRemoved:                 atomic.LoadInt64(&dm.metrics.nodesRemoved),
-		VersionConflicts:             atomic.LoadInt64(&dm.metrics.versionConflicts),
-		VersionTieBreaks:             atomic.LoadInt64(&dm.metrics.versionTieBreaks),
-		ReadPrimaryPromote:           atomic.LoadInt64(&dm.metrics.readPrimaryPromote),
-		HintedQueued:                 atomic.LoadInt64(&dm.metrics.hintedQueued),
-		HintedReplayed:               atomic.LoadInt64(&dm.metrics.hintedReplayed),
-		HintedExpired:                atomic.LoadInt64(&dm.metrics.hintedExpired),
-		HintedDropped:                atomic.LoadInt64(&dm.metrics.hintedDropped),
-		HintedGlobalDropped:          atomic.LoadInt64(&dm.metrics.hintedGlobalDropped),
-		HintedBytes:                  atomic.LoadInt64(&dm.metrics.hintedBytes),
-		MerkleSyncs:                  atomic.LoadInt64(&dm.metrics.merkleSyncs),
-		MerkleKeysPulled:             atomic.LoadInt64(&dm.metrics.merkleKeysPulled),
-		MerkleBuildNanos:             atomic.LoadInt64(&dm.metrics.merkleBuildNanos),
-		MerkleDiffNanos:              atomic.LoadInt64(&dm.metrics.merkleDiffNanos),
-		MerkleFetchNanos:             atomic.LoadInt64(&dm.metrics.merkleFetchNanos),
-		AutoSyncLoops:                atomic.LoadInt64(&dm.metrics.autoSyncLoops),
+		ForwardGet:                   dm.metrics.forwardGet.Load(),
+		ForwardSet:                   dm.metrics.forwardSet.Load(),
+		ForwardRemove:                dm.metrics.forwardRemove.Load(),
+		ReplicaFanoutSet:             dm.metrics.replicaFanoutSet.Load(),
+		ReplicaFanoutRemove:          dm.metrics.replicaFanoutRemove.Load(),
+		ReadRepair:                   dm.metrics.readRepair.Load(),
+		ReplicaGetMiss:               dm.metrics.replicaGetMiss.Load(),
+		HeartbeatSuccess:             dm.metrics.heartbeatSuccess.Load(),
+		HeartbeatFailure:             dm.metrics.heartbeatFailure.Load(),
+		NodesSuspect:                 dm.metrics.nodesSuspect.Load(),
+		NodesDead:                    dm.metrics.nodesDead.Load(),
+		NodesRemoved:                 dm.metrics.nodesRemoved.Load(),
+		VersionConflicts:             dm.metrics.versionConflicts.Load(),
+		VersionTieBreaks:             dm.metrics.versionTieBreaks.Load(),
+		ReadPrimaryPromote:           dm.metrics.readPrimaryPromote.Load(),
+		HintedQueued:                 dm.metrics.hintedQueued.Load(),
+		HintedReplayed:               dm.metrics.hintedReplayed.Load(),
+		HintedExpired:                dm.metrics.hintedExpired.Load(),
+		HintedDropped:                dm.metrics.hintedDropped.Load(),
+		HintedGlobalDropped:          dm.metrics.hintedGlobalDropped.Load(),
+		HintedBytes:                  dm.metrics.hintedBytes.Load(),
+		MerkleSyncs:                  dm.metrics.merkleSyncs.Load(),
+		MerkleKeysPulled:             dm.metrics.merkleKeysPulled.Load(),
+		MerkleBuildNanos:             dm.metrics.merkleBuildNanos.Load(),
+		MerkleDiffNanos:              dm.metrics.merkleDiffNanos.Load(),
+		MerkleFetchNanos:             dm.metrics.merkleFetchNanos.Load(),
+		AutoSyncLoops:                dm.metrics.autoSyncLoops.Load(),
 		LastAutoSyncNanos:            dm.lastAutoSyncDuration.Load(),
 		LastAutoSyncError:            lastErr,
-		TombstonesActive:             atomic.LoadInt64(&dm.metrics.tombstonesActive),
-		TombstonesPurged:             atomic.LoadInt64(&dm.metrics.tombstonesPurged),
-		WriteQuorumFailures:          atomic.LoadInt64(&dm.metrics.writeQuorumFailures),
-		WriteAcks:                    atomic.LoadInt64(&dm.metrics.writeAcks),
-		WriteAttempts:                atomic.LoadInt64(&dm.metrics.writeAttempts),
-		RebalancedKeys:               atomic.LoadInt64(&dm.metrics.rebalancedKeys),
-		RebalanceBatches:             atomic.LoadInt64(&dm.metrics.rebalanceBatches),
-		RebalanceThrottle:            atomic.LoadInt64(&dm.metrics.rebalanceThrottle),
-		RebalanceLastNanos:           atomic.LoadInt64(&dm.metrics.rebalanceLastNanos),
-		RebalancedReplicaDiff:        atomic.LoadInt64(&dm.metrics.rebalanceReplicaDiff),
-		RebalanceReplicaDiffThrottle: atomic.LoadInt64(&dm.metrics.rebalanceReplicaDiffThrottle),
-		RebalancedPrimary:            atomic.LoadInt64(&dm.metrics.rebalancedPrimary),
+		TombstonesActive:             dm.metrics.tombstonesActive.Load(),
+		TombstonesPurged:             dm.metrics.tombstonesPurged.Load(),
+		WriteQuorumFailures:          dm.metrics.writeQuorumFailures.Load(),
+		WriteAcks:                    dm.metrics.writeAcks.Load(),
+		WriteAttempts:                dm.metrics.writeAttempts.Load(),
+		RebalancedKeys:               dm.metrics.rebalancedKeys.Load(),
+		RebalanceBatches:             dm.metrics.rebalanceBatches.Load(),
+		RebalanceThrottle:            dm.metrics.rebalanceThrottle.Load(),
+		RebalanceLastNanos:           dm.metrics.rebalanceLastNanos.Load(),
+		RebalancedReplicaDiff:        dm.metrics.rebalanceReplicaDiff.Load(),
+		RebalanceReplicaDiffThrottle: dm.metrics.rebalanceReplicaDiffThrottle.Load(),
+		RebalancedPrimary:            dm.metrics.rebalancedPrimary.Load(),
 		MembershipVersion:            mv,
 		MembersAlive:                 alive,
 		MembersSuspect:               suspect,
@@ -1224,7 +1224,7 @@ func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, ent
 
 	// track number of remote-only keys discovered via fallback
 	if len(mset) > 0 {
-		atomic.AddInt64(&dm.metrics.merkleKeysPulled, int64(len(mset)))
+		dm.metrics.merkleKeysPulled.Add(int64(len(mset)))
 	}
 
 	return mset
@@ -1304,7 +1304,7 @@ func (dm *DistMemory) fetchAndAdopt(ctx context.Context, nodeID, key string) {
 			nextVer := cur.Version + 1
 
 			sh.tombs[key] = tombstone{version: nextVer, origin: string(dm.localNode.ID), at: time.Now()}
-			atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
+			dm.metrics.tombstonesActive.Store(dm.countTombstones())
 		}
 
 		return
@@ -1318,12 +1318,12 @@ func (dm *DistMemory) fetchAndAdopt(ctx context.Context, nodeID, key string) {
 
 		// remote has newer version; clear tombstone (key resurrected intentionally)
 		delete(sh.tombs, key)
-		atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
+		dm.metrics.tombstonesActive.Store(dm.countTombstones())
 	}
 
 	if cur, okLocal := sh.items.Get(key); !okLocal || it.Version > cur.Version {
 		dm.applySet(ctx, it, false)
-		atomic.AddInt64(&dm.metrics.merkleKeysPulled, 1)
+		dm.metrics.merkleKeysPulled.Add(1)
 	}
 }
 
@@ -1367,10 +1367,10 @@ func (dm *DistMemory) startTombstoneSweeper() { //nolint:ireturn
 			case <-ticker.C:
 				purged := dm.compactTombstones()
 				if purged > 0 {
-					atomic.AddInt64(&dm.metrics.tombstonesPurged, purged)
+					dm.metrics.tombstonesPurged.Add(purged)
 				}
 
-				atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
+				dm.metrics.tombstonesActive.Store(dm.countTombstones())
 
 			case <-stopCh:
 				return
@@ -1478,7 +1478,7 @@ func (dm *DistMemory) runRebalanceTick(ctx context.Context) { //nolint:ireturn
 	// Perform shedding cleanup after replica diff (delete local copies after grace once we are no longer owner).
 	dm.shedRemovedKeys()
 
-	atomic.StoreInt64(&dm.metrics.rebalanceLastNanos, time.Since(start).Nanoseconds())
+	dm.metrics.rebalanceLastNanos.Store(time.Since(start).Nanoseconds())
 	dm.lastRebalanceVersion.Store(mv)
 }
 
@@ -1658,13 +1658,13 @@ func (dm *DistMemory) sendReplicaDiff(
 		}
 
 		_ = dm.transport.ForwardSet(ctx, string(rid), it, false) //nolint:errcheck
-		atomic.AddInt64(&dm.metrics.replicaFanoutSet, 1)
-		atomic.AddInt64(&dm.metrics.rebalancedKeys, 1)
-		atomic.AddInt64(&dm.metrics.rebalanceReplicaDiff, 1)
+		dm.metrics.replicaFanoutSet.Add(1)
+		dm.metrics.rebalancedKeys.Add(1)
+		dm.metrics.rebalanceReplicaDiff.Add(1)
 
 		processed++
 		if limit > 0 && processed >= limit {
-			atomic.AddInt64(&dm.metrics.rebalanceReplicaDiffThrottle, 1)
+			dm.metrics.rebalanceReplicaDiffThrottle.Add(1)
 
 			return processed
 		}
@@ -1724,7 +1724,7 @@ func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) {
 		case sem <- struct{}{}:
 		default:
 			// saturated; record throttle and then block
-			atomic.AddInt64(&dm.metrics.rebalanceThrottle, 1)
+			dm.metrics.rebalanceThrottle.Add(1)
 
 			sem <- struct{}{}
 		}
@@ -1733,7 +1733,7 @@ func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) {
 		wg.Go(func() {
 			defer func() { <-sem }()
 
-			atomic.AddInt64(&dm.metrics.rebalanceBatches, 1)
+			dm.metrics.rebalanceBatches.Add(1)
 
 			for i := range batchItems {
 				itm := batchItems[i] // value copy
@@ -1757,8 +1757,8 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) { /
 	}
 
 	// increment metrics once per attempt (ownership changed). Success is best-effort.
-	atomic.AddInt64(&dm.metrics.rebalancedKeys, 1)
-	atomic.AddInt64(&dm.metrics.rebalancedPrimary, 1)
+	dm.metrics.rebalancedKeys.Add(1)
+	dm.metrics.rebalancedPrimary.Add(1)
 
 	_ = dm.transport.ForwardSet(ctx, string(owners[0]), item, true) //nolint:errcheck // best-effort
 
@@ -1991,7 +1991,7 @@ func (dm *DistMemory) tryLocalGet(key string, idx int, oid cluster.NodeID) (*cac
 
 	if it, ok := dm.shardFor(key).items.GetCopy(key); ok {
 		if idx > 0 { // promotion
-			atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+			dm.metrics.readPrimaryPromote.Add(1)
 		}
 
 		return it, true
@@ -2006,12 +2006,12 @@ func (dm *DistMemory) tryRemoteGet(ctx context.Context, key string, idx int, oid
 		return nil, false
 	}
 
-	atomic.AddInt64(&dm.metrics.forwardGet, 1)
+	dm.metrics.forwardGet.Add(1)
 
 	it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
 	if errors.Is(err, sentinel.ErrBackendNotFound) { // owner unreachable -> promotion scenario
 		if idx == 0 { // primary missing
-			atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+			dm.metrics.readPrimaryPromote.Add(1)
 		}
 
 		return nil, false
@@ -2022,7 +2022,7 @@ func (dm *DistMemory) tryRemoteGet(ctx context.Context, key string, idx int, oid
 	}
 
 	if idx > 0 { // promotion occurred
-		atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+		dm.metrics.readPrimaryPromote.Add(1)
 	}
 
 	// read repair: if we're an owner but local missing, replicate
@@ -2030,7 +2030,7 @@ func (dm *DistMemory) tryRemoteGet(ctx context.Context, key string, idx int, oid
 		if _, ok2 := dm.shardFor(key).items.Get(key); !ok2 {
 			cloned := *it
 			dm.applySet(ctx, &cloned, false)
-			atomic.AddInt64(&dm.metrics.readRepair, 1)
+			dm.metrics.readRepair.Add(1)
 		}
 	}
 
@@ -2112,7 +2112,7 @@ func (dm *DistMemory) repairStaleOwners(
 
 		if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) {
 			_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false) //nolint:errcheck
-			atomic.AddInt64(&dm.metrics.readRepair, 1)
+			dm.metrics.readRepair.Add(1)
 		}
 	}
 }
@@ -2130,7 +2130,7 @@ func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid c
 	it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
 	if errors.Is(err, sentinel.ErrBackendNotFound) { // promotion
 		if idx == 0 {
-			atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+			dm.metrics.readPrimaryPromote.Add(1)
 		}
 
 		return nil, false
@@ -2141,7 +2141,7 @@ func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid c
 	}
 
 	if idx > 0 { // earlier owner skipped
-		atomic.AddInt64(&dm.metrics.readPrimaryPromote, 1)
+		dm.metrics.readPrimaryPromote.Add(1)
 	}
 
 	return it, true
@@ -2266,7 +2266,7 @@ func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced co
 
 	if (dm.hintMaxTotal > 0 && dm.hintTotal >= dm.hintMaxTotal) || (dm.hintMaxBytes > 0 && dm.hintBytes+size > dm.hintMaxBytes) {
 		dm.hintsMu.Unlock()
-		atomic.AddInt64(&dm.metrics.hintedGlobalDropped, 1)
+		dm.metrics.hintedGlobalDropped.Add(1)
 
 		return
 	}
@@ -2278,8 +2278,8 @@ func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced co
 	dm.adjustHintAccounting(1, size)
 	dm.hintsMu.Unlock()
 
-	atomic.AddInt64(&dm.metrics.hintedQueued, 1)
-	atomic.StoreInt64(&dm.metrics.hintedBytes, dm.hintBytes)
+	dm.metrics.hintedQueued.Add(1)
+	dm.metrics.hintedBytes.Store(dm.hintBytes)
 }
 
 // approxHintSize estimates the size of a hinted item for global caps.
@@ -2382,21 +2382,21 @@ func (dm *DistMemory) replayHints(ctx context.Context) { // reduced cognitive co
 		}
 	}
 
-	atomic.StoreInt64(&dm.metrics.hintedBytes, dm.hintBytes)
+	dm.metrics.hintedBytes.Store(dm.hintBytes)
 	dm.hintsMu.Unlock()
 }
 
 // processHint returns 0=keep,1=remove.
 func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hintedEntry, now time.Time) int {
 	if now.After(entry.expire) {
-		atomic.AddInt64(&dm.metrics.hintedExpired, 1)
+		dm.metrics.hintedExpired.Add(1)
 
 		return 1
 	}
 
 	err := dm.transport.ForwardSet(ctx, nodeID, entry.item, false)
 	if err == nil {
-		atomic.AddInt64(&dm.metrics.hintedReplayed, 1)
+		dm.metrics.hintedReplayed.Add(1)
 
 		return 1
 	}
@@ -2405,7 +2405,7 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 		return 0
 	}
 
-	atomic.AddInt64(&dm.metrics.hintedDropped, 1)
+	dm.metrics.hintedDropped.Add(1)
 
 	return 1
 }
@@ -2489,7 +2489,7 @@ func (dm *DistMemory) runAutoSyncTick(ctx context.Context) { //nolint:ireturn
 		dm.lastAutoSyncError.Store("")
 	}
 
-	atomic.AddInt64(&dm.metrics.autoSyncLoops, 1)
+	dm.metrics.autoSyncLoops.Add(1)
 }
 
 func (dm *DistMemory) gossipLoop(stopCh <-chan struct{}) { //nolint:ireturn
@@ -2603,28 +2603,28 @@ func (dm *DistMemory) chooseNewer(itemA, itemB *cache.Item) *cache.Item { //noli
 	}
 
 	if itemB.Version > itemA.Version { // itemB newer
-		atomic.AddInt64(&dm.metrics.versionConflicts, 1)
+		dm.metrics.versionConflicts.Add(1)
 
 		return itemB
 	}
 
 	if itemA.Version > itemB.Version { // itemA newer
-		atomic.AddInt64(&dm.metrics.versionConflicts, 1)
+		dm.metrics.versionConflicts.Add(1)
 
 		return itemA
 	}
 
 	// versions equal: tie-break on origin
 	if itemB.Origin < itemA.Origin { // itemB wins by tie-break
-		atomic.AddInt64(&dm.metrics.versionConflicts, 1)
-		atomic.AddInt64(&dm.metrics.versionTieBreaks, 1)
+		dm.metrics.versionConflicts.Add(1)
+		dm.metrics.versionTieBreaks.Add(1)
 
 		return itemB
 	}
 
 	if itemA.Origin < itemB.Origin { // itemA wins by tie-break (still counts)
-		atomic.AddInt64(&dm.metrics.versionConflicts, 1)
-		atomic.AddInt64(&dm.metrics.versionTieBreaks, 1)
+		dm.metrics.versionConflicts.Add(1)
+		dm.metrics.versionTieBreaks.Add(1)
 	}
 
 	return itemA
@@ -2653,7 +2653,7 @@ func (dm *DistMemory) repairLocalReplica(ctx context.Context, key string, chosen
 	if !ok || localIt.Version < chosen.Version || (localIt.Version == chosen.Version && localIt.Origin > chosen.Origin) {
 		cloned := *chosen
 		dm.applySet(ctx, &cloned, false)
-		atomic.AddInt64(&dm.metrics.readRepair, 1)
+		dm.metrics.readRepair.Add(1)
 	}
 }
 
@@ -2671,7 +2671,7 @@ func (dm *DistMemory) repairRemoteReplica(
 	it, ok, _ := dm.transport.ForwardGet(ctx, string(oid), key)                                            //nolint:errcheck
 	if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) { // stale
 		_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false) //nolint:errcheck
-		atomic.AddInt64(&dm.metrics.readRepair, 1)
+		dm.metrics.readRepair.Add(1)
 	}
 }
 
@@ -2681,7 +2681,7 @@ func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster
 		return false, sentinel.ErrNotOwner
 	}
 
-	atomic.AddInt64(&dm.metrics.forwardSet, 1)
+	dm.metrics.forwardSet.Add(1)
 
 	errFwd := dm.transport.ForwardSet(ctx, string(owners[0]), item, true)
 	switch {
@@ -2802,7 +2802,7 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 		return
 	}
 
-	atomic.AddInt64(&dm.metrics.replicaFanoutSet, int64(len(owners)-1))
+	dm.metrics.replicaFanoutSet.Add(int64(len(owners) - 1))
 
 	for _, oid := range owners[1:] { // skip primary
 		if oid == dm.localNode.ID {
@@ -2874,7 +2874,7 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 	sh.items.Remove(key)
 
 	sh.tombs[key] = tombstone{version: nextVer, origin: string(dm.localNode.ID), at: time.Now()}
-	atomic.StoreInt64(&dm.metrics.tombstonesActive, dm.countTombstones())
+	dm.metrics.tombstonesActive.Store(dm.countTombstones())
 
 	if !replicate || dm.ring == nil || dm.transport == nil {
 		return
@@ -2885,7 +2885,7 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 		return
 	}
 
-	atomic.AddInt64(&dm.metrics.replicaFanoutRemove, int64(len(owners)-1))
+	dm.metrics.replicaFanoutRemove.Add(int64(len(owners) - 1))
 
 	for _, oid := range owners[1:] {
 		if oid == dm.localNode.ID {
@@ -2941,8 +2941,8 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 
 	if dm.hbDeadAfter > 0 && elapsed > dm.hbDeadAfter { // prune dead
 		if dm.membership.Remove(node.ID) {
-			atomic.AddInt64(&dm.metrics.nodesRemoved, 1)
-			atomic.AddInt64(&dm.metrics.nodesDead, 1)
+			dm.metrics.nodesRemoved.Add(1)
+			dm.metrics.nodesDead.Add(1)
 		}
 
 		return
@@ -2950,7 +2950,7 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 
 	if dm.hbSuspectAfter > 0 && elapsed > dm.hbSuspectAfter && node.State == cluster.NodeAlive { // suspect
 		dm.membership.Mark(node.ID, cluster.NodeSuspect)
-		atomic.AddInt64(&dm.metrics.nodesSuspect, 1)
+		dm.metrics.nodesSuspect.Add(1)
 	}
 
 	ctxHealth, cancel := context.WithTimeout(ctx, dm.hbInterval/2)
@@ -2959,17 +2959,17 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 	cancel()
 
 	if err != nil {
-		atomic.AddInt64(&dm.metrics.heartbeatFailure, 1)
+		dm.metrics.heartbeatFailure.Add(1)
 
 		if node.State == cluster.NodeAlive { // escalate
 			dm.membership.Mark(node.ID, cluster.NodeSuspect)
-			atomic.AddInt64(&dm.metrics.nodesSuspect, 1)
+			dm.metrics.nodesSuspect.Add(1)
 		}
 
 		return
 	}
 
-	atomic.AddInt64(&dm.metrics.heartbeatSuccess, 1)
+	dm.metrics.heartbeatSuccess.Add(1)
 	// Mark alive (refresh LastSeen, clear suspicion)
 	dm.membership.Mark(node.ID, cluster.NodeAlive)
 }
