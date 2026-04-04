@@ -6,11 +6,10 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/goccy/go-json v0.10.6
 	github.com/gofiber/fiber/v3 v3.1.0
-	github.com/hyp3rd/ewrap v1.3.8
+	github.com/hyp3rd/ewrap v1.3.9
 	github.com/hyp3rd/sectools v1.2.3
 	github.com/longbridgeapp/assert v1.1.0
 	github.com/redis/go-redis/v9 v9.18.0
-	github.com/shamaton/msgpack/v3 v3.1.0
 	github.com/ugorji/go/codec v1.3.1
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/metric v1.43.0
