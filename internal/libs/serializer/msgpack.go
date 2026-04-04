@@ -33,7 +33,7 @@ func (*MsgpackSerializer) Marshal(_ any) ([]byte, error) { // receiver omitted (
 //
 // Deprecated: This method is now a shim and will be removed in a future release for security reasons.
 // REF: https://github.com/shamaton/msgpack/pull/60
-// Please use the `Marshal` method of the `Serializer` interface instead.
+// Please use the `Unmarshal` method of the `Serializer` interface instead.
 func (*MsgpackSerializer) Unmarshal(_ []byte, _ any) error { // receiver omitted (unused)
 	// err := msgpack.Unmarshal(data, v)
 	// if err != nil {
