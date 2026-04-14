@@ -30,7 +30,7 @@ repos:
     hooks:
       - id: hadolint-docker
   - repo: https://github.com/streetsidesoftware/cspell-cli
-    rev: v9.7.0
+    rev: v10.0.0
     hooks:
       # Spell check changed files
       - id: cspell
