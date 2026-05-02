@@ -69,6 +69,7 @@ func (c *HistogramStatsCollector) Mean(stat constants.Stat) float64 {
 	}
 
 	var sum int64
+
 	for _, value := range values {
 		sum += value
 	}
@@ -142,6 +143,7 @@ func (c *HistogramStatsCollector) GetStats() Stats {
 // sum returns the sum of a set of values.
 func sum(values []int64) int64 {
 	var sum int64
+
 	for _, value := range values {
 		sum += value
 	}
@@ -156,6 +158,7 @@ func variance(values []int64, mean float64) float64 {
 	}
 
 	var variance float64
+
 	for _, value := range values {
 		variance += math.Pow(float64(value)-mean, 2)
 	}

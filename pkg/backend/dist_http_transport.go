@@ -159,6 +159,7 @@ func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
 	}
 
 	var found bool
+
 	if fb, ok := raw["found"]; ok {
 		err := json.Unmarshal(fb, &found)
 		if err != nil {

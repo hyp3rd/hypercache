@@ -357,6 +357,7 @@ func (mt *MerkleTree) DiffLeafRanges(other *MerkleTree) []int { //nolint:ireturn
 	}
 
 	var diffs []int
+
 	for i := range mt.LeafHashes {
 		if !equalBytes(mt.LeafHashes[i], other.LeafHashes[i]) {
 			diffs = append(diffs, i)
@@ -595,6 +596,7 @@ func NewDistMemoryWithConfig(ctx context.Context, cfg any, opts ...DistMemoryOpt
 	}
 
 	var mc minimalConfig
+
 	if asserted, ok := cfg.(minimalConfig); ok { // best-effort copy
 		mc = asserted
 	}
@@ -1388,6 +1390,7 @@ func (dm *DistMemory) compactTombstones() int64 { //nolint:ireturn
 	now := time.Now()
 
 	var purged int64
+
 	for _, sh := range dm.shards {
 		if sh == nil {
 			continue
@@ -1408,6 +1411,7 @@ func (dm *DistMemory) compactTombstones() int64 { //nolint:ireturn
 // countTombstones returns approximate current count.
 func (dm *DistMemory) countTombstones() int64 { //nolint:ireturn
 	var total int64
+
 	for _, sh := range dm.shards {
 		if sh == nil {
 			continue
@@ -1637,6 +1641,7 @@ func (*DistMemory) computeNewReplicas(sh *distShard, key string, owners []cluste
 	}
 
 	var out []cluster.NodeID
+
 	for _, o := range owners[1:] {
 		if _, ok := prevSet[o]; !ok {
 			out = append(out, o)
@@ -1808,6 +1813,7 @@ func (dm *DistMemory) shedShard(sh *distShard, now time.Time) { //nolint:ireturn
 	sh.removedAtMu.Lock()
 
 	var dels []string
+
 	for k, at := range sh.removedAt {
 		if now.Sub(at) >= grace {
 			dels = append(dels, k)
@@ -2370,6 +2376,7 @@ func (dm *DistMemory) replayHints(ctx context.Context) { // reduced cognitive co
 				out = append(out, hintEntry)
 			case 1:
 				dm.adjustHintAccounting(-1, -hintEntry.size)
+
 			default: // defensive future-proofing
 				out = append(out, hintEntry)
 			}
@@ -2517,6 +2524,7 @@ func (dm *DistMemory) runGossipTick() { //nolint:ireturn
 	}
 
 	var candidates []*cluster.Node
+
 	for _, n := range peers {
 		if n.ID != dm.localNode.ID {
 			candidates = append(candidates, n)
@@ -2861,6 +2869,7 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 	sh := dm.shardFor(key)
 	// capture version from existing item (if any) and increment for tombstone
 	var nextVer uint64
+
 	if it, ok := sh.items.Get(key); ok && it != nil {
 		ci := it // already *cache.Item (ConcurrentMap stores *cache.Item)
 

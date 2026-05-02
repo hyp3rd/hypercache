@@ -384,6 +384,7 @@ func (hyperCache *HyperCache[T]) startBackgroundJobs(ctx context.Context) {
 func (hyperCache *HyperCache[T]) startExpirationRoutine(ctx context.Context) {
 	go func() {
 		var tick *time.Ticker
+
 		if hyperCache.expirationInterval > 0 {
 			tick = time.NewTicker(hyperCache.expirationInterval)
 		}
@@ -399,6 +400,7 @@ func (hyperCache *HyperCache[T]) startExpirationRoutine(ctx context.Context) {
 // handleExpirationSelect processes one select iteration; returns true if caller should exit.
 func (hyperCache *HyperCache[T]) handleExpirationSelect(ctx context.Context, tick *time.Ticker) bool {
 	var tickC <-chan time.Time
+
 	if tick != nil {
 		tickC = tick.C
 	}
@@ -411,6 +413,7 @@ func (hyperCache *HyperCache[T]) handleExpirationSelect(ctx context.Context, tic
 		// manual/coalesced trigger
 		hyperCache.expirationLoop(ctx)
 		hyperCache.expirationSignalPending.Store(false)
+
 		// drain any queued triggers quickly
 		for draining := true; draining; {
 			select {
@@ -774,6 +777,7 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 		hyperCache.mutex.Lock()
 		hyperCache.evictionAlgorithm.Set(key, item.Value)
 		hyperCache.mutex.Unlock()
+
 		// If the cache is at capacity, evict an item when the eviction interval is zero
 		if hyperCache.shouldEvict.Load() && hyperCache.backend.Count(ctx) > hyperCache.backend.Capacity() {
 			hyperCache.evictItem(ctx)
@@ -805,6 +809,7 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 			hyperCache.execTriggerExpiration()
 		} else {
 			hyperCache.touchItem(ctx, key, item) // Update the last access time and access count
+
 			// Add the item to the result map
 			result[key] = item.Value
 		}
@@ -934,6 +939,7 @@ func (hyperCache *HyperCache[T]) SetCapacity(ctx context.Context, capacity int) 
 	hyperCache.backend.SetCapacity(capacity)
 	// evaluate again if the cache should evict items proactively
 	hyperCache.shouldEvict.Swap(hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0)
+
 	// if the cache size is greater than the new capacity, evict items
 	if hyperCache.backend.Count(ctx) > hyperCache.Capacity() {
 		hyperCache.evictionLoop(ctx)

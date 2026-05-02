@@ -57,7 +57,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	metricsBody := getJSON(t, baseURL+"/dist/metrics")
 	if _, ok := metricsBody["ForwardGet"]; !ok { // one exported field
 		// could be 404 if backend unsupported (should not be here)
-		if e, hasErr := metricsBody["error"]; hasErr {
+		if e, hasErr := metricsBody[constants.ErrorLabel]; hasErr {
 			t.Fatalf("/dist/metrics returned error: %v", e)
 		}
 
@@ -68,7 +68,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	// /dist/owners
 	ownersBody := getJSON(t, baseURL+"/dist/owners?key=alpha")
 	if _, ok := ownersBody["owners"]; !ok {
-		if e, hasErr := ownersBody["error"]; hasErr {
+		if e, hasErr := ownersBody[constants.ErrorLabel]; hasErr {
 			t.Fatalf("/dist/owners returned error: %v", e)
 		}
 
@@ -78,7 +78,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	// /cluster/members
 	membersBody := getJSON(t, baseURL+"/cluster/members")
 	if _, ok := membersBody["members"]; !ok {
-		if e, hasErr := membersBody["error"]; hasErr {
+		if e, hasErr := membersBody[constants.ErrorLabel]; hasErr {
 			t.Fatalf("/cluster/members returned error: %v", e)
 		}
 
@@ -88,7 +88,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	// /cluster/ring
 	ringBody := getJSON(t, baseURL+"/cluster/ring")
 	if _, ok := ringBody["vnodes"]; !ok {
-		if e, hasErr := ringBody["error"]; hasErr {
+		if e, hasErr := ringBody[constants.ErrorLabel]; hasErr {
 			t.Fatalf("/cluster/ring returned error: %v", e)
 		}
 

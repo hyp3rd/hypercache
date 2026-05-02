@@ -26,6 +26,7 @@ func NewInMemory(opts ...Option[InMemory]) (IBackend[InMemory], error) {
 	}
 	// Apply the backend options
 	ApplyOptions(backendInstance, opts...)
+
 	// Check if the `capacity` is valid
 	if backendInstance.capacity < 0 {
 		return nil, sentinel.ErrInvalidCapacity
@@ -142,6 +143,7 @@ func (cacheBackend *InMemory) Clear(ctx context.Context) error {
 
 	go func() {
 		defer close(done)
+
 		// clear the cacheBackend
 		cacheBackend.items.Clear()
 	}()

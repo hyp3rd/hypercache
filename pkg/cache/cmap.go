@@ -131,6 +131,7 @@ func (m ConcurrentMap[K, V]) Get(key K) (V, bool) {
 	// Get shard
 	shard := m.GetShard(key)
 	shard.RLock()
+
 	// Get item from shard.
 	val, ok := shard.items[key]
 	shard.RUnlock()
@@ -158,6 +159,7 @@ func (m ConcurrentMap[K, V]) Has(key K) bool {
 	// Get shard
 	shard := m.GetShard(key)
 	shard.RLock()
+
 	// See if element is within shard.
 	_, ok := shard.items[key]
 	shard.RUnlock()
@@ -270,6 +272,7 @@ func snapshot[Key comparable, Val any](cmap ConcurrentMap[Key, Val]) []chan Tupl
 	chans := make([]chan Tuple[Key, Val], ShardCount)
 	wg := sync.WaitGroup{}
 	wg.Add(ShardCount)
+
 	// Foreach shard.
 	for index, shard := range cmap.shards {
 		go func(index int, shard *ConcurrentMapShared[Key, Val]) {

@@ -49,10 +49,12 @@ linters:
   # https://golangci-lint.run/usage/linters/#enabled-by-default
   default: all
   enable:
+    - gomodguard_v2
     - wsl_v5
   disable:
     - exhaustruct
     - depguard
+    - gomodguard
     - ireturn
     - lll
     - tagliatelle
@@ -126,23 +128,23 @@ linters:
           disabled: false
           arguments:
             - max-lit-count: "3"
-              allow-strs: '"","get","path","key"'
+              allow-strs: "\"\",\"get\",\"path\",\"key\""
               allow-ints: "-1,0,1,2,10"
               allow-floats: "0.0,1.0"
 
         - name: cognitive-complexity
           severity: warning
           disabled: false
-          arguments: [15]
+          arguments: [ 15 ]
 
         - name: cyclomatic
-          arguments: [15]
+          arguments: [ 15 ]
 
         # - name: function-length
         #   arguments: [80, 0]
 
         - name: max-public-structs
-          arguments: [10]
+          arguments: [ 10 ]
 
         - name: nested-structs
           disabled: true
@@ -151,7 +153,7 @@ linters:
           disabled: true
 
         - name: line-length-limit
-          arguments: [160]
+          arguments: [ 160 ]
 
         - name: var-naming
           disabled: true

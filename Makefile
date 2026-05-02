@@ -1,7 +1,7 @@
 include .project-settings.env
 
-GOLANGCI_LINT_VERSION ?= v2.11.4
-BUF_VERSION ?= v1.67.0
+GOLANGCI_LINT_VERSION ?= v2.12.1
+BUF_VERSION ?= v1.69.0
 GO_VERSION ?= 1.26.2
 GCI_PREFIX ?= github.com/hyp3rd/hypercache
 PROTO_ENABLED ?= true
@@ -166,4 +166,5 @@ help:
 	@echo
 	@echo
 	@echo "For more information, see the project README."
+
 .PHONY: init prepare-toolchain prepare-base-tools update-toolchain test bench vet update-deps lint sec help
