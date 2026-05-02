@@ -19,7 +19,7 @@ jobs:
           source .project-settings.env
           set +a
           echo "go_version=${GO_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "gci_prefix=${GCI_PREFIX:-github.com/hyp3rd/ewrap}" >> "$GITHUB_OUTPUT"
+          echo "gci_prefix=${GCI_PREFIX:-github.com/hyp3rd/hypercache}" >> "$GITHUB_OUTPUT"
           echo "golangci_lint_version=${GOLANGCI_LINT_VERSION}" >> "$GITHUB_OUTPUT"
           echo "proto_enabled=${PROTO_ENABLED:-true}" >> "$GITHUB_OUTPUT"
       - name: Setup Go
