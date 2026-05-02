@@ -64,6 +64,7 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 		target := owners[0]
 
 		var err2 error
+
 		switch target {
 		case n1.ID:
 			err2 = b1.Set(context.Background(), item)

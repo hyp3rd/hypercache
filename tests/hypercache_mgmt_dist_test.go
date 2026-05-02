@@ -101,6 +101,7 @@ func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) st
 	deadline := time.Now().Add(2 * time.Second)
 
 	var addr string
+
 	for time.Now().Before(deadline) {
 		addr = hc.ManagementHTTPAddress()
 		if addr != "" {

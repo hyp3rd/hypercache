@@ -42,6 +42,7 @@ func TestHintGlobalCaps(t *testing.T) { //nolint:paralleltest
 	b2 := b2i.(*backend.DistMemory)
 
 	transport.Register(b1)
+
 	// do not register b2 (simulate down replica so hints queue)
 
 	// Generate many keys to force surpassing global cap (3) quickly.

@@ -19,7 +19,7 @@ func BenchmarkHyperCache_Set(b *testing.B) {
 
 	for i := range b.N {
 		// Store a value in the cache with a key and expiration duration
-		cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), "value", time.Hour)
+		_ = cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), "value", time.Hour)
 	}
 }
 
@@ -41,6 +41,6 @@ func BenchmarkHyperCache_Set_Proactive_Eviction(b *testing.B) {
 
 	for i := 0; b.Loop(); i++ {
 		// Store a value in the cache with a key and expiration duration
-		cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), "value", time.Hour)
+		_ = cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), "value", time.Hour)
 	}
 }

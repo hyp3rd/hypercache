@@ -51,6 +51,7 @@ func TestWorkerPool_JobErrorHandling(t *testing.T) {
 	}()
 
 	var gotErr error
+
 	for err := range pool.Errors() {
 		if errors.Is(err, expectedErr) {
 			gotErr = err

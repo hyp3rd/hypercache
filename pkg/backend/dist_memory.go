@@ -821,7 +821,7 @@ func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //noli
 
 		dm.metrics.forwardRemove.Add(1)
 
-		_ = dm.transport.ForwardRemove(ctx, string(owners[0]), key, true) //nolint:errcheck // best-effort
+		_ = dm.transport.ForwardRemove(ctx, string(owners[0]), key, true)
 	}
 
 	return nil
@@ -1662,7 +1662,7 @@ func (dm *DistMemory) sendReplicaDiff(
 			continue
 		}
 
-		_ = dm.transport.ForwardSet(ctx, string(rid), it, false) //nolint:errcheck
+		_ = dm.transport.ForwardSet(ctx, string(rid), it, false)
 		dm.metrics.replicaFanoutSet.Add(1)
 		dm.metrics.rebalancedKeys.Add(1)
 		dm.metrics.rebalanceReplicaDiff.Add(1)
@@ -1765,7 +1765,7 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) { /
 	dm.metrics.rebalancedKeys.Add(1)
 	dm.metrics.rebalancedPrimary.Add(1)
 
-	_ = dm.transport.ForwardSet(ctx, string(owners[0]), item, true) //nolint:errcheck // best-effort
+	_ = dm.transport.ForwardSet(ctx, string(owners[0]), item, true)
 
 	// Update originalPrimary so we don't recount repeatedly.
 	sh := dm.shardFor(item.Key)
@@ -2117,7 +2117,7 @@ func (dm *DistMemory) repairStaleOwners(
 		}
 
 		if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) {
-			_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false) //nolint:errcheck
+			_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false)
 			dm.metrics.readRepair.Add(1)
 		}
 	}
@@ -2676,9 +2676,9 @@ func (dm *DistMemory) repairRemoteReplica(
 		return
 	}
 
-	it, ok, _ := dm.transport.ForwardGet(ctx, string(oid), key)                                            //nolint:errcheck
+	it, ok, _ := dm.transport.ForwardGet(ctx, string(oid), key)
 	if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) { // stale
-		_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false) //nolint:errcheck
+		_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false)
 		dm.metrics.readRepair.Add(1)
 	}
 }
@@ -2817,7 +2817,7 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 			continue
 		}
 
-		_ = dm.transport.ForwardSet(ctx, string(oid), item, false) //nolint:errcheck
+		_ = dm.transport.ForwardSet(ctx, string(oid), item, false)
 	}
 }
 
@@ -2901,7 +2901,7 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 			continue
 		}
 
-		_ = dm.transport.ForwardRemove(ctx, string(oid), key, false) //nolint:errcheck // best-effort (tombstone inferred remotely)
+		_ = dm.transport.ForwardRemove(ctx, string(oid), key, false)
 	}
 }
 

@@ -17,11 +17,27 @@ test:
 	RUN_INTEGRATION_TEST=yes go test -v -timeout 5m -cover ./...
 
 test-race:
-	go test -race ./...
+	RUN_INTEGRATION_TEST=yes go test -race -count=10 -shuffle=on -timeout=15m ./...
+
+typecheck:
+	@echo "Running go vet..."
+	go vet ./...
+
+build:
+	@echo "Building..."
+	go build -v ./...
+
+# ci aggregates the gates required before declaring a task done (see AGENTS.md).
+ci: lint typecheck test-race sec build
+	@echo "All CI gates passed."
 
 # bench runs the benchmark tests in the benchmark subpackage of the tests package.
 bench:
 	cd tests/benchmark && go test -bench=. -benchmem -benchtime=4s . -timeout 30m
+
+# bench-baseline captures the current benchmark output to bench-baseline.txt for benchstat comparison.
+bench-baseline:
+	cd tests/benchmark && go test -bench=. -benchmem -benchtime=4s -count=5 . -timeout 30m | tee ../../bench-baseline.txt
 
 # run-example runs the example specified in the example variable with the optional arguments specified in the ARGS variable.
 run-example:
@@ -156,9 +172,15 @@ help:
 	@echo
 	@echo "Testing commands:"
 	@echo "  test\t\t\t\tRun all tests in the project"
+	@echo "  test-race\t\t\tRun tests with -race -count=10 -shuffle=on"
+	@echo "  bench\t\t\t\tRun benchmarks in tests/benchmark"
+	@echo "  bench-baseline\t\tCapture benchmark baseline to bench-baseline.txt"
 	@echo
 	@echo "Code quality commands:"
+	@echo "  ci\t\t\t\tRun the full quality gate (lint typecheck test-race sec build)"
 	@echo "  lint\t\t\t\tRun all linters (gci, gofumpt, staticcheck, golangci-lint)"
+	@echo "  typecheck\t\t\tRun go vet"
+	@echo "  build\t\t\t\tRun go build ./..."
 	@echo "  vet\t\t\t\tRun go vet and shadow analysis"
 	@echo "  sec\t\t\t\tRun security analysis (govulncheck, gosec)"
 	@echo
@@ -167,4 +189,4 @@ help:
 	@echo
 	@echo "For more information, see the project README."
 
-.PHONY: init prepare-toolchain prepare-base-tools update-toolchain test bench vet update-deps lint sec help
+.PHONY: init prepare-toolchain prepare-base-tools update-toolchain test test-race typecheck build ci bench bench-baseline vet update-deps lint sec help

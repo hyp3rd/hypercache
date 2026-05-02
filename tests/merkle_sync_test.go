@@ -15,7 +15,7 @@ func TestMerkleSyncConvergence(t *testing.T) {
 	transport := backend.NewInProcessTransport()
 
 	bA, err := backend.NewDistMemory(ctx,
-		backend.WithDistNode("A", "127.0.0.1:9101"),
+		backend.WithDistNode("A", AllocatePort(t)),
 		backend.WithDistReplication(1),
 		backend.WithDistMerkleChunkSize(2),
 	)
@@ -26,7 +26,7 @@ func TestMerkleSyncConvergence(t *testing.T) {
 	dmA := any(bA).(*backend.DistMemory)
 
 	bB, err := backend.NewDistMemory(ctx,
-		backend.WithDistNode("B", "127.0.0.1:9102"),
+		backend.WithDistNode("B", AllocatePort(t)),
 		backend.WithDistReplication(1),
 		backend.WithDistMerkleChunkSize(2),
 	)

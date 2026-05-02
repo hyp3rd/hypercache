@@ -17,6 +17,7 @@ func TestARC_BasicSetGetAndEvict(t *testing.T) {
 
 	// Insert c, causing an eviction
 	arc.Set("c", 3)
+
 	// One of a/b should be evicted; the other should remain.
 	if _, ok := arc.Get("a"); !ok {
 		if _, ok2 := arc.Get("b"); !ok2 {

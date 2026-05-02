@@ -22,6 +22,7 @@ func TestClock_EvictsWhenHandFindsColdPage(t *testing.T) {
 		key string
 		ok  bool
 	)
+
 	for range 3 {
 		key, ok = clk.Evict()
 		if ok && key == "b" {

@@ -19,23 +19,26 @@ func TestHTTPFetchMerkle(t *testing.T) {
 	ring := cluster.NewRing(cluster.WithReplication(1))
 	membership := cluster.NewMembership(ring)
 
-	// create two nodes with HTTP server enabled (addresses)
-	n1 := cluster.NewNode("", "127.0.0.1:9201")
+	// create two nodes with HTTP server enabled (dynamically allocated addresses)
+	addr1 := AllocatePort(t)
+	addr2 := AllocatePort(t)
+
+	n1 := cluster.NewNode("", addr1)
 
 	b1i, err := backend.NewDistMemory(ctx,
 		backend.WithDistMembership(membership, n1),
-		backend.WithDistNode("n1", "127.0.0.1:9201"),
+		backend.WithDistNode("n1", addr1),
 		backend.WithDistMerkleChunkSize(2),
 	)
 	if err != nil {
 		t.Fatalf("b1: %v", err)
 	}
 
-	n2 := cluster.NewNode("", "127.0.0.1:9202")
+	n2 := cluster.NewNode("", addr2)
 
 	b2i, err := backend.NewDistMemory(ctx,
 		backend.WithDistMembership(membership, n2),
-		backend.WithDistNode("n2", "127.0.0.1:9202"),
+		backend.WithDistNode("n2", addr2),
 		backend.WithDistMerkleChunkSize(2),
 	)
 	if err != nil {

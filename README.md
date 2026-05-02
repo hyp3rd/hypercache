@@ -368,4 +368,3 @@ I'm a surfer, and a software architect with 15 years of experience designing hig
 
 [build-link]: https://github.com/hyp3rd/hypercache/actions/workflows/go.yml
 [codeql-link]:https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml
-[golangci-lint-link]:https://github.com/hyp3rd/hypercache/actions/workflows/golangci-lint.yml

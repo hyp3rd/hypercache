@@ -284,6 +284,7 @@ func TestSnapshotPanic(t *testing.T) {
 	}()
 
 	var cm ConcurrentMap
+
 	snapshot(&cm)
 }
 

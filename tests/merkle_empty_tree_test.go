@@ -14,13 +14,13 @@ func TestMerkleEmptyTrees(t *testing.T) {
 
 	a, _ := backend.NewDistMemory(
 		ctx,
-		backend.WithDistNode("A", "127.0.0.1:9201"),
+		backend.WithDistNode("A", AllocatePort(t)),
 		backend.WithDistReplication(1),
 		backend.WithDistMerkleChunkSize(2),
 	)
 	b, _ := backend.NewDistMemory(
 		ctx,
-		backend.WithDistNode("B", "127.0.0.1:9202"),
+		backend.WithDistNode("B", AllocatePort(t)),
 		backend.WithDistReplication(1),
 		backend.WithDistMerkleChunkSize(2),
 	)

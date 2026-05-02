@@ -182,6 +182,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 
 	// metrics should show at least one read repair
 	var repaired bool
+
 	if replica == b1.LocalNodeID() {
 		repaired = b1.Metrics().ReadRepair > 0
 	} else {
