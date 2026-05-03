@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/longbridgeapp/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/pkg/backend"
@@ -13,17 +13,19 @@ import (
 
 // Test TriggerEviction when evictionInterval == 0 triggers immediate eviction of overflow item(s).
 func TestHyperCache_TriggerEviction_Immediate(t *testing.T) {
-	hc, err := hypercache.NewInMemoryWithDefaults(context.TODO(), 1)
-	assert.Nil(t, err)
+	t.Parallel()
 
-	defer hc.Stop(context.TODO())
+	hc, err := hypercache.NewInMemoryWithDefaults(context.TODO(), 1)
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = hc.Stop(context.TODO()) })
 
 	// Set eviction interval to zero; eviction loop will run on manual trigger
 	hypercache.ApplyHyperCacheOptions(hc, hypercache.WithEvictionInterval[backend.InMemory](0))
 
 	// Add two items beyond capacity to force eviction need
-	assert.Nil(t, hc.Set(context.TODO(), "k1", "v1", 0))
-	assert.Nil(t, hc.Set(context.TODO(), "k2", "v2", 0))
+	require.NoError(t, hc.Set(context.TODO(), "k1", "v1", 0))
+	require.NoError(t, hc.Set(context.TODO(), "k2", "v2", 0))
 
 	// Without waiting, trigger eviction explicitly (non-blocking)
 	// Rapid fire triggers should be non-blocking
@@ -44,5 +46,5 @@ func TestHyperCache_TriggerEviction_Immediate(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	assert.True(t, hc.Count(context.TODO()) <= 1)
+	require.LessOrEqual(t, hc.Count(context.TODO()), 1)
 }

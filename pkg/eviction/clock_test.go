@@ -3,6 +3,8 @@ package eviction
 import "testing"
 
 func TestClock_EvictsWhenHandFindsColdPage(t *testing.T) {
+	t.Parallel()
+
 	clk, err := NewClockAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewClockAlgorithm error: %v", err)
@@ -46,6 +48,8 @@ func TestClock_EvictsWhenHandFindsColdPage(t *testing.T) {
 }
 
 func TestClock_ZeroCapacity_NoOp(t *testing.T) {
+	t.Parallel()
+
 	clk, err := NewClockAlgorithm(0)
 	if err != nil {
 		t.Fatalf("NewClockAlgorithm error: %v", err)
@@ -63,6 +67,8 @@ func TestClock_ZeroCapacity_NoOp(t *testing.T) {
 }
 
 func TestClock_Delete_RemovesItem(t *testing.T) {
+	t.Parallel()
+
 	clk, err := NewClockAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewClockAlgorithm error: %v", err)

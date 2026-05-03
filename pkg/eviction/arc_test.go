@@ -3,6 +3,8 @@ package eviction
 import "testing"
 
 func TestARC_BasicSetGetAndEvict(t *testing.T) {
+	t.Parallel()
+
 	arc, err := NewARCAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewARCAlgorithm error: %v", err)
@@ -11,8 +13,10 @@ func TestARC_BasicSetGetAndEvict(t *testing.T) {
 	arc.Set("a", 1)
 	arc.Set("b", 2)
 
-	if v, ok := arc.Get("a"); !ok || v.(int) != 1 {
-		t.Fatalf("expected a=1, got %v ok=%v", v, ok)
+	if v, ok := arc.Get("a"); !ok {
+		t.Fatalf("expected a present, got ok=%v", ok)
+	} else if got, ok := v.(int); !ok || got != 1 {
+		t.Fatalf("expected a=1, got %v", v)
 	}
 
 	// Insert c, causing an eviction
@@ -27,6 +31,8 @@ func TestARC_BasicSetGetAndEvict(t *testing.T) {
 }
 
 func TestARC_ZeroCapacity_NoOp(t *testing.T) {
+	t.Parallel()
+
 	arc, err := NewARCAlgorithm(0)
 	if err != nil {
 		t.Fatalf("NewARCAlgorithm error: %v", err)
@@ -44,6 +50,8 @@ func TestARC_ZeroCapacity_NoOp(t *testing.T) {
 }
 
 func TestARC_Delete_RemovesResidentAndGhost(t *testing.T) {
+	t.Parallel()
+
 	arc, err := NewARCAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewARCAlgorithm error: %v", err)
@@ -63,6 +71,8 @@ func TestARC_Delete_RemovesResidentAndGhost(t *testing.T) {
 }
 
 func TestARC_B1GhostHitPromotesToT2(t *testing.T) {
+	t.Parallel()
+
 	arc, err := NewARCAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewARCAlgorithm error: %v", err)
@@ -75,7 +85,9 @@ func TestARC_B1GhostHitPromotesToT2(t *testing.T) {
 	// Now reinsert one of the early keys to hit a ghost (B1/B2) path
 	arc.Set("a", 10)
 
-	if v, ok := arc.Get("a"); !ok || v.(int) != 10 {
-		t.Fatalf("expected updated a=10 resident after B1/B2 hit, got %v ok=%v", v, ok)
+	if v, ok := arc.Get("a"); !ok {
+		t.Fatalf("expected a present after B1/B2 hit, got ok=%v", ok)
+	} else if got, ok := v.(int); !ok || got != 10 {
+		t.Fatalf("expected updated a=10 resident after B1/B2 hit, got %v", v)
 	}
 }

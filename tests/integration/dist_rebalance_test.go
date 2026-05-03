@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +14,14 @@ import (
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
+// errUnexpectedStatus is the sentinel returned when the dist node health
+// endpoint reports a non-OK status during the readiness poll.
+var errUnexpectedStatus = errors.New("unexpected dist node health status")
+
 // TestDistRebalanceJoin verifies keys are migrated to a new node after join.
 func TestDistRebalanceJoin(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	// Initial cluster: 2 nodes.
@@ -112,6 +119,8 @@ func TestDistRebalanceJoin(t *testing.T) {
 
 // TestDistRebalanceThrottle simulates saturation causing throttle metric increments.
 func TestDistRebalanceThrottle(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	addrA := allocatePort(t)
@@ -174,7 +183,7 @@ func mustDistNode(
 ) *backend.DistMemory {
 	t.Helper()
 
-	opts := []backend.DistMemoryOption{
+	opts := []backend.DistMemoryOption{ //nolint:prealloc // literal helper-builder list, append-once with extra below
 		backend.WithDistNode(id, addr),
 		backend.WithDistSeeds(seeds),
 		backend.WithDistHintReplayInterval(200 * time.Millisecond),
@@ -190,7 +199,7 @@ func mustDistNode(
 		t.Fatalf("new dist memory: %v", err)
 	}
 
-	waitForDistNodeHealth(t, addr)
+	waitForDistNodeHealth(ctx, t, addr)
 
 	bk, ok := bm.(*backend.DistMemory)
 	if !ok {
@@ -234,7 +243,7 @@ func ownedPrimaryCount(dm *backend.DistMemory, keys []string) int {
 	return c
 }
 
-func waitForDistNodeHealth(t *testing.T, addr string) {
+func waitForDistNodeHealth(ctx context.Context, t *testing.T, addr string) {
 	t.Helper()
 
 	client := &http.Client{Timeout: 100 * time.Millisecond}
@@ -244,7 +253,12 @@ func waitForDistNodeHealth(t *testing.T, addr string) {
 	var lastErr error
 
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(healthURL)
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+		if reqErr != nil {
+			t.Fatalf("build health request: %v", reqErr)
+		}
+
+		resp, err := client.Do(req)
 		if err == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
@@ -253,7 +267,7 @@ func waitForDistNodeHealth(t *testing.T, addr string) {
 				return
 			}
 
-			lastErr = fmt.Errorf("unexpected status %d", resp.StatusCode)
+			lastErr = fmt.Errorf("%w: %d", errUnexpectedStatus, resp.StatusCode)
 		} else {
 			lastErr = err
 		}

@@ -11,6 +11,8 @@ import (
 
 // TestMerkleNoDiff ensures SyncWith returns quickly when trees are identical.
 func TestMerkleNoDiff(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 

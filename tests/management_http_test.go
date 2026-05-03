@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	"github.com/longbridgeapp/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/internal/constants"
@@ -17,6 +17,8 @@ import (
 // TestManagementHTTP_BasicEndpoints spins up the management HTTP server on an ephemeral port
 // and validates core endpoints.
 func TestManagementHTTP_BasicEndpoints(t *testing.T) {
+	t.Parallel()
+
 	cfg, err := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -29,9 +31,9 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 
 	ctx := context.Background()
 	hc, err := hypercache.New(ctx, hypercache.GetDefaultManager(), cfg)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
-	defer hc.Stop(ctx)
+	t.Cleanup(func() { _ = hc.Stop(ctx) })
 
 	// Wait for the management HTTP listener to come up. The race detector
 	// can push listener startup well past the original 30 ms; poll with a
@@ -54,40 +56,40 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	// /health
-	resp, err := client.Get("http://" + addr + "/health")
-	if err != nil {
-		t.Fatalf("GET /health: %v", err)
+	get := func(path string) *http.Response {
+		t.Helper()
+
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+path, nil)
+		require.NoError(t, reqErr)
+
+		resp, doErr := client.Do(req)
+		require.NoError(t, doErr)
+
+		return resp
 	}
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	// /health
+	resp := get("/health")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 
 	// /stats
-	resp, err = client.Get("http://" + addr + "/stats")
-	if err != nil {
-		t.Fatalf("GET /stats: %v", err)
-	}
-
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp = get("/stats")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var statsBody map[string]any
 
 	dec := json.NewDecoder(resp.Body)
 
 	err = dec.Decode(&statsBody)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	_ = resp.Body.Close()
 
 	// /config
-	resp, err = client.Get("http://" + addr + "/config")
-	if err != nil {
-		t.Fatalf("GET /config: %v", err)
-	}
-
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp = get("/config")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var cfgBody map[string]any
 
@@ -95,7 +97,6 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 	_ = dec.Decode(&cfgBody)
 	_ = resp.Body.Close()
 
-	assert.True(t, len(cfgBody) > 0)
-
-	assert.True(t, cfgBody["evictionAlgorithm"] != nil)
+	require.NotEmpty(t, cfgBody)
+	require.NotNil(t, cfgBody["evictionAlgorithm"])
 }

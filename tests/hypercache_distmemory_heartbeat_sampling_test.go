@@ -88,7 +88,11 @@ func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest
 	snap := b1.DistMembershipSnapshot()
 	verAny := snap["version"]
 
-	ver, _ := verAny.(uint64)
+	ver, ok := verAny.(uint64)
+	if !ok {
+		t.Fatalf("expected version to be uint64, got %T (%v)", verAny, verAny)
+	}
+
 	if ver < 3 { // initial upserts already increment version; tolerate timing variance
 		t.Fatalf("expected membership version >=4, got %v", verAny)
 	}

@@ -63,6 +63,37 @@ linters:
     # (access to unexported helpers without re-exporting). Documented choice.
     - testpackage
 
+  exclusions:
+    # Path-based exclusions for rules that produce false-positive noise on test
+    # code without corresponding signal. Production code remains under the full
+    # rule set; only `_test.go` files are exempted from these specific rules.
+    #
+    # Justification per rule:
+    #   - funlen / cyclop / gocognit: tests legitimately have long bodies
+    #     (setup -> many actions -> many assertions); splitting into helpers
+    #     adds noise without surfacing real defects.
+    #   - dupl: table-driven test bodies repeat by design.
+    #   - gocritic: subjective stylistic suggestions, low signal on tests.
+    #   - goconst: short fixture strings ("v1", "key1") naturally repeat in
+    #     tests; constants would obscure intent.
+    #   - noinlineerr: stylistic preference, not a defect.
+    #   - revive function-length / cognitive-complexity / cyclomatic: same
+    #     reasons as funlen / cyclop / gocognit (revive's variants).
+    rules:
+      - path: _test\.go$
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+          - dupl
+          - gocritic
+          - goconst
+          - noinlineerr
+      - path: _test\.go$
+        linters:
+          - revive
+        text: '^(function-length|cognitive-complexity|cyclomatic):'
+
   settings:
     cyclop:
       # The maximal code complexity to report.

@@ -13,6 +13,8 @@ import (
 // TestDistMemoryForwardingReplication spins up two DistMemory backends sharing membership and transport
 // then ensures ownership, forwarding and replication semantics hold.
 func TestDistMemoryForwardingReplication(t *testing.T) {
+	t.Parallel()
+
 	ring := cluster.NewRing(cluster.WithReplication(2))
 	membership := cluster.NewMembership(ring)
 	transport := backend.NewInProcessTransport()

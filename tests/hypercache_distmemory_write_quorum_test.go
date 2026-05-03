@@ -15,6 +15,8 @@ import (
 
 // TestWriteQuorumSuccess ensures a QUORUM write succeeds with majority acks.
 func TestWriteQuorumSuccess(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
@@ -74,6 +76,8 @@ func TestWriteQuorumSuccess(t *testing.T) {
 
 // TestWriteQuorumFailure ensures ALL consistency fails when not enough acks.
 func TestWriteQuorumFailure(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
@@ -125,7 +129,7 @@ func TestWriteQuorumFailure(t *testing.T) {
 	da.SetTransport(transport)
 	db.SetTransport(transport)
 	transport.Register(da)
-	transport.Register(db) // C intentionally not registered (unreachable)
+	transport.Register(db) // C intentionally left unregistered to simulate it being offline
 
 	// Find a key whose owners include all three nodes (replication=3 ensures this) – just brute force until order stable.
 	key := "quorum-all-fail"

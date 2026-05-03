@@ -11,6 +11,8 @@ import (
 
 // TestMerkleDeleteTombstone ensures a deleted key does not resurrect via sync.
 func TestMerkleDeleteTombstone(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 

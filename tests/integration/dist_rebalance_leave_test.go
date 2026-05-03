@@ -11,6 +11,8 @@ import (
 
 // TestDistRebalanceLeave verifies keys are redistributed after a node leaves.
 func TestDistRebalanceLeave(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	// Start 3 nodes.

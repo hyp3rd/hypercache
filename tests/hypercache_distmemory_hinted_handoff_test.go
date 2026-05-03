@@ -15,6 +15,8 @@ import (
 
 // TestHintedHandoffReplay ensures that when a replica is down during a write, a hint is queued and later replayed.
 func TestHintedHandoffReplay(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
@@ -36,8 +38,15 @@ func TestHintedHandoffReplay(t *testing.T) {
 	primary, _ := backend.NewDistMemory(ctx, primaryOpts...)
 	replica, _ := backend.NewDistMemory(ctx, replicaOpts...)
 
-	p := any(primary).(*backend.DistMemory)
-	r := any(replica).(*backend.DistMemory)
+	p, ok := any(primary).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast primary to *backend.DistMemory")
+	}
+
+	r, ok := any(replica).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast replica to *backend.DistMemory")
+	}
 
 	StopOnCleanup(t, p)
 	StopOnCleanup(t, r)

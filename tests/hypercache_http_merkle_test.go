@@ -13,6 +13,8 @@ import (
 
 // TestHTTPFetchMerkle ensures HTTP transport can fetch a remote Merkle tree and SyncWith works over HTTP.
 func TestHTTPFetchMerkle(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	// shared ring/membership
@@ -89,8 +91,13 @@ func TestHTTPFetchMerkle(t *testing.T) {
 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get("http://" + b1.LocalNodeAddr() + "/internal/merkle")
-		if err == nil {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+b1.LocalNodeAddr()+"/internal/merkle", nil)
+		if reqErr != nil {
+			t.Fatalf("build merkle request: %v", reqErr)
+		}
+
+		resp, getErr := http.DefaultClient.Do(req)
+		if getErr == nil {
 			_ = resp.Body.Close()
 
 			if resp.StatusCode == http.StatusOK {
@@ -131,4 +138,6 @@ func TestHTTPFetchMerkle(t *testing.T) {
 	}
 }
 
-func httpKey(i int) string { return "hkey:" + string(rune('a'+i)) }
+func httpKey(i int) string {
+	return "hkey:" + string(rune('a'+i)) //nolint:gosec // test fixture, i bounded by 5 in caller
+}

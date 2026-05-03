@@ -10,6 +10,8 @@ import (
 )
 
 func TestWorkerPool_EnqueueAndShutdown(t *testing.T) {
+	t.Parallel()
+
 	pool := NewWorkerPool(3)
 
 	var mu sync.Mutex
@@ -38,6 +40,8 @@ func TestWorkerPool_EnqueueAndShutdown(t *testing.T) {
 }
 
 func TestWorkerPool_JobErrorHandling(t *testing.T) {
+	t.Parallel()
+
 	pool := NewWorkerPool(2)
 	expectedErr := ewrap.New("job error")
 	pool.Enqueue(func() error {
@@ -66,6 +70,8 @@ func TestWorkerPool_JobErrorHandling(t *testing.T) {
 }
 
 func TestWorkerPool_ResizeIncrease(t *testing.T) {
+	t.Parallel()
+
 	pool := NewWorkerPool(1)
 
 	var mu sync.Mutex
@@ -94,6 +100,8 @@ func TestWorkerPool_ResizeIncrease(t *testing.T) {
 }
 
 func TestWorkerPool_ResizeDecrease(t *testing.T) {
+	t.Parallel()
+
 	pool := NewWorkerPool(4)
 
 	var mu sync.Mutex
@@ -122,6 +130,8 @@ func TestWorkerPool_ResizeDecrease(t *testing.T) {
 }
 
 func TestWorkerPool_ResizeToZeroAndBack(t *testing.T) {
+	t.Parallel()
+
 	pool := NewWorkerPool(2)
 	done := make(chan struct{})
 	called := false
@@ -152,6 +162,8 @@ func TestWorkerPool_ResizeToZeroAndBack(t *testing.T) {
 }
 
 func TestWorkerPool_NegativeResizeDoesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool := NewWorkerPool(2)
 	pool.Resize(-1)
 
@@ -170,6 +182,8 @@ func TestWorkerPool_NegativeResizeDoesNothing(t *testing.T) {
 // schedule work mid-shutdown. The new contract trades a "loud failure on
 // programming error" for "no panics during graceful shutdown races.".
 func TestWorkerPool_EnqueueAfterShutdownDrops(t *testing.T) {
+	t.Parallel()
+
 	pool := NewWorkerPool(1)
 	pool.Shutdown()
 

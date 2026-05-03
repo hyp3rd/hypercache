@@ -12,6 +12,8 @@ import (
 
 // TestDistMemoryStaleQuorum ensures quorum read returns newest version and repairs stale replicas.
 func TestDistMemoryStaleQuorum(t *testing.T) {
+	t.Parallel()
+
 	ring := cluster.NewRing(cluster.WithReplication(3))
 	membership := cluster.NewMembership(ring)
 	transport := backend.NewInProcessTransport()

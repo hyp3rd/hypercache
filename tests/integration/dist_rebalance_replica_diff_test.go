@@ -12,13 +12,15 @@ import (
 // TestDistRebalanceReplicaDiff ensures that when a new replica is added (primary unchanged)
 // the new replica eventually receives the keys via replica-only diff replication.
 func TestDistRebalanceReplicaDiff(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	// Start with two nodes replication=2 so both are owners for each key.
 	addrA := allocatePort(t)
 	addrB := allocatePort(t)
 
-	baseOpts := []backend.DistMemoryOption{
+	baseOpts := []backend.DistMemoryOption{ //nolint:prealloc // literal options; final size depends on test branches
 		backend.WithDistReplication(2),
 		backend.WithDistVirtualNodes(32),
 		backend.WithDistRebalanceInterval(120 * time.Millisecond),

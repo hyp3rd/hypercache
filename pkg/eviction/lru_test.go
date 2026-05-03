@@ -3,6 +3,8 @@ package eviction
 import "testing"
 
 func TestLRU_EvictsLeastRecentlyUsedOnSet(t *testing.T) {
+	t.Parallel()
+
 	lru, err := NewLRUAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewLRUAlgorithm error: %v", err)
@@ -27,12 +29,16 @@ func TestLRU_EvictsLeastRecentlyUsedOnSet(t *testing.T) {
 		t.Fatalf("expected 'a' to remain in cache")
 	}
 
-	if v, ok := lru.Get("c"); !ok || v.(int) != 3 {
-		t.Fatalf("expected 'c'=3 in cache, got %v, ok=%v", v, ok)
+	if v, ok := lru.Get("c"); !ok {
+		t.Fatalf("expected 'c' present, got ok=%v", ok)
+	} else if got, ok := v.(int); !ok || got != 3 {
+		t.Fatalf("expected 'c'=3 in cache, got %v", v)
 	}
 }
 
 func TestLRU_EvictMethodOrder(t *testing.T) {
+	t.Parallel()
+
 	lru, err := NewLRUAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewLRUAlgorithm error: %v", err)
@@ -54,6 +60,8 @@ func TestLRU_EvictMethodOrder(t *testing.T) {
 }
 
 func TestLRU_ZeroCapacity_NoOp(t *testing.T) {
+	t.Parallel()
+
 	lru, err := NewLRUAlgorithm(0)
 	if err != nil {
 		t.Fatalf("NewLRUAlgorithm error: %v", err)
@@ -71,6 +79,8 @@ func TestLRU_ZeroCapacity_NoOp(t *testing.T) {
 }
 
 func TestLRU_Delete_RemovesItem(t *testing.T) {
+	t.Parallel()
+
 	lru, err := NewLRUAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewLRUAlgorithm error: %v", err)

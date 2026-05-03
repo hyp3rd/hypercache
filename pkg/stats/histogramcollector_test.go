@@ -10,6 +10,8 @@ import (
 )
 
 func TestHistogramStatsCollector_BasicAggregates(t *testing.T) {
+	t.Parallel()
+
 	c := NewHistogramStatsCollector()
 
 	c.Incr(constants.StatIncr, 10)
@@ -49,6 +51,8 @@ func TestHistogramStatsCollector_BasicAggregates(t *testing.T) {
 }
 
 func TestHistogramStatsCollector_DecrStoresNegative(t *testing.T) {
+	t.Parallel()
+
 	c := NewHistogramStatsCollector()
 
 	c.Incr(constants.StatIncr, 5)
@@ -69,6 +73,8 @@ func TestHistogramStatsCollector_DecrStoresNegative(t *testing.T) {
 }
 
 func TestHistogramStatsCollector_Median(t *testing.T) {
+	t.Parallel()
+
 	c := NewHistogramStatsCollector()
 
 	for _, v := range []int64{3, 1, 4, 1, 5, 9, 2, 6} {
@@ -89,6 +95,8 @@ func TestHistogramStatsCollector_Median(t *testing.T) {
 }
 
 func TestHistogramStatsCollector_Percentile(t *testing.T) {
+	t.Parallel()
+
 	c := NewHistogramStatsCollector()
 
 	for i := int64(1); i <= 100; i++ {
@@ -113,6 +121,8 @@ func TestHistogramStatsCollector_Percentile(t *testing.T) {
 }
 
 func TestHistogramStatsCollector_EmptyStat(t *testing.T) {
+	t.Parallel()
+
 	c := NewHistogramStatsCollector()
 
 	// querying an unrecorded stat must return zero values, not panic
@@ -134,11 +144,13 @@ func TestHistogramStatsCollector_EmptyStat(t *testing.T) {
 }
 
 func TestHistogramStatsCollector_BoundedSamples(t *testing.T) {
-	const cap = 8
+	t.Parallel()
 
-	c := NewHistogramStatsCollectorWithCapacity(cap)
+	const windowCap = 8
 
-	// Write more than cap samples; sample buffer must stay at cap.
+	c := NewHistogramStatsCollectorWithCapacity(windowCap)
+
+	// Write more than windowCap samples; sample buffer must stay at windowCap.
 	for i := range int64(100) {
 		c.Histogram(constants.StatHistogram, i)
 	}
@@ -152,8 +164,8 @@ func TestHistogramStatsCollector_BoundedSamples(t *testing.T) {
 		t.Errorf("lifetime Count = %d, want 100", stat.Count)
 	}
 
-	if got := len(stat.Values); got != cap {
-		t.Errorf("len(Values) = %d, want %d (bounded)", got, cap)
+	if got := len(stat.Values); got != windowCap {
+		t.Errorf("len(Values) = %d, want %d (bounded)", got, windowCap)
 	}
 
 	// Min/Max must still reflect the lifetime range, not just the window.
@@ -171,6 +183,8 @@ func TestHistogramStatsCollector_BoundedSamples(t *testing.T) {
 // trip the race detector (which the previous implementation would, since it
 // sorted shared backing arrays in-place under RLock).
 func TestHistogramStatsCollector_ConcurrentRecord(t *testing.T) {
+	t.Parallel()
+
 	c := NewHistogramStatsCollector()
 
 	const writers = 8
@@ -224,6 +238,8 @@ func TestHistogramStatsCollector_ConcurrentRecord(t *testing.T) {
 // not mutate the live sample buffer. The previous implementation called
 // slices.Sort on the live buffer, racing with concurrent writers.
 func TestHistogramStatsCollector_GetStatsSnapshotIsolated(t *testing.T) {
+	t.Parallel()
+
 	c := NewHistogramStatsCollector()
 
 	for i := range int64(32) {
@@ -252,20 +268,22 @@ func TestHistogramStatsCollector_GetStatsSnapshotIsolated(t *testing.T) {
 // keeps memory usage flat under sustained recording. The previous
 // implementation appended forever and would grow unbounded.
 func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("skipping memory soak in short mode")
 	}
 
-	const cap = 1024
+	const windowCap = 1024
 
-	c := NewHistogramStatsCollectorWithCapacity(cap)
+	c := NewHistogramStatsCollectorWithCapacity(windowCap)
 
 	// Prime the ring buffer.
-	for i := range cap {
+	for i := range windowCap {
 		c.Histogram(constants.StatHistogram, int64(i))
 	}
 
-	runtime.GC()
+	runtime.GC() //nolint:revive // intentional GC to take a clean heap reading for the leak assertion
 
 	var before runtime.MemStats
 
@@ -278,7 +296,7 @@ func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
 		c.Histogram(constants.StatHistogram, int64(i))
 	}
 
-	runtime.GC()
+	runtime.GC() //nolint:revive // intentional GC to take a clean heap reading for the leak assertion
 
 	var after runtime.MemStats
 
@@ -288,14 +306,14 @@ func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
 	// runtime overhead, GC bookkeeping, etc.).
 	const slack = 1 << 20
 
-	growth := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+	growth := int64(after.HeapAlloc) - int64(before.HeapAlloc) //nolint:gosec // HeapAlloc never approaches int64 max in this test
 	if growth > slack {
 		t.Errorf("heap grew by %d bytes during steady-state recording (want <= %d)", growth, slack)
 	}
 
 	// And lifetime count is still exact.
 	stat := c.GetStats()[constants.StatHistogram.String()]
-	want := int64(cap + extra)
+	want := int64(windowCap + extra)
 
 	if int64(stat.Count) != want {
 		t.Errorf("Count = %d, want %d", stat.Count, want)
@@ -305,6 +323,8 @@ func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
 // TestHistogramStatsCollector_AtomicMinMaxRace exercises the CAS loops in
 // record() under concurrent extreme values.
 func TestHistogramStatsCollector_AtomicMinMaxRace(t *testing.T) {
+	t.Parallel()
+
 	c := NewHistogramStatsCollector()
 
 	var wg sync.WaitGroup

@@ -9,6 +9,8 @@ import (
 
 // TestMerkleEmptyTrees ensures diff between two empty trees is empty and SyncWith is no-op.
 func TestMerkleEmptyTrees(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 

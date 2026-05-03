@@ -5,13 +5,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/longbridgeapp/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
 func TestHyperCache_New(t *testing.T) {
+	t.Parallel()
+
 	// Test that an error is returned when the capacity is negative
 	_, err := NewInMemoryWithDefaults(context.TODO(), -1)
 	if err == nil {
@@ -40,17 +42,21 @@ func TestHyperCache_New(t *testing.T) {
 }
 
 func TestHyperCache_WithStatsCollector(t *testing.T) {
+	t.Parallel()
+
 	// Test with default stats collector
 	cache, err := NewInMemoryWithDefaults(context.TODO(), 10)
-	assert.Nil(t, err)
-	assert.NotNil(t, cache.StatsCollector)
+	require.NoError(t, err)
+	require.NotNil(t, cache.StatsCollector)
 }
 
 func TestHyperCache_WithExpirationInterval(t *testing.T) {
+	t.Parallel()
+
 	// Test with default expiration interval
 	cache, err := NewInMemoryWithDefaults(context.TODO(), 10)
-	assert.Nil(t, err)
-	assert.Equal(t, 30*time.Minute, cache.expirationInterval)
+	require.NoError(t, err)
+	require.Equal(t, 30*time.Minute, cache.expirationInterval)
 
 	config := &Config[backend.InMemory]{
 		BackendType: constants.InMemoryBackend,
@@ -65,15 +71,17 @@ func TestHyperCache_WithExpirationInterval(t *testing.T) {
 	hcm := GetDefaultManager()
 
 	cache, err = New(context.TODO(), hcm, config)
-	assert.Nil(t, err)
-	assert.Equal(t, 1*time.Hour, cache.expirationInterval)
+	require.NoError(t, err)
+	require.Equal(t, 1*time.Hour, cache.expirationInterval)
 }
 
 func TestHyperCache_WithEvictionInterval(t *testing.T) {
+	t.Parallel()
+
 	// Test with default eviction interval
 	cache, err := NewInMemoryWithDefaults(context.TODO(), 10)
-	assert.Nil(t, err)
-	assert.Equal(t, 10*time.Minute, cache.evictionInterval)
+	require.NoError(t, err)
+	require.Equal(t, 10*time.Minute, cache.evictionInterval)
 
 	// Test with custom eviction interval
 	config := &Config[backend.InMemory]{
@@ -88,15 +96,17 @@ func TestHyperCache_WithEvictionInterval(t *testing.T) {
 	hcm := GetDefaultManager()
 	// Test with custom eviction interval
 	cache, err = New(context.TODO(), hcm, config)
-	assert.Nil(t, err)
-	assert.Equal(t, 1*time.Hour, cache.evictionInterval)
+	require.NoError(t, err)
+	require.Equal(t, 1*time.Hour, cache.evictionInterval)
 }
 
 func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
+	t.Parallel()
+
 	// Test with default max eviction count
 	cache, err := NewInMemoryWithDefaults(context.TODO(), 10)
-	assert.Nil(t, err)
-	assert.Equal(t, uint(10), cache.maxEvictionCount)
+	require.NoError(t, err)
+	require.Equal(t, uint(10), cache.maxEvictionCount)
 
 	// Test with custom max eviction count
 	config := &Config[backend.InMemory]{
@@ -112,6 +122,6 @@ func TestHyperCache_WithMaxEvictionCount(t *testing.T) {
 	hcm := GetDefaultManager()
 
 	cache, err = New(context.TODO(), hcm, config)
-	assert.Nil(t, err)
-	assert.Equal(t, uint(5), cache.maxEvictionCount)
+	require.NoError(t, err)
+	require.Equal(t, uint(5), cache.maxEvictionCount)
 }

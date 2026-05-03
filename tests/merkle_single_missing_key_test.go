@@ -11,6 +11,8 @@ import (
 
 // TestMerkleSingleMissingKey ensures a single remote-only key is detected and pulled.
 func TestMerkleSingleMissingKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 

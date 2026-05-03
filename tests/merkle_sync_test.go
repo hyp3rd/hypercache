@@ -11,6 +11,8 @@ import (
 
 // TestMerkleSyncConvergence ensures SyncWith pulls newer keys from remote.
 func TestMerkleSyncConvergence(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
@@ -89,4 +91,6 @@ func TestMerkleSyncConvergence(t *testing.T) {
 	}
 }
 
-func keyf(prefix string, i int) string { return prefix + ":" + string(rune('a'+i)) }
+func keyf(prefix string, i int) string {
+	return prefix + ":" + string(rune('a'+i)) //nolint:gosec // test fixture, i bounded in callers
+}

@@ -10,6 +10,8 @@ import (
 )
 
 // helper to build two-node replicated cluster.
+//
+//nolint:revive // confusing-results: two backends + ring is the natural shape; named returns add no clarity here
 func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, *cluster.Ring) {
 	t.Helper()
 
@@ -50,6 +52,8 @@ func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, 
 
 // TestDistMemoryRemoveReplication ensures that Remove replicates deletions across replicas.
 func TestDistMemoryRemoveReplication(t *testing.T) {
+	t.Parallel()
+
 	b1, b2, ring := newTwoNodeCluster(t)
 	key := "remove-key"
 
@@ -111,6 +115,8 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 
 // TestDistMemoryReadRepair ensures a stale replica is healed on read.
 func TestDistMemoryReadRepair(t *testing.T) {
+	t.Parallel()
+
 	b1, b2, ring := newTwoNodeCluster(t)
 	key := "rr-key"
 

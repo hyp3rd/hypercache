@@ -11,13 +11,15 @@ import (
 
 // TestDistRebalanceReplicaDiffThrottle ensures the per-tick limit increments throttle metric.
 func TestDistRebalanceReplicaDiffThrottle(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	addrA := allocatePort(t)
 	addrB := allocatePort(t)
 
 	// Low rebalance interval & strict replica diff limit of 1 per tick to force throttle.
-	base := []backend.DistMemoryOption{
+	base := []backend.DistMemoryOption{ //nolint:prealloc // literal options; final size depends on test branches
 		backend.WithDistReplication(2),
 		backend.WithDistVirtualNodes(16),
 		backend.WithDistRebalanceInterval(80 * time.Millisecond),
