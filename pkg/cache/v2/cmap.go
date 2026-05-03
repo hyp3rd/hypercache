@@ -9,7 +9,7 @@
 //   - Sharded design with 32 shards to reduce lock contention
 //   - FNV-1a hash function for efficient key distribution
 //   - Thread-safe operations with optimized read/write locking
-//   - Buffered iteration support for safe concurrent traversal
+//   - iter.Seq2 iteration via All() for safe concurrent traversal
 //   - Standard map operations: Set, Get, Has, Remove, Pop, Clear, Count
 //
 // Example usage:
@@ -22,6 +22,7 @@
 package v2
 
 import (
+	"iter"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -181,91 +182,47 @@ func (cm *ConcurrentMap) Pop(key string) (*Item, bool) {
 	return item, ok
 }
 
-// Tuple is used by the IterBuffered functions to wrap two variables together over a channel,.
-type Tuple struct {
-	Key string
-	Val Item
+// All returns an iter.Seq2 that yields every (key, *Item) pair across all
+// shards. Each shard is walked under its own RLock, released before moving
+// to the next shard — concurrent writers to a different shard are not
+// blocked.
+//
+// IMPORTANT: the yielded *Item points directly into the live map. Callers
+// MUST treat it as read-only and copy if they need to retain the value
+// past the yield. The shard's RLock is held during yield, so a
+// long-running consumer body will block writers to that shard. Drain into
+// a local slice first if the consumer needs to do I/O or block.
+//
+// Replaces the previous IterBuffered channel-based iterator: no fan-in
+// goroutines, no per-shard channel allocations.
+func (cm *ConcurrentMap) All() iter.Seq2[string, *Item] {
+	return func(yield func(string, *Item) bool) {
+		if len(cm.shards) == 0 {
+			panic(`cmap.ConcurrentMap is not initialized. Should run New() before usage.`)
+		}
+
+		for _, shard := range cm.shards {
+			if !yieldShard(shard, yield) {
+				return
+			}
+		}
+	}
 }
 
-// IterBuffered returns a buffered iterator which could be used in a for range loop.
-func (cm *ConcurrentMap) IterBuffered() <-chan Tuple {
-	chans := snapshot(cm)
+// yieldShard walks one shard under RLock and forwards entries to yield.
+// Returns true if iteration should continue, false if the consumer asked
+// to stop.
+func yieldShard(shard *ConcurrentMapShard, yield func(string, *Item) bool) bool {
+	shard.RLock()
+	defer shard.RUnlock()
 
-	total := 0
-	for _, c := range chans {
-		total += cap(c)
+	for k, v := range shard.items {
+		if !yield(k, v) {
+			return false
+		}
 	}
 
-	ch := make(chan Tuple, total)
-	go fanIn(chans, ch)
-
-	return ch
-}
-
-// Returns a array of channels that contains elements in each shard,
-// which likely takes a snapshot of `m`.
-// It returns once the size of each buffered channel is determined,
-// before all the channels are populated using goroutines.
-func snapshot(cm *ConcurrentMap) []chan Tuple {
-	// When you access map items before initializing.
-	if len(cm.shards) == 0 {
-		panic(`cmap.ConcurrentMap is not initialized. Should run New() before usage.`)
-	}
-
-	chans := make([]chan Tuple, ShardCount)
-	wg := sync.WaitGroup{}
-	wg.Add(ShardCount)
-
-	// Foreach shard.
-	for index, shard := range cm.shards {
-		go func(index int, shard *ConcurrentMapShard) {
-			// Foreach key, value pair.
-			shard.RLock()
-
-			// Determine capacity and copy to a local slice to shorten lock hold time.
-			n := len(shard.items)
-
-			chans[index] = make(chan Tuple, n)
-
-			local := make([]Tuple, 0, n)
-			for key, val := range shard.items {
-				local = append(local, Tuple{Key: key, Val: *val})
-			}
-
-			shard.RUnlock()
-
-			wg.Done()
-
-			for _, t := range local {
-				chans[index] <- t
-			}
-
-			close(chans[index])
-		}(index, shard)
-	}
-
-	wg.Wait()
-
-	return chans
-}
-
-// fanIn reads elements from channels `chans` into channel `out`.
-func fanIn(chans []chan Tuple, out chan Tuple) {
-	wg := sync.WaitGroup{}
-	wg.Add(len(chans))
-
-	for _, ch := range chans {
-		go func(ch chan Tuple) {
-			for t := range ch {
-				out <- t
-			}
-
-			wg.Done()
-		}(ch)
-	}
-
-	wg.Wait()
-	close(out)
+	return true
 }
 
 // Remove removes the value under the specified key.

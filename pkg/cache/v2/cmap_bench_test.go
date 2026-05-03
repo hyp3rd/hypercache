@@ -79,10 +79,11 @@ func BenchmarkConcurrentMap_GetShard(b *testing.B) {
 	}
 }
 
-// BenchmarkConcurrentMap_IterBuffered measures allocation pressure of the
-// channel-based iterator. Phase 2b replaces it with iter.Seq2 — this benchmark
-// proves the alloc/op drops to ~0.
-func BenchmarkConcurrentMap_IterBuffered(b *testing.B) {
+// BenchmarkConcurrentMap_All measures allocation pressure of the iter.Seq2
+// iterator that replaced the channel-based IterBuffered in Phase 2b. The
+// expected delta vs. the old IterBuffered baseline: ~0 alloc/op (no
+// channels, no goroutines, no per-shard buffers).
+func BenchmarkConcurrentMap_All(b *testing.B) {
 	cm := New()
 	for i := range 4096 {
 		cm.Set("k"+strconv.Itoa(i), &Item{Key: "k" + strconv.Itoa(i)})
@@ -92,8 +93,8 @@ func BenchmarkConcurrentMap_IterBuffered(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		for tup := range cm.IterBuffered() {
-			_ = tup
+		for k, v := range cm.All() {
+			_, _ = k, v
 		}
 	}
 }

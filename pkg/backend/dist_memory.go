@@ -699,12 +699,7 @@ func (dm *DistMemory) Count(_ context.Context) int {
 	total := 0
 
 	for _, s := range dm.shards {
-		// iterate channel to count; ConcurrentMap has Count helper
-		// but we call Count for each shard
-		for range s.items.IterBuffered() {
-			// ineff: but simple; optimize later with sized field
-			total++
-		}
+		total += s.items.Count()
 	}
 
 	return total
@@ -798,8 +793,8 @@ func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error {
 func (dm *DistMemory) List(_ context.Context, _ ...IFilter) ([]*cache.Item, error) {
 	items := make([]*cache.Item, 0, listPrealloc)
 	for _, s := range dm.shards {
-		for kv := range s.items.IterBuffered() {
-			cloned := kv.Val
+		for _, it := range s.items.All() {
+			cloned := *it
 
 			items = append(items, &cloned)
 		}
@@ -1322,9 +1317,8 @@ func (dm *DistMemory) enumerateRemoteOnlyKeys(nodeID string, local []merkleKV) m
 			continue
 		}
 
-		rch := shard.items.IterBuffered()
-		for t := range rch {
-			missing[t.Key] = struct{}{}
+		for k := range shard.items.All() {
+			missing[k] = struct{}{}
 		}
 	}
 
@@ -1392,9 +1386,8 @@ func (dm *DistMemory) merkleEntries() []merkleKV {
 			continue
 		}
 
-		ch := shard.items.IterBuffered()
-		for t := range ch {
-			entries = append(entries, merkleKV{k: t.Key, v: t.Val.Version})
+		for k, it := range shard.items.All() {
+			entries = append(entries, merkleKV{k: k, v: it.Version})
 		}
 
 		for k, ts := range shard.tombs { // include tombstones
@@ -1555,10 +1548,10 @@ func (dm *DistMemory) collectRebalanceCandidates() []cache.Item {
 			continue
 		}
 
-		for kv := range sh.items.IterBuffered() { // snapshot iteration
-			it := kv.Val
-			if dm.shouldRebalance(sh, &it) {
-				out = append(out, it)
+		for _, it := range sh.items.All() { // snapshot iteration
+			cloned := *it
+			if dm.shouldRebalance(sh, &cloned) {
+				out = append(out, cloned)
 			}
 		}
 	}
@@ -1629,12 +1622,21 @@ func (dm *DistMemory) replicateNewReplicas(ctx context.Context) {
 }
 
 func (dm *DistMemory) replDiffShard(ctx context.Context, sh *distShard, processed, limit int) int {
-	for kv := range sh.items.IterBuffered() {
+	// Snapshot under the iter.Seq2 RLock so we don't hold the shard read
+	// lock across sendReplicaDiff's network I/O. Capacity is conservative
+	// (Count may drift between snapshot start and end, but the slice
+	// grows as needed).
+	snapshot := make([]cache.Item, 0, sh.items.Count())
+	for _, it := range sh.items.All() {
+		snapshot = append(snapshot, *it)
+	}
+
+	for i := range snapshot {
 		if limit > 0 && processed >= limit {
 			return processed
 		}
 
-		it := kv.Val
+		it := &snapshot[i]
 
 		owners := dm.ring.Lookup(it.Key)
 		if len(owners) == 0 || owners[0] != dm.localNode.ID {
@@ -1652,7 +1654,7 @@ func (dm *DistMemory) replDiffShard(ctx context.Context, sh *distShard, processe
 			continue
 		}
 
-		processed = dm.sendReplicaDiff(ctx, &it, newRepls, processed, limit)
+		processed = dm.sendReplicaDiff(ctx, it, newRepls, processed, limit)
 		dm.setOwnerBaseline(sh, it.Key, owners)
 	}
 

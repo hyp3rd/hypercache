@@ -90,10 +90,12 @@ func (cacheBackend *InMemory) List(_ context.Context, filters ...IFilter) ([]*ca
 
 	items := make([]*cache.Item, 0, cacheBackend.items.Count())
 
-	for item := range cacheBackend.items.IterBuffered() {
-		cloned := item
+	for _, item := range cacheBackend.items.All() {
+		// Copy under the iterator's RLock so the slice owns its data once
+		// the lock is released — All() yields pointers into the live map.
+		cloned := *item
 
-		items = append(items, &cloned.Val)
+		items = append(items, &cloned)
 	}
 
 	// Apply the filters

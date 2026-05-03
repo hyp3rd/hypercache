@@ -1,0 +1,26 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/hyp3rd/hypercache/pkg/cache/v2
+cpu: Apple M4 Pro
+BenchmarkConcurrentMap_Count-14            	122877582	         9.726 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_Count-14            	122084272	         9.828 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_Count-14            	123835690	         9.683 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_Count-14            	122782857	         9.763 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_Count-14            	124295282	         9.649 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_CountParallel-14    	79226004	        13.44 ns/op	       9 B/op	       0 allocs/op
+BenchmarkConcurrentMap_CountParallel-14    	82377501	        13.32 ns/op	       9 B/op	       0 allocs/op
+BenchmarkConcurrentMap_CountParallel-14    	93374600	        12.83 ns/op	       9 B/op	       0 allocs/op
+BenchmarkConcurrentMap_CountParallel-14    	74157042	        14.11 ns/op	       9 B/op	       0 allocs/op
+BenchmarkConcurrentMap_CountParallel-14    	89445556	        13.49 ns/op	       8 B/op	       0 allocs/op
+BenchmarkConcurrentMap_GetShard-14         	100000000	        10.08 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_GetShard-14         	120268629	        10.01 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_GetShard-14         	100000000	        10.22 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_GetShard-14         	100000000	        10.03 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_GetShard-14         	100000000	        10.07 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_All-14              	   46454	     26087 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_All-14              	   44976	     26633 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_All-14              	   45357	     26457 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_All-14              	   41589	     27827 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConcurrentMap_All-14              	   45512	     26454 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/hyp3rd/hypercache/pkg/cache/v2	23.302s

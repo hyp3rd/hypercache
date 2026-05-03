@@ -196,9 +196,8 @@ func (s *distHTTPServer) registerMerkle(_ context.Context, dm *DistMemory) {
 				continue
 			}
 
-			ch := shard.items.IterBuffered()
-			for t := range ch {
-				keys = append(keys, t.Key)
+			for k := range shard.items.All() {
+				keys = append(keys, k)
 			}
 		}
 

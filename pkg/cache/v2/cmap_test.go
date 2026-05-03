@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"iter"
 	"sync"
 	"testing"
 	"time"
@@ -251,7 +252,7 @@ func TestCount_SetExistingKeyDoesNotIncrement(t *testing.T) {
 	}
 }
 
-func TestIterBuffered(t *testing.T) {
+func TestAll(t *testing.T) {
 	t.Parallel()
 
 	cm := New()
@@ -261,15 +262,13 @@ func TestIterBuffered(t *testing.T) {
 		"key3": {Value: "value3", Expiration: time.Hour},
 	}
 
-	// Set items
 	for k, v := range items {
 		cm.Set(k, v)
 	}
 
-	// Iterate and verify
 	found := make(map[string]Item)
-	for tuple := range cm.IterBuffered() {
-		found[tuple.Key] = tuple.Val
+	for k, v := range cm.All() {
+		found[k] = *v
 	}
 
 	if len(found) != len(items) {
@@ -282,6 +281,40 @@ func TestIterBuffered(t *testing.T) {
 		} else if foundItem.Value != expectedItem.Value {
 			t.Errorf("Value mismatch for key %s", key)
 		}
+	}
+}
+
+// TestAll_EarlyTermination ensures yield(false) stops iteration without
+// leaking the shard RLock — if the lock leaked, a subsequent Set would
+// deadlock.
+func TestAll_EarlyTermination(t *testing.T) {
+	t.Parallel()
+
+	cm := New()
+	for i := range 100 {
+		cm.Set(string(rune(i)), &Item{Value: i})
+	}
+
+	// Stop after the first item.
+	count := 0
+
+	for range cm.All() {
+		count++
+
+		break
+	}
+
+	if count != 1 {
+		t.Errorf("expected 1 iteration before break, got %d", count)
+	}
+
+	// If RLock leaked, this Set would block forever — the test timeout
+	// would fire instead of failing fast. Run a Set to prove the lock was
+	// released cleanly.
+	cm.Set("after-break", &Item{Value: "ok"})
+
+	if !cm.Has("after-break") {
+		t.Error("Set after early-termination iteration did not take effect")
 	}
 }
 
@@ -339,7 +372,7 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-func TestSnapshotPanic(t *testing.T) {
+func TestAll_PanicOnUninitialized(t *testing.T) {
 	t.Parallel()
 
 	defer func() {
@@ -350,7 +383,13 @@ func TestSnapshotPanic(t *testing.T) {
 
 	var cm ConcurrentMap
 
-	snapshot(&cm)
+	// The yield function should never run — the panic happens before the
+	// first iteration. Calling next() once forces the seq body to start.
+	next, stop := iter.Pull2(cm.All())
+
+	defer stop()
+
+	next()
 }
 
 func BenchmarkSet(b *testing.B) {
