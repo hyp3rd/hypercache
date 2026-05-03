@@ -2,17 +2,16 @@ package backend
 
 import (
 	"context"
-	"sync"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
-// InMemory is a cache backend that stores the items in memory, leveraging a custom `ConcurrentMap`.
+// InMemory is a cache backend that stores the items in memory, leveraging a
+// custom sharded ConcurrentMap. Thread-safety is provided by the underlying
+// ConcurrentMap; no backend-level mutex is needed.
 type InMemory struct {
-	sync.RWMutex // mutex to protect the cache from concurrent access
-
 	items           cache.ConcurrentMap    // map to store the items in the cache
 	itemPoolManager *cache.ItemPoolManager // item pool manager to manage the item pool
 	capacity        int                    // capacity of the cache, limits the number of items that can be stored in the cache
@@ -80,9 +79,6 @@ func (cacheBackend *InMemory) Set(_ context.Context, item *cache.Item) error {
 		return err
 	}
 
-	cacheBackend.Lock()
-	defer cacheBackend.Unlock()
-
 	cacheBackend.items.Set(item.Key, item)
 
 	return nil
@@ -90,10 +86,6 @@ func (cacheBackend *InMemory) Set(_ context.Context, item *cache.Item) error {
 
 // List returns a list of all items in the cache filtered and ordered by the given options.
 func (cacheBackend *InMemory) List(_ context.Context, filters ...IFilter) ([]*cache.Item, error) {
-	// Apply the filters
-	cacheBackend.RLock()
-	defer cacheBackend.RUnlock()
-
 	var err error
 
 	items := make([]*cache.Item, 0, cacheBackend.items.Count())

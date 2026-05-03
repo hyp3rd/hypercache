@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -23,7 +23,12 @@ func TestMerkleSyncConvergence(t *testing.T) {
 		t.Fatalf("new dist memory A: %v", err)
 	}
 
-	dmA := any(bA).(*backend.DistMemory)
+	dmA, ok := any(bA).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bA)
+	}
+
+	StopOnCleanup(t, dmA)
 
 	bB, err := backend.NewDistMemory(ctx,
 		backend.WithDistNode("B", AllocatePort(t)),
@@ -34,7 +39,12 @@ func TestMerkleSyncConvergence(t *testing.T) {
 		t.Fatalf("new dist memory B: %v", err)
 	}
 
-	dmB := any(bB).(*backend.DistMemory)
+	dmB, ok := any(bB).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bB)
+	}
+
+	StopOnCleanup(t, dmB)
 
 	dmA.SetTransport(transport)
 	dmB.SetTransport(transport)

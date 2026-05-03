@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+const (
+	concurrentWrites = 100
+	concurrentReads  = 50
+)
+
 func TestNew(t *testing.T) {
 	cm := New()
 	if len(cm.shards) != ShardCount {
@@ -248,7 +253,7 @@ func TestConcurrentAccess(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	// Concurrent writes
-	for i := range 100 {
+	for i := range concurrentWrites {
 		wg.Add(1)
 
 		go func(i int) {
@@ -263,7 +268,7 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Concurrent reads
-	for i := range 50 {
+	for i := range concurrentReads {
 		wg.Add(1)
 
 		go func(i int) {

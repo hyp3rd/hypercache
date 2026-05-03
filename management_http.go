@@ -123,7 +123,9 @@ func (s *ManagementHTTPServer) Start(ctx context.Context, hc managementCache) er
 	s.ln = ln
 
 	go func() { // serve in background (optional server errors are ignored intentionally)
-		err = s.app.Listener(ln)
+		// Suppress fiber's startup banner so tests at -count=N do not drown
+		// real failures under hundreds of "INFO Server started on..." lines.
+		err = s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true})
 		if err != nil { // optional server; log hook could be added in future
 			_ = err
 		}
@@ -229,7 +231,7 @@ func (s *ManagementHTTPServer) registerDistributed(useAuth func(fiber.Handler) f
 		if dist, ok := hc.(managementCacheDistOpt); ok {
 			key := fiberCtx.Query("key")
 			if key == "" {
-				return fiberCtx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMegMissingCacheKey})
+				return fiberCtx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 			}
 
 			owners := dist.ClusterOwners(key)

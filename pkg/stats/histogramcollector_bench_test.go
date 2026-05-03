@@ -48,6 +48,34 @@ func BenchmarkHistogramTimingParallel(b *testing.B) {
 	})
 }
 
+// BenchmarkHistogramRealisticParallel models a realistic workload where many
+// stat keys spread the contention. The single-key Parallel benchmark above is
+// the synthetic worst case; this benchmark is what production looks like.
+func BenchmarkHistogramRealisticParallel(b *testing.B) {
+	keys := []constants.Stat{
+		constants.StatIncr,
+		constants.StatDecr,
+		constants.StatTiming,
+		constants.StatGauge,
+		constants.StatHistogram,
+	}
+
+	c := NewHistogramStatsCollector()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		var i int
+
+		for pb.Next() {
+			c.Incr(keys[i%len(keys)], 1)
+
+			i++
+		}
+	})
+}
+
 // BenchmarkHistogramGetStats measures the read path. Currently sorts the
 // backing slice in-place under RLock (race) and re-sorts per-stat multiple times.
 func BenchmarkHistogramGetStats(b *testing.B) {

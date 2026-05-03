@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -24,10 +24,10 @@ func TestDistRebalanceLeave(t *testing.T) {
 		backend.WithDistRebalanceInterval(100 * time.Millisecond),
 	}
 
-	nodeA := mustDistNode(t, ctx, "A", addrA, []string{addrB, addrC}, opts...)
-	nodeB := mustDistNode(t, ctx, "B", addrB, []string{addrA, addrC}, opts...)
+	nodeA := mustDistNode(ctx, t, "A", addrA, []string{addrB, addrC}, opts...)
+	nodeB := mustDistNode(ctx, t, "B", addrB, []string{addrA, addrC}, opts...)
 
-	nodeC := mustDistNode(t, ctx, "C", addrC, []string{addrA, addrB}, opts...)
+	nodeC := mustDistNode(ctx, t, "C", addrC, []string{addrA, addrB}, opts...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx); _ = nodeC.Stop(ctx) }()
 
 	// Insert keys through A.

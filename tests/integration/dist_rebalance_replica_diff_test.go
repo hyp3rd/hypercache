@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -24,9 +24,9 @@ func TestDistRebalanceReplicaDiff(t *testing.T) {
 		backend.WithDistRebalanceInterval(120 * time.Millisecond),
 	}
 
-	nodeA := mustDistNode(t, ctx, "A", addrA, []string{addrB}, baseOpts...)
+	nodeA := mustDistNode(ctx, t, "A", addrA, []string{addrB}, baseOpts...)
 
-	nodeB := mustDistNode(t, ctx, "B", addrB, []string{addrA}, baseOpts...)
+	nodeB := mustDistNode(ctx, t, "B", addrB, []string{addrA}, baseOpts...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
 	// Insert a set of keys through primary (either node). We'll use A.
@@ -49,7 +49,7 @@ func TestDistRebalanceReplicaDiff(t *testing.T) {
 	// as a replica for some keys (virtual nodes distribution will produce owners including C) by simply adding the peer.
 	addrC := allocatePort(t)
 
-	nodeC := mustDistNode(t, ctx, "C", addrC, []string{addrA, addrB}, append(baseOpts, backend.WithDistReplication(3))...)
+	nodeC := mustDistNode(ctx, t, "C", addrC, []string{addrA, addrB}, append(baseOpts, backend.WithDistReplication(3))...)
 	defer func() { _ = nodeC.Stop(ctx) }()
 
 	// Propagate C to existing nodes (they still have replication=2 configured, but ring will include C;

@@ -160,15 +160,23 @@ func TestWorkerPool_NegativeResizeDoesNothing(t *testing.T) {
 	pool.Shutdown()
 }
 
-func TestWorkerPool_EnqueueAfterShutdownPanics(t *testing.T) {
+// TestWorkerPool_EnqueueAfterShutdownDrops verifies the post-fix contract:
+// Enqueue is safe to call after Shutdown and silently drops the job.
+//
+// Background: previously Enqueue panicked (send on closed channel), which
+// surfaced under -race -count=N when expiration/eviction goroutines tried to
+// schedule work mid-shutdown. The new contract trades a "loud failure on
+// programming error" for "no panics during graceful shutdown races.".
+func TestWorkerPool_EnqueueAfterShutdownDrops(t *testing.T) {
 	pool := NewWorkerPool(1)
 	pool.Shutdown()
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic when enqueuing after shutdown")
-		}
-	}()
+	pool.Enqueue(func() error {
+		t.Errorf("job should not run after shutdown")
 
-	pool.Enqueue(func() error { return nil })
+		return nil
+	})
+
+	// Repeat Shutdown is idempotent.
+	pool.Shutdown()
 }

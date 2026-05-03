@@ -25,7 +25,7 @@ func TestGetMultiple(t *testing.T) {
 			name:       "get multiple keys with values",
 			keys:       []string{"key1", "key2", "key3"},
 			wantValues: map[string]any{"key1": 1, "key2": 2, "key3": 3},
-			wantErrs:   map[string]error(map[string]error{}),
+			wantErrs:   map[string]error{},
 			setup: func(cache *hypercache.HyperCache[backend.InMemory]) {
 				cache.Set(context.TODO(), "key1", 1, 0)
 				cache.Set(context.TODO(), "key2", 2, 0)

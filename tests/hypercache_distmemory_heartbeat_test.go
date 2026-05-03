@@ -12,9 +12,13 @@ import (
 // TestDistMemoryHeartbeatLiveness spins up three nodes with a fast heartbeat interval
 // and validates suspect -> removal transitions plus success/failure metrics.
 func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
-	interval := 30 * time.Millisecond
-	suspectAfter := 2 * interval
-	deadAfter := 4 * interval
+	// Intervals chosen so the test tolerates the 3-5x slowdown imposed by
+	// the race detector. Previous values (interval=30ms, dead=120ms) were
+	// tight enough that a delayed heartbeat tick could push *alive* nodes
+	// past deadAfter under -race, removing them from membership.
+	interval := 80 * time.Millisecond
+	suspectAfter := 4 * interval // 320ms
+	deadAfter := 8 * interval    // 640ms
 
 	ring := cluster.NewRing(cluster.WithReplication(1))
 	membership := cluster.NewMembership(ring)
@@ -36,7 +40,12 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
 		t.Fatalf("b1: %v", err)
 	}
 
-	b1 := b1i.(*backend.DistMemory) //nolint:forcetypeassert
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
 
 	// add peers (without heartbeat loops themselves)
 	b2i, err := backend.NewDistMemory(
@@ -48,7 +57,12 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
 		t.Fatalf("b2: %v", err)
 	}
 
-	b2 := b2i.(*backend.DistMemory) //nolint:forcetypeassert
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b2)
 
 	b3i, err := backend.NewDistMemory(
 		context.TODO(),
@@ -59,14 +73,19 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
 		t.Fatalf("b3: %v", err)
 	}
 
-	b3 := b3i.(*backend.DistMemory) //nolint:forcetypeassert
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b3)
 
 	transport.Register(b1)
 	transport.Register(b2)
 	transport.Register(b3)
 
 	// Wait until heartbeat marks peers alive (initial success probes)
-	deadline := time.Now().Add(500 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		aliveCount := 0
 		for _, n := range membership.List() {
@@ -79,7 +98,7 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
 			break
 		}
 
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	// Simulate node2 becoming unresponsive by removing it from transport registry.
@@ -149,8 +168,4 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
 	if m.NodesRemoved == 0 {
 		t.Errorf("expected nodes removed metric > 0")
 	}
-
-	_ = b1.Stop(context.Background())
-	_ = b2.Stop(context.Background())
-	_ = b3.Stop(context.Background())
 }

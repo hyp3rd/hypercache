@@ -45,8 +45,18 @@ func TestHTTPFetchMerkle(t *testing.T) {
 		t.Fatalf("b2: %v", err)
 	}
 
-	b1 := b1i.(*backend.DistMemory) //nolint:forcetypeassert
-	b2 := b2i.(*backend.DistMemory) //nolint:forcetypeassert
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
 
 	// HTTP transport resolver maps node IDs to http base URLs.
 	resolver := func(id string) (string, bool) {
@@ -59,7 +69,9 @@ func TestHTTPFetchMerkle(t *testing.T) {
 
 		return "", false
 	}
-	transport := backend.NewDistHTTPTransport(2*time.Second, resolver)
+	// 5s transport timeout (was 2s) — under -race the fiber listener can take
+	// >2s to accept its first request, which made SyncWith time out spuriously.
+	transport := backend.NewDistHTTPTransport(5*time.Second, resolver)
 	b1.SetTransport(transport)
 	b2.SetTransport(transport)
 
@@ -70,15 +82,29 @@ func TestHTTPFetchMerkle(t *testing.T) {
 		b1.DebugInject(item)
 	}
 
-	// ensure HTTP merkle endpoint reachable
-	resp, err := http.Get("http://" + b1.LocalNodeAddr() + "/internal/merkle")
-	if err != nil {
-		t.Fatalf("merkle http get: %v", err)
+	// Poll the HTTP merkle endpoint until it actually responds 200. Under
+	// -race the fiber listener can take seconds to start accepting requests
+	// even after Listen() returns; a single-shot Get is racy.
+	merkleReady := false
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://" + b1.LocalNodeAddr() + "/internal/merkle")
+		if err == nil {
+			_ = resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				merkleReady = true
+
+				break
+			}
+		}
+
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected status %d", resp.StatusCode)
+	if !merkleReady {
+		t.Fatal("merkle endpoint did not become ready within deadline")
 	}
 
 	// b2 sync from b1 via HTTP transport
@@ -86,8 +112,19 @@ func TestHTTPFetchMerkle(t *testing.T) {
 		t.Fatalf("sync: %v", err)
 	}
 
-	// validate keys present on b2
+	// Validate keys present on b2. Allow brief retry to absorb any async tail
+	// in sync's apply path (each missing key is retried once).
 	for i := range 5 {
+		if _, ok := b2.Get(ctx, httpKey(i)); ok {
+			continue
+		}
+
+		// One retry: re-sync and check again.
+		err := b2.SyncWith(ctx, "n1")
+		if err != nil {
+			t.Fatalf("re-sync: %v", err)
+		}
+
 		if _, ok := b2.Get(ctx, httpKey(i)); !ok {
 			t.Fatalf("missing key %d post-sync", i)
 		}

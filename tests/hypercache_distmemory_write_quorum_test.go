@@ -9,7 +9,7 @@ import (
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -28,9 +28,24 @@ func TestWriteQuorumSuccess(t *testing.T) {
 	b, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("B", "B"))...)
 	c, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("C", "C"))...)
 
-	da := any(a).(*backend.DistMemory)
-	db := any(b).(*backend.DistMemory)
-	dc := any(c).(*backend.DistMemory)
+	da, ok := any(a).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", a)
+	}
+
+	db, ok := any(b).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", b)
+	}
+
+	dc, ok := any(c).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", c)
+	}
+
+	StopOnCleanup(t, da)
+	StopOnCleanup(t, db)
+	StopOnCleanup(t, dc)
 
 	da.SetTransport(transport)
 	db.SetTransport(transport)
@@ -84,12 +99,28 @@ func TestWriteQuorumFailure(t *testing.T) {
 		ctx,
 		append(opts, backend.WithDistNode("B", "B"), backend.WithDistMembership(m, cluster.NewNode("B", "B")))...)
 
-	_, _ = backend.NewDistMemory(
+	nc, _ := backend.NewDistMemory(
 		ctx,
 		append(opts, backend.WithDistNode("C", "C"), backend.WithDistMembership(m, cluster.NewNode("C", "C")))...)
 
-	da := any(na).(*backend.DistMemory)
-	db := any(nb).(*backend.DistMemory)
+	da, ok := any(na).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", na)
+	}
+
+	db, ok := any(nb).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", nb)
+	}
+
+	dc, ok := any(nc).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", nc)
+	}
+
+	StopOnCleanup(t, da)
+	StopOnCleanup(t, db)
+	StopOnCleanup(t, dc)
 
 	da.SetTransport(transport)
 	db.SetTransport(transport)

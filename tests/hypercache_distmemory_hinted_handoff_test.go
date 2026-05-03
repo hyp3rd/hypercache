@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -38,6 +38,9 @@ func TestHintedHandoffReplay(t *testing.T) {
 
 	p := any(primary).(*backend.DistMemory)
 	r := any(replica).(*backend.DistMemory)
+
+	StopOnCleanup(t, p)
+	StopOnCleanup(t, r)
 
 	p.SetTransport(transport)
 	// r transport deliberately not registered yet (simulate down replica)

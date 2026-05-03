@@ -31,9 +31,18 @@ func TestHyperCache_TriggerEviction_Immediate(t *testing.T) {
 		hc.TriggerEviction(context.TODO())
 	}
 
-	// Allow a tiny time for worker to process
-	time.Sleep(50 * time.Millisecond)
+	// Eventually item count should be <= capacity (1). Poll instead of a
+	// fixed sleep — under -race the eviction pipeline (channel send ->
+	// expiration goroutine -> worker pool -> algorithm.Evict + Remove)
+	// can take well over 50 ms.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if hc.Count(context.TODO()) <= 1 {
+			break
+		}
 
-	// Eventually item count should be <= capacity (1)
+		time.Sleep(20 * time.Millisecond)
+	}
+
 	assert.True(t, hc.Count(context.TODO()) <= 1)
 }

@@ -46,7 +46,11 @@ type DistMemory struct {
 	localNode  *cluster.Node
 	membership *cluster.Membership
 	ring       *cluster.Ring
-	transport  DistTransport
+	// transport holds the active DistTransport behind an atomic.Pointer so that
+	// callers (including the hint-replay goroutine) can read it without racing
+	// against SetTransport / WithDistTransport / lazy HTTP server bring-up.
+	// Use loadTransport() / storeTransport() instead of touching this directly.
+	transport  atomic.Pointer[distTransportSlot]
 	httpServer *distHTTPServer // optional internal HTTP server
 	metrics    distMetrics
 	// configuration (static for now, future: dynamic membership/gossip)
@@ -127,6 +131,9 @@ type DistMemory struct {
 
 	// shedding / cleanup of keys we no longer own (grace period before delete to aid late reads / hinted handoff)
 	removalGracePeriod time.Duration // if >0 we delay deleting keys we no longer own; after grace we remove locally
+
+	// stopped guards Stop() against double-invocation (idempotent shutdown).
+	stopped atomic.Bool
 }
 
 const (
@@ -135,6 +142,10 @@ const (
 )
 
 var errUnexpectedBackendType = errors.New("backend: unexpected backend type") // stable error (no dynamic wrapping needed)
+
+// distTransportSlot wraps a DistTransport interface value so it can be stored
+// in atomic.Pointer (atomic.Pointer requires a concrete pointer type).
+type distTransportSlot struct{ t DistTransport }
 
 // hintedEntry represents a deferred replica write.
 type hintedEntry struct {
@@ -383,13 +394,14 @@ func equalBytes(a, b []byte) bool { // tiny helper
 
 // SyncWith performs Merkle anti-entropy against a remote node (pull newer versions for differing chunks).
 func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error { //nolint:ireturn
-	if dm.transport == nil {
+	transport := dm.loadTransport()
+	if transport == nil {
 		return errNoTransport
 	}
 
 	startFetch := time.Now()
 
-	remoteTree, err := dm.transport.FetchMerkle(ctx, nodeID)
+	remoteTree, err := transport.FetchMerkle(ctx, nodeID)
 	if err != nil {
 		return err
 	}
@@ -443,7 +455,7 @@ func WithDistMembership(m *cluster.Membership, node *cluster.Node) DistMemoryOpt
 
 // WithDistTransport sets a transport used for forwarding / replication.
 func WithDistTransport(t DistTransport) DistMemoryOption {
-	return func(dm *DistMemory) { dm.transport = t }
+	return func(dm *DistMemory) { dm.storeTransport(t) }
 }
 
 // WithDistHeartbeatSample sets how many random peers to probe per heartbeat tick (0=all).
@@ -452,7 +464,7 @@ func WithDistHeartbeatSample(k int) DistMemoryOption { //nolint:ireturn
 }
 
 // SetTransport sets the transport post-construction (testing helper).
-func (dm *DistMemory) SetTransport(t DistTransport) { dm.transport = t }
+func (dm *DistMemory) SetTransport(t DistTransport) { dm.storeTransport(t) }
 
 // WithDistHeartbeat configures heartbeat interval and suspect/dead thresholds.
 // If interval <= 0 heartbeat is disabled.
@@ -810,7 +822,8 @@ func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //noli
 			continue
 		}
 
-		if dm.transport == nil { // non-owner without transport
+		transport := dm.loadTransport()
+		if transport == nil { // non-owner without transport
 			return sentinel.ErrNotOwner
 		}
 
@@ -821,7 +834,7 @@ func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //noli
 
 		dm.metrics.forwardRemove.Add(1)
 
-		_ = dm.transport.ForwardRemove(ctx, string(owners[0]), key, true)
+		_ = transport.ForwardRemove(ctx, string(owners[0]), key, true)
 	}
 
 	return nil
@@ -1100,8 +1113,15 @@ func (dm *DistMemory) LatencyHistograms() map[string][]uint64 { //nolint:ireturn
 	return dm.latency.snapshot()
 }
 
-// Stop stops heartbeat loop if running.
+// Stop terminates every background goroutine started by NewDistMemory and
+// shuts down the optional HTTP server. Idempotent and safe to call concurrently
+// — repeat calls are no-ops. Tests SHOULD register Stop via t.Cleanup to avoid
+// goroutine leaks across `-count=N` iterations under -race.
 func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
+	if !dm.stopped.CompareAndSwap(false, true) {
+		return nil
+	}
+
 	if dm.stopCh != nil {
 		close(dm.stopCh)
 
@@ -1126,15 +1146,26 @@ func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 		dm.autoSyncStopCh = nil
 	}
 
+	if dm.tombStopCh != nil { // stop tomb sweeper
+		close(dm.tombStopCh)
+
+		dm.tombStopCh = nil
+	}
+
+	if dm.rebalanceStopCh != nil { // stop rebalance loop (was leaking pre-fix)
+		close(dm.rebalanceStopCh)
+
+		dm.rebalanceStopCh = nil
+	}
+
 	if dm.httpServer != nil {
 		err := dm.httpServer.stop(ctx) // best-effort
+
+		dm.httpServer = nil
+
 		if err != nil {
 			return err
 		}
-	}
-
-	if dm.tombStopCh != nil { // stop tomb sweeper
-		close(dm.tombStopCh)
 	}
 
 	return nil
@@ -1201,7 +1232,7 @@ func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, ent
 		return missing
 	}
 
-	httpT, ok := dm.transport.(*DistHTTPTransport)
+	httpT, ok := dm.loadTransport().(*DistHTTPTransport)
 	if !ok {
 		return missing
 	}
@@ -1254,11 +1285,27 @@ func (dm *DistMemory) applyMerkleDiffs(
 	}
 }
 
+// loadTransport returns the currently configured transport, or nil. Safe to
+// call concurrently with storeTransport.
+func (dm *DistMemory) loadTransport() DistTransport {
+	if slot := dm.transport.Load(); slot != nil {
+		return slot.t
+	}
+
+	return nil
+}
+
+// storeTransport replaces the active transport. Safe to call concurrently
+// with loadTransport.
+func (dm *DistMemory) storeTransport(t DistTransport) {
+	dm.transport.Store(&distTransportSlot{t: t})
+}
+
 // enumerateRemoteOnlyKeys returns keys present only on the remote side (best-effort, in-process only).
 func (dm *DistMemory) enumerateRemoteOnlyKeys(nodeID string, local []merkleKV) map[string]struct{} { //nolint:ireturn
 	missing := make(map[string]struct{})
 
-	ip, ok := dm.transport.(*InProcessTransport)
+	ip, ok := dm.loadTransport().(*InProcessTransport)
 	if !ok {
 		return missing
 	}
@@ -1288,7 +1335,12 @@ func (dm *DistMemory) enumerateRemoteOnlyKeys(nodeID string, local []merkleKV) m
 
 // fetchAndAdopt pulls a key from a remote node and adopts it if it's newer or absent locally.
 func (dm *DistMemory) fetchAndAdopt(ctx context.Context, nodeID, key string) {
-	it, ok, gerr := dm.transport.ForwardGet(ctx, nodeID, key)
+	transport := dm.loadTransport()
+	if transport == nil {
+		return
+	}
+
+	it, ok, gerr := transport.ForwardGet(ctx, nodeID, key)
 	if gerr != nil { // remote failure: ignore
 		return
 	}
@@ -1555,7 +1607,7 @@ func (dm *DistMemory) shouldRebalance(sh *distShard, it *cache.Item) bool { //no
 // replicateNewReplicas scans for keys where this node is still primary but new replica owners were added since first observation.
 // It forwards the current item to newly added replicas (best-effort) and updates originalOwners snapshot.
 func (dm *DistMemory) replicateNewReplicas(ctx context.Context) { //nolint:ireturn
-	if dm.ring == nil || dm.transport == nil {
+	if dm.ring == nil || dm.loadTransport() == nil {
 		return
 	}
 
@@ -1657,12 +1709,18 @@ func (dm *DistMemory) sendReplicaDiff(
 	repls []cluster.NodeID,
 	processed, limit int,
 ) int { //nolint:ireturn
+	transport := dm.loadTransport()
+	if transport == nil {
+		return processed
+	}
+
 	for _, rid := range repls {
 		if rid == dm.localNode.ID {
 			continue
 		}
 
-		_ = dm.transport.ForwardSet(ctx, string(rid), it, false)
+		_ = transport.ForwardSet(ctx, string(rid), it, false)
+
 		dm.metrics.replicaFanoutSet.Add(1)
 		dm.metrics.rebalancedKeys.Add(1)
 		dm.metrics.rebalanceReplicaDiff.Add(1)
@@ -1757,7 +1815,8 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) { /
 		return
 	}
 
-	if dm.transport == nil {
+	transport := dm.loadTransport()
+	if transport == nil {
 		return
 	}
 
@@ -1765,7 +1824,7 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) { /
 	dm.metrics.rebalancedKeys.Add(1)
 	dm.metrics.rebalancedPrimary.Add(1)
 
-	_ = dm.transport.ForwardSet(ctx, string(owners[0]), item, true)
+	_ = transport.ForwardSet(ctx, string(owners[0]), item, true)
 
 	// Update originalPrimary so we don't recount repeatedly.
 	sh := dm.shardFor(item.Key)
@@ -1908,7 +1967,7 @@ func (dm *DistMemory) initMembershipIfNeeded() { //nolint:ireturn
 
 // tryStartHTTP starts internal HTTP transport if not provided.
 func (dm *DistMemory) tryStartHTTP(ctx context.Context) { //nolint:ireturn
-	if dm.transport != nil || dm.nodeAddr == "" {
+	if dm.loadTransport() != nil || dm.nodeAddr == "" {
 		return
 	}
 
@@ -1937,12 +1996,12 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) { //nolint:ireturn
 		return "", false
 	}
 
-	dm.transport = NewDistHTTPTransport(2*time.Second, resolver)
+	dm.storeTransport(NewDistHTTPTransport(2*time.Second, resolver))
 }
 
 // startHeartbeatIfEnabled launches heartbeat loop if configured.
 func (dm *DistMemory) startHeartbeatIfEnabled(ctx context.Context) { //nolint:ireturn
-	if dm.hbInterval > 0 && dm.transport != nil {
+	if dm.hbInterval > 0 && dm.loadTransport() != nil {
 		stopCh := make(chan struct{})
 
 		dm.stopCh = stopCh
@@ -2008,13 +2067,14 @@ func (dm *DistMemory) tryLocalGet(key string, idx int, oid cluster.NodeID) (*cac
 
 // tryRemoteGet attempts remote fetch for given owner; includes promotion + repair.
 func (dm *DistMemory) tryRemoteGet(ctx context.Context, key string, idx int, oid cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
-	if oid == dm.localNode.ID || dm.transport == nil { // skip local path or missing transport
+	transport := dm.loadTransport()
+	if oid == dm.localNode.ID || transport == nil { // skip local path or missing transport
 		return nil, false
 	}
 
 	dm.metrics.forwardGet.Add(1)
 
-	it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
+	it, ok, err := transport.ForwardGet(ctx, string(oid), key)
 	if errors.Is(err, sentinel.ErrBackendNotFound) { // owner unreachable -> promotion scenario
 		if idx == 0 { // primary missing
 			dm.metrics.readPrimaryPromote.Add(1)
@@ -2102,7 +2162,8 @@ func (dm *DistMemory) repairStaleOwners(
 	chosen *cache.Item,
 	staleOwners []cluster.NodeID,
 ) { //nolint:ireturn
-	if dm.transport == nil || chosen == nil {
+	transport := dm.loadTransport()
+	if transport == nil || chosen == nil {
 		return
 	}
 
@@ -2111,13 +2172,14 @@ func (dm *DistMemory) repairStaleOwners(
 			continue
 		}
 
-		it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
+		it, ok, err := transport.ForwardGet(ctx, string(oid), key)
 		if err != nil { // skip unreachable
 			continue
 		}
 
 		if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) {
-			_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false)
+			_ = transport.ForwardSet(ctx, string(oid), chosen, false)
+
 			dm.metrics.readRepair.Add(1)
 		}
 	}
@@ -2133,7 +2195,12 @@ func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid c
 		return nil, false
 	}
 
-	it, ok, err := dm.transport.ForwardGet(ctx, string(oid), key)
+	transport := dm.loadTransport()
+	if transport == nil {
+		return nil, false
+	}
+
+	it, ok, err := transport.ForwardGet(ctx, string(oid), key)
 	if errors.Is(err, sentinel.ErrBackendNotFound) { // promotion
 		if idx == 0 {
 			dm.metrics.readPrimaryPromote.Add(1)
@@ -2155,23 +2222,26 @@ func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid c
 
 // replicateTo sends writes to replicas (best-effort) returning ack count.
 func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replicas []cluster.NodeID) int { //nolint:ireturn
+	transport := dm.loadTransport()
+	if transport == nil {
+		return 0
+	}
+
 	acks := 0
 	for _, oid := range replicas {
 		if oid == dm.localNode.ID {
 			continue
 		}
 
-		if dm.transport != nil {
-			err := dm.transport.ForwardSet(ctx, string(oid), item, false)
-			if err == nil {
-				acks++
+		err := transport.ForwardSet(ctx, string(oid), item, false)
+		if err == nil {
+			acks++
 
-				continue
-			}
+			continue
+		}
 
-			if errors.Is(err, sentinel.ErrBackendNotFound) { // queue hint for unreachable replica
-				dm.queueHint(string(oid), item)
-			}
+		if errors.Is(err, sentinel.ErrBackendNotFound) { // queue hint for unreachable replica
+			dm.queueHint(string(oid), item)
 		}
 	}
 
@@ -2357,7 +2427,7 @@ func (dm *DistMemory) hintReplayLoop(ctx context.Context, stopCh <-chan struct{}
 }
 
 func (dm *DistMemory) replayHints(ctx context.Context) { // reduced cognitive complexity
-	if dm.transport == nil {
+	if dm.loadTransport() == nil {
 		return
 	}
 
@@ -2401,7 +2471,12 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 		return 1
 	}
 
-	err := dm.transport.ForwardSet(ctx, nodeID, entry.item, false)
+	transport := dm.loadTransport()
+	if transport == nil {
+		return 0
+	}
+
+	err := transport.ForwardSet(ctx, nodeID, entry.item, false)
 	if err == nil {
 		dm.metrics.hintedReplayed.Add(1)
 
@@ -2514,7 +2589,7 @@ func (dm *DistMemory) gossipLoop(stopCh <-chan struct{}) { //nolint:ireturn
 }
 
 func (dm *DistMemory) runGossipTick() { //nolint:ireturn
-	if dm.membership == nil || dm.transport == nil {
+	if dm.membership == nil || dm.loadTransport() == nil {
 		return
 	}
 
@@ -2545,7 +2620,7 @@ func (dm *DistMemory) runGossipTick() { //nolint:ireturn
 
 	target := candidates[idxBig.Int64()]
 
-	ip, ok := dm.transport.(*InProcessTransport)
+	ip, ok := dm.loadTransport().(*InProcessTransport)
 	if !ok {
 		return
 	}
@@ -2672,26 +2747,29 @@ func (dm *DistMemory) repairRemoteReplica(
 	chosen *cache.Item,
 	oid cluster.NodeID,
 ) { // separated to reduce cyclomatic complexity //nolint:ireturn
-	if dm.transport == nil { // cannot repair remote
+	transport := dm.loadTransport()
+	if transport == nil { // cannot repair remote
 		return
 	}
 
-	it, ok, _ := dm.transport.ForwardGet(ctx, string(oid), key)
+	it, ok, _ := transport.ForwardGet(ctx, string(oid), key)
 	if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) { // stale
-		_ = dm.transport.ForwardSet(ctx, string(oid), chosen, false)
+		_ = transport.ForwardSet(ctx, string(oid), chosen, false)
+
 		dm.metrics.readRepair.Add(1)
 	}
 }
 
 // handleForwardPrimary tries to forward a Set to the primary; returns (proceedAsPrimary,false) if promotion required.
 func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster.NodeID, item *cache.Item) (bool, error) { //nolint:ireturn
-	if dm.transport == nil {
+	transport := dm.loadTransport()
+	if transport == nil {
 		return false, sentinel.ErrNotOwner
 	}
 
 	dm.metrics.forwardSet.Add(1)
 
-	errFwd := dm.transport.ForwardSet(ctx, string(owners[0]), item, true)
+	errFwd := transport.ForwardSet(ctx, string(owners[0]), item, true)
 	switch {
 	case errFwd == nil:
 		return false, nil // forwarded successfully
@@ -2806,7 +2884,9 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 	}
 
 	owners := dm.ring.Lookup(item.Key)
-	if len(owners) <= 1 || dm.transport == nil {
+	transport := dm.loadTransport()
+
+	if len(owners) <= 1 || transport == nil {
 		return
 	}
 
@@ -2817,7 +2897,7 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 			continue
 		}
 
-		_ = dm.transport.ForwardSet(ctx, string(oid), item, false)
+		_ = transport.ForwardSet(ctx, string(oid), item, false)
 	}
 }
 
@@ -2885,7 +2965,8 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 	sh.tombs[key] = tombstone{version: nextVer, origin: string(dm.localNode.ID), at: time.Now()}
 	dm.metrics.tombstonesActive.Store(dm.countTombstones())
 
-	if !replicate || dm.ring == nil || dm.transport == nil {
+	transport := dm.loadTransport()
+	if !replicate || dm.ring == nil || transport == nil {
 		return
 	}
 
@@ -2901,13 +2982,13 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 			continue
 		}
 
-		_ = dm.transport.ForwardRemove(ctx, string(oid), key, false)
+		_ = transport.ForwardRemove(ctx, string(oid), key, false)
 	}
 }
 
 // runHeartbeatTick runs one heartbeat iteration (best-effort).
 func (dm *DistMemory) runHeartbeatTick(ctx context.Context) { //nolint:ireturn,revive
-	if dm.transport == nil || dm.membership == nil {
+	if dm.loadTransport() == nil || dm.membership == nil {
 		return
 	}
 
@@ -2962,8 +3043,13 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 		dm.metrics.nodesSuspect.Add(1)
 	}
 
+	transport := dm.loadTransport()
+	if transport == nil {
+		return
+	}
+
 	ctxHealth, cancel := context.WithTimeout(ctx, dm.hbInterval/2)
-	err := dm.transport.Health(ctxHealth, string(node.ID))
+	err := transport.Health(ctxHealth, string(node.ID))
 
 	cancel()
 

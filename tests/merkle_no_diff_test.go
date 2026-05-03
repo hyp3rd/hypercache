@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -27,8 +27,18 @@ func TestMerkleNoDiff(t *testing.T) {
 		backend.WithDistMerkleChunkSize(4),
 	)
 
-	da := any(a).(*backend.DistMemory)
-	db := any(b).(*backend.DistMemory)
+	da, ok := any(a).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast a to *backend.DistMemory")
+	}
+
+	db, ok := any(b).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, da)
+	StopOnCleanup(t, db)
 
 	da.SetTransport(transport)
 	db.SetTransport(transport)

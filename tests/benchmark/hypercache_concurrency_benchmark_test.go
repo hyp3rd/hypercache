@@ -93,7 +93,10 @@ func BenchmarkHyperCache_GetOrSetParallel(b *testing.B) {
 
 // BenchmarkHyperCache_MixedParallel simulates an 80% read / 20% write workload.
 func BenchmarkHyperCache_MixedParallel(b *testing.B) {
-	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	config, err := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	if err != nil {
+		b.Fatal(err)
+	}
 
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionAlgorithm[backend.InMemory]("lru"),

@@ -38,8 +38,18 @@ func TestHintGlobalCaps(t *testing.T) { //nolint:paralleltest
 		backend.WithDistReplication(2),
 	)
 
-	b1 := b1i.(*backend.DistMemory)
-	b2 := b2i.(*backend.DistMemory)
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
 
 	transport.Register(b1)
 

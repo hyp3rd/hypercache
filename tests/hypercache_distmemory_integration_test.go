@@ -39,8 +39,18 @@ func TestDistMemoryForwardingReplication(t *testing.T) {
 		t.Fatalf("backend2: %v", err)
 	}
 
-	b1 := b1i.(*backend.DistMemory) //nolint:forcetypeassert
-	b2 := b2i.(*backend.DistMemory) //nolint:forcetypeassert
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
 
 	transport.Register(b1)
 	transport.Register(b2)

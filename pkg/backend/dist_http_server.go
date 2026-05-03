@@ -101,7 +101,7 @@ func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) { //noli
 	s.app.Get("/internal/cache/get", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMegMissingCacheKey})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 		}
 
 		owners := dm.lookupOwners(key)
@@ -120,7 +120,7 @@ func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) { //noli
 	s.app.Get("/internal/get", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMegMissingCacheKey})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 		}
 
 		owners := dm.lookupOwners(key)
@@ -141,7 +141,7 @@ func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { /
 	s.app.Delete("/internal/cache/remove", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMegMissingCacheKey})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 		}
 
 		replicate, parseErr := strconv.ParseBool(fctx.Query("replicate", "false"))
@@ -158,7 +158,7 @@ func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { /
 	s.app.Delete("/internal/del", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMegMissingCacheKey})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 		}
 
 		replicate, parseErr := strconv.ParseBool(fctx.Query("replicate", "false"))
@@ -217,7 +217,10 @@ func (s *distHTTPServer) listen(ctx context.Context) error { //nolint:ireturn
 	s.ln = ln
 
 	go func() { // capture server errors (ignored intentionally for now)
-		serveErr := s.app.Listener(ln)
+		// DisableStartupMessage avoids fiber's per-instance banner spam,
+		// which would otherwise flood test output at -count=N (see hundreds of
+		// "INFO Server started on..." lines drowning real failures).
+		serveErr := s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true})
 		if serveErr != nil { // separated for noinlineerr linter
 			_ = serveErr
 		}

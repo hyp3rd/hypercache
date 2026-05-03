@@ -61,7 +61,6 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	maxEvictionCount           uint                // max items per eviction run
 	maxCacheSize               int64               // hard memory limit (MB), 0 = unlimited
 	memoryAllocation           atomic.Int64        // current memory usage (bytes)
-	mutex                      sync.RWMutex        // protects eviction algorithm
 	once                       sync.Once           // ensures background loops start once
 	statsCollectorName         string              // configured stats collector name
 	// StatsCollector to collect cache statistics
@@ -83,7 +82,11 @@ type touchBackend interface {
 //   - The maximum cache size in bytes is set to 0 (no limitations).
 func NewInMemoryWithDefaults(ctx context.Context, capacity int) (*HyperCache[backend.InMemory], error) {
 	// Initialize the configuration
-	config := NewConfig[backend.InMemory](constants.InMemoryBackend)
+	config, err := NewConfig[backend.InMemory](constants.InMemoryBackend)
+	if err != nil {
+		return nil, err
+	}
+
 	// Set the default options
 	config.HyperCacheOptions = []Option[backend.InMemory]{
 		WithEvictionInterval[backend.InMemory](constants.DefaultEvictionInterval),
@@ -559,12 +562,11 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 				break
 			}
 
-			// Protect eviction algorithm access
-			hyperCache.mutex.Lock()
-
+			// Each eviction algorithm provides its own internal mutex; no
+			// outer lock needed. The Evict() -> Remove() window below is
+			// already non-atomic by design (other workers may insert items
+			// between the two calls); a wider lock would not change that.
 			key, ok := hyperCache.evictionAlgorithm.Evict()
-			hyperCache.mutex.Unlock()
-
 			if !ok {
 				// no more items to evict
 				break
@@ -602,11 +604,7 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 // evictItem is a helper function that removes an item from the cache and returns the key of the evicted item.
 // If no item can be evicted, it returns a false.
 func (hyperCache *HyperCache[T]) evictItem(ctx context.Context) (string, bool) {
-	hyperCache.mutex.Lock()
-
 	key, ok := hyperCache.evictionAlgorithm.Evict()
-	hyperCache.mutex.Unlock()
-
 	if !ok {
 		// no more items to evict
 		return "", false
@@ -659,10 +657,9 @@ func (hyperCache *HyperCache[T]) Set(ctx context.Context, key string, value any,
 		return err
 	}
 
-	// Set the item in the eviction algorithm
-	hyperCache.mutex.Lock()
+	// Set the item in the eviction algorithm. The algorithm protects its own
+	// state internally; no outer lock needed.
 	hyperCache.evictionAlgorithm.Set(key, item.Value)
-	hyperCache.mutex.Unlock()
 
 	// If the cache is at capacity, evict an item when the eviction interval is zero
 	if hyperCache.shouldEvict.Load() && hyperCache.backend.Count(ctx) > hyperCache.backend.Capacity() {
@@ -772,17 +769,16 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 		return nil, err
 	}
 
-	go func() {
-		// Set the item in the eviction algorithm
-		hyperCache.mutex.Lock()
-		hyperCache.evictionAlgorithm.Set(key, item.Value)
-		hyperCache.mutex.Unlock()
+	// Set the item in the eviction algorithm synchronously. The previous bare
+	// goroutine had no panic recovery, no shutdown coordination with Stop(),
+	// and let the caller observe a key whose eviction tracking had not yet
+	// been recorded. The algorithm's own internal mutex provides safety.
+	hyperCache.evictionAlgorithm.Set(key, item.Value)
 
-		// If the cache is at capacity, evict an item when the eviction interval is zero
-		if hyperCache.shouldEvict.Load() && hyperCache.backend.Count(ctx) > hyperCache.backend.Capacity() {
-			hyperCache.evictItem(ctx)
-		}
-	}()
+	// If the cache is at capacity, evict an item when the eviction interval is zero
+	if hyperCache.shouldEvict.Load() && hyperCache.backend.Count(ctx) > hyperCache.backend.Capacity() {
+		hyperCache.evictItem(ctx)
+	}
 
 	return value, nil
 }
@@ -882,9 +878,7 @@ func (hyperCache *HyperCache[T]) Remove(ctx context.Context, keys ...string) err
 		if ok {
 			// remove the item from the cacheBackend and update the memory allocation
 			hyperCache.memoryAllocation.Add(-item.Size)
-			hyperCache.mutex.Lock()
 			hyperCache.evictionAlgorithm.Delete(key)
-			hyperCache.mutex.Unlock()
 		}
 	}
 
@@ -916,9 +910,7 @@ func (hyperCache *HyperCache[T]) Clear(ctx context.Context) error {
 	}
 
 	for _, item := range items {
-		hyperCache.mutex.Lock()
 		hyperCache.evictionAlgorithm.Delete(item.Key)
-		hyperCache.mutex.Unlock()
 	}
 
 	// reset the memory allocation
@@ -1023,16 +1015,11 @@ func (hyperCache *HyperCache[T]) Stop(ctx context.Context) error {
 	return nil
 }
 
-// GetStats returns the stats collected by the cache.
+// GetStats returns the stats collected by the cache. Thread-safety is
+// delegated to the configured StatsCollector implementation (the default
+// HistogramStatsCollector is fully thread-safe with no global lock).
 func (hyperCache *HyperCache[T]) GetStats() stats.Stats {
-	// Lock the cache's mutex to ensure thread-safety
-	hyperCache.mutex.RLock()
-	defer hyperCache.mutex.RUnlock()
-
-	// Get the stats from the stats collector
-	statsOut := hyperCache.StatsCollector.GetStats()
-
-	return statsOut
+	return hyperCache.StatsCollector.GetStats()
 }
 
 // DistMetrics returns distributed backend metrics if the underlying backend is DistMemory.

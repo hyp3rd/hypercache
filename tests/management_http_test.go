@@ -17,7 +17,10 @@ import (
 // TestManagementHTTP_BasicEndpoints spins up the management HTTP server on an ephemeral port
 // and validates core endpoints.
 func TestManagementHTTP_BasicEndpoints(t *testing.T) {
-	cfg := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	cfg, err := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
 
 	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
 		hypercache.WithEvictionInterval[backend.InMemory](0),
@@ -30,24 +33,43 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 
 	defer hc.Stop(ctx)
 
-	// wait briefly for listener
-	time.Sleep(30 * time.Millisecond)
+	// Wait for the management HTTP listener to come up. The race detector
+	// can push listener startup well past the original 30 ms; poll with a
+	// generous deadline instead.
+	var addr string
 
-	addr := hc.ManagementHTTPAddress()
-	assert.True(t, addr != "")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		addr = hc.ManagementHTTPAddress()
+		if addr != "" {
+			break
+		}
 
-	client := &http.Client{Timeout: 2 * time.Second}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if addr == "" {
+		t.Fatal("management HTTP listener did not bind within deadline")
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
 
 	// /health
 	resp, err := client.Get("http://" + addr + "/health")
-	assert.Nil(t, err)
+	if err != nil {
+		t.Fatalf("GET /health: %v", err)
+	}
+
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 
 	// /stats
 	resp, err = client.Get("http://" + addr + "/stats")
-	assert.Nil(t, err)
+	if err != nil {
+		t.Fatalf("GET /stats: %v", err)
+	}
+
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var statsBody map[string]any
@@ -61,7 +83,10 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 
 	// /config
 	resp, err = client.Get("http://" + addr + "/config")
-	assert.Nil(t, err)
+	if err != nil {
+		t.Fatalf("GET /config: %v", err)
+	}
+
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var cfgBody map[string]any

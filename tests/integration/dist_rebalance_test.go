@@ -9,8 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyp3rd/hypercache/internal/cluster"
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -23,8 +22,8 @@ func TestDistRebalanceJoin(t *testing.T) {
 	addrB := allocatePort(t)
 
 	nodeA := mustDistNode(
-		t,
 		ctx,
+		t,
 		"A",
 		addrA,
 		[]string{addrB},
@@ -34,8 +33,8 @@ func TestDistRebalanceJoin(t *testing.T) {
 	)
 
 	nodeB := mustDistNode(
-		t,
 		ctx,
+		t,
 		"B",
 		addrB,
 		[]string{addrA},
@@ -70,8 +69,8 @@ func TestDistRebalanceJoin(t *testing.T) {
 	addrC := allocatePort(t)
 
 	nodeC := mustDistNode(
-		t,
 		ctx,
+		t,
 		"C",
 		addrC,
 		[]string{addrA, addrB},
@@ -127,9 +126,9 @@ func TestDistRebalanceThrottle(t *testing.T) {
 		backend.WithDistRebalanceMaxConcurrent(1),
 	}
 
-	nodeA := mustDistNode(t, ctx, "A", addrA, []string{addrB}, opts...)
+	nodeA := mustDistNode(ctx, t, "A", addrA, []string{addrB}, opts...)
+	nodeB := mustDistNode(ctx, t, "B", addrB, []string{addrA}, opts...)
 
-	nodeB := mustDistNode(t, ctx, "B", addrB, []string{addrA}, opts...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
 	// Populate many keys on A.
@@ -147,7 +146,7 @@ func TestDistRebalanceThrottle(t *testing.T) {
 	// Add third node to force migrations while concurrency=1, which should queue batches.
 	addrC := allocatePort(t)
 
-	nodeC := mustDistNode(t, ctx, "C", addrC, []string{addrA, addrB}, opts...)
+	nodeC := mustDistNode(ctx, t, "C", addrC, []string{addrA, addrB}, opts...)
 	defer func() { _ = nodeC.Stop(ctx) }()
 
 	// propagate membership like in join test
@@ -167,12 +166,14 @@ func TestDistRebalanceThrottle(t *testing.T) {
 // Helpers.
 
 func mustDistNode(
-	t *testing.T,
 	ctx context.Context,
+	t *testing.T,
 	id, addr string,
 	seeds []string,
 	extra ...backend.DistMemoryOption,
 ) *backend.DistMemory {
+	t.Helper()
+
 	opts := []backend.DistMemoryOption{
 		backend.WithDistNode(id, addr),
 		backend.WithDistSeeds(seeds),
@@ -191,7 +192,12 @@ func mustDistNode(
 
 	waitForDistNodeHealth(t, addr)
 
-	return bm.(*backend.DistMemory)
+	bk, ok := bm.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bm)
+	}
+
+	return bk
 }
 
 func cacheKey(i int) string { return "k" + strconv.Itoa(i) }
@@ -217,7 +223,7 @@ func ownedPrimaryCount(dm *backend.DistMemory, keys []string) int {
 
 	c := 0
 
-	self := cluster.NodeID(dm.LocalNodeID())
+	self := dm.LocalNodeID()
 	for _, k := range keys {
 		owners := ring.Lookup(k)
 		if len(owners) > 0 && owners[0] == self {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -24,9 +24,9 @@ func TestDistRebalanceReplicaDiffThrottle(t *testing.T) {
 		backend.WithDistReplicaDiffMaxPerTick(1),
 	}
 
-	nodeA := mustDistNode(t, ctx, "A", addrA, []string{addrB}, base...)
+	nodeA := mustDistNode(ctx, t, "A", addrA, []string{addrB}, base...)
 
-	nodeB := mustDistNode(t, ctx, "B", addrB, []string{addrA}, base...)
+	nodeB := mustDistNode(ctx, t, "B", addrB, []string{addrA}, base...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
 	// Seed multiple keys.
@@ -41,7 +41,7 @@ func TestDistRebalanceReplicaDiffThrottle(t *testing.T) {
 	// Add third node with replication=3 so it becomes new replica for many keys.
 	addrC := allocatePort(t)
 
-	nodeC := mustDistNode(t, ctx, "C", addrC, []string{addrA, addrB}, append(base, backend.WithDistReplication(3))...)
+	nodeC := mustDistNode(ctx, t, "C", addrC, []string{addrA, addrB}, append(base, backend.WithDistReplication(3))...)
 	defer func() { _ = nodeC.Stop(ctx) }()
 
 	nodeA.AddPeer(addrC)

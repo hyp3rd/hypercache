@@ -14,7 +14,7 @@ run:
   issues-exit-code: 2
   # Include test files or not.
   # Default: true
-  tests: false
+  tests: true
   # List of build tags, all linters use it.
   # Default: []
   # build-tags:
@@ -62,15 +62,12 @@ linters:
     # testpackage: project consistently uses internal _test packages
     # (access to unexported helpers without re-exporting). Documented choice.
     - testpackage
-    # paralleltest: tracked separately; many tests share a cache instance and
-    # cannot be parallelized without refactoring (see Phase 1).
-    - paralleltest
 
   settings:
     cyclop:
       # The maximal code complexity to report.
       # Default: 10
-      max-complexity: 12
+      max-complexity: 15
     errcheck:
       # Report about not checking of errors in type assertions: `a := b.(MyStruct)`.
       # Such cases aren't reported by default.
@@ -168,7 +165,7 @@ linters:
           disabled: true
 
         - name: line-length-limit
-          arguments: [ 160 ]
+          arguments: [ 150 ]
 
         - name: var-naming
           disabled: true
@@ -360,7 +357,7 @@ formatters:
     golines:
       # Target maximum line length.
       # Default: 100
-      max-len: 140
+      max-len: 150
       # Length of a tabulation.
       # Default: 4
       # tab-len: 8

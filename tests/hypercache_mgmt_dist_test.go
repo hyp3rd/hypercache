@@ -16,7 +16,10 @@ import (
 
 // TestManagementHTTPDistMemory validates management endpoints for the experimental DistMemory backend.
 func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
-	cfg := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
+	cfg, err := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
 
 	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
 		hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:0"), // ephemeral port
@@ -97,7 +100,9 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 }
 
 // waitForMgmt waits until management HTTP server is bound and responsive.
-func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) string { //nolint:thelper
+func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) string {
+	t.Helper()
+
 	deadline := time.Now().Add(2 * time.Second)
 
 	var addr string
@@ -127,7 +132,9 @@ func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) st
 	return "http://" + addr
 }
 
-func getJSON(t *testing.T, url string) map[string]any { //nolint:thelper
+func getJSON(t *testing.T, url string) map[string]any {
+	t.Helper()
+
 	resp, err := http.Get(url) //nolint:noctx,gosec
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)

@@ -34,9 +34,24 @@ func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest
 	b2i, _ := backend.NewDistMemory(ctx, backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
 	b3i, _ := backend.NewDistMemory(ctx, backend.WithDistMembership(membership, n3), backend.WithDistTransport(transport))
 
-	b1 := b1i.(*backend.DistMemory)
-	b2 := b2i.(*backend.DistMemory)
-	b3 := b3i.(*backend.DistMemory)
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
 
 	transport.Register(b1)
 	transport.Register(b2)
