@@ -14,15 +14,35 @@ import (
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
+// assertEndpointHasField fetches baseURL+path as JSON and asserts the
+// response contains `field`. If the response carries an error label
+// (constants.ErrorLabel), the test fatals with its value — this surfaces
+// 404/500 from a misconfigured backend instead of the misleading "missing
+// field" assertion.
+func assertEndpointHasField(t *testing.T, url, field string) {
+	t.Helper()
+
+	body := getJSON(t, url)
+	if _, ok := body[field]; ok {
+		return
+	}
+
+	if e, hasErr := body[constants.ErrorLabel]; hasErr {
+		t.Fatalf("%s returned error: %v", url, e)
+	}
+
+	t.Errorf("%s missing %s field", url, field)
+}
+
 // TestManagementHTTPDistMemory validates management endpoints for the experimental DistMemory backend.
-func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
+func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest // mgmt server bound to fixed port
 	cfg, err := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
 	}
 
 	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
-		hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:0"), // ephemeral port
+		hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:0"),
 	)
 	cfg.DistMemoryOptions = []backend.DistMemoryOption{
 		backend.WithDistReplication(1),
@@ -39,14 +59,11 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 
 	baseURL := waitForMgmt(t, hc)
 
-	// Insert a key to exercise owners endpoint.
 	err = hc.Set(context.Background(), "alpha", "value", 0)
 	if err != nil {
-		// not fatal for owners shape but should succeed given replication=1
 		t.Fatalf("set alpha: %v", err)
 	}
 
-	// /config should include replication + virtualNodesPerNode
 	configBody := getJSON(t, baseURL+"/config")
 	if _, ok := configBody["replication"]; !ok {
 		t.Errorf("/config missing replication")
@@ -56,47 +73,10 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 		t.Errorf("/config missing virtualNodesPerNode")
 	}
 
-	// /dist/metrics basic shape
-	metricsBody := getJSON(t, baseURL+"/dist/metrics")
-	if _, ok := metricsBody["ForwardGet"]; !ok { // one exported field
-		// could be 404 if backend unsupported (should not be here)
-		if e, hasErr := metricsBody[constants.ErrorLabel]; hasErr {
-			t.Fatalf("/dist/metrics returned error: %v", e)
-		}
-
-		// else fail
-		t.Errorf("/dist/metrics missing ForwardGet field")
-	}
-
-	// /dist/owners
-	ownersBody := getJSON(t, baseURL+"/dist/owners?key=alpha")
-	if _, ok := ownersBody["owners"]; !ok {
-		if e, hasErr := ownersBody[constants.ErrorLabel]; hasErr {
-			t.Fatalf("/dist/owners returned error: %v", e)
-		}
-
-		t.Errorf("/dist/owners missing owners field")
-	}
-
-	// /cluster/members
-	membersBody := getJSON(t, baseURL+"/cluster/members")
-	if _, ok := membersBody["members"]; !ok {
-		if e, hasErr := membersBody[constants.ErrorLabel]; hasErr {
-			t.Fatalf("/cluster/members returned error: %v", e)
-		}
-
-		t.Errorf("/cluster/members missing members field")
-	}
-
-	// /cluster/ring
-	ringBody := getJSON(t, baseURL+"/cluster/ring")
-	if _, ok := ringBody["vnodes"]; !ok {
-		if e, hasErr := ringBody[constants.ErrorLabel]; hasErr {
-			t.Fatalf("/cluster/ring returned error: %v", e)
-		}
-
-		t.Errorf("/cluster/ring missing vnodes field")
-	}
+	assertEndpointHasField(t, baseURL+"/dist/metrics", "ForwardGet")
+	assertEndpointHasField(t, baseURL+"/dist/owners?key=alpha", "owners")
+	assertEndpointHasField(t, baseURL+"/cluster/members", "members")
+	assertEndpointHasField(t, baseURL+"/cluster/ring", "vnodes")
 }
 
 // waitForMgmt waits until management HTTP server is bound and responsive.

@@ -13,6 +13,71 @@ import (
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
+// findKeyOwnedBy scans candidate keys whose ring owners include the named
+// node. Returns the first match or `defaultKey` if no candidate qualifies
+// within attempts.
+func findKeyOwnedBy(node *backend.DistMemory, ownerID string, attempts int, defaultKey, prefix string) string {
+	for i := range attempts {
+		candidate := fmt.Sprintf("%s-%d", prefix, i)
+		for _, oid := range node.Ring().Lookup(candidate) {
+			if string(oid) == ownerID {
+				return candidate
+			}
+		}
+	}
+
+	return defaultKey
+}
+
+// assertHintedHandoffMetrics fails the test unless the primary observed at
+// least one queued + one replayed hint and zero dropped.
+func assertHintedHandoffMetrics(t *testing.T, m backend.DistMetrics) {
+	t.Helper()
+
+	if m.HintedQueued < 1 {
+		t.Fatalf("expected HintedQueued >=1, got %d", m.HintedQueued)
+	}
+
+	if m.HintedReplayed < 1 {
+		t.Fatalf("expected HintedReplayed >=1, got %d", m.HintedReplayed)
+	}
+
+	if m.HintedDropped != 0 {
+		t.Fatalf("expected no HintedDropped, got %d", m.HintedDropped)
+	}
+}
+
+// newHintedHandoffNode constructs one DistMemory backend wired into the
+// shared membership/transport for the hinted-handoff test. Construction
+// uses context.Background() rather than a caller-supplied ctx because Stop
+// runs from t.Cleanup at end-of-test where the test ctx may already be
+// canceled — see StopOnCleanup for the same rationale.
+func newHintedHandoffNode(t *testing.T, m *cluster.Membership, id string, baseOpts []backend.DistMemoryOption) *backend.DistMemory {
+	t.Helper()
+
+	opts := make([]backend.DistMemoryOption, 0, len(baseOpts)+2)
+
+	opts = append(opts, baseOpts...)
+	opts = append(opts,
+		backend.WithDistNode(id, id),
+		backend.WithDistMembership(m, cluster.NewNode(id, id)),
+	)
+
+	bi, err := backend.NewDistMemory(context.Background(), opts...)
+	if err != nil {
+		t.Fatalf("new %s: %v", id, err)
+	}
+
+	b, ok := bi.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bi)
+	}
+
+	StopOnCleanup(t, b)
+
+	return b
+}
+
 // TestHintedHandoffReplay ensures that when a replica is down during a write, a hint is queued and later replayed.
 func TestHintedHandoffReplay(t *testing.T) {
 	t.Parallel()
@@ -20,111 +85,47 @@ func TestHintedHandoffReplay(t *testing.T) {
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
-	opts := []backend.DistMemoryOption{
-		backend.WithDistReplication(2),                           // primary + 1 replica
-		backend.WithDistWriteConsistency(backend.ConsistencyOne), // allow local success while still attempting fanout
+	baseOpts := []backend.DistMemoryOption{
+		backend.WithDistReplication(2),
+		backend.WithDistWriteConsistency(backend.ConsistencyOne),
 		backend.WithDistHintTTL(time.Minute),
 		backend.WithDistHintReplayInterval(25 * time.Millisecond),
 		backend.WithDistHintMaxPerNode(10),
 	}
 
 	ring := cluster.NewRing(cluster.WithReplication(2))
-	m := cluster.NewMembership(ring)
-	m.Upsert(cluster.NewNode("P", "P"))
-	m.Upsert(cluster.NewNode("R", "R"))
+	membership := cluster.NewMembership(ring)
+	membership.Upsert(cluster.NewNode("P", "P"))
+	membership.Upsert(cluster.NewNode("R", "R"))
 
-	primaryOpts := append(opts, backend.WithDistNode("P", "P"), backend.WithDistMembership(m, cluster.NewNode("P", "P")))
-	replicaOpts := append(opts, backend.WithDistNode("R", "R"), backend.WithDistMembership(m, cluster.NewNode("R", "R")))
-	primary, _ := backend.NewDistMemory(ctx, primaryOpts...)
-	replica, _ := backend.NewDistMemory(ctx, replicaOpts...)
-
-	p, ok := any(primary).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast primary to *backend.DistMemory")
-	}
-
-	r, ok := any(replica).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast replica to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, p)
-	StopOnCleanup(t, r)
+	p := newHintedHandoffNode(t, membership, "P", baseOpts)
+	r := newHintedHandoffNode(t, membership, "R", baseOpts)
 
 	p.SetTransport(transport)
-	// r transport deliberately not registered yet (simulate down replica)
 	transport.Register(p)
+	// r is deliberately not registered yet (simulate downed replica).
 
-	// manually start replay (constructor might have skipped due to timing)
+	// Constructor may have skipped replay due to timing — start it manually.
 	p.StartHintReplayForTest(ctx)
 
-	// find a key whose owners include replica R
-	key := "hint-key"
-	for i := range 100 { // try a few keys
-		candidate := fmt.Sprintf("hint-key-%d", i)
-		owners := p.Ring().Lookup(candidate)
+	key := findKeyOwnedBy(p, "R", 100, "hint-key", "hint-key")
 
-		foundR := false
-		for _, oid := range owners {
-			if string(oid) == "R" {
-				foundR = true
-
-				break
-			}
-		}
-
-		if foundR {
-			key = candidate
-
-			break
-		}
-	}
-
-	item := &cache.Item{Key: key, Value: "v1"}
-
-	_ = primary.Set(ctx, item) // should attempt to replicate to R and queue hint
+	_ = p.Set(ctx, &cache.Item{Key: key, Value: "v1"})
 
 	if p.HintedQueueSize("R") == 0 {
 		t.Fatalf("expected hint queued for unreachable replica; size=0 key=%s owners=%v", key, p.Ring().Lookup(key))
 	}
 
-	// Now register replica so hints can replay
+	// Bring R online and force an immediate replay cycle.
 	r.SetTransport(transport)
 	transport.Register(r)
-	// immediate manual replay before polling
 	p.ReplayHintsForTest(ctx)
 
-	// Wait for replay loop to deliver hint
 	t.Logf("queued hints for R: %d", p.HintedQueueSize("R"))
 
-	deadline := time.Now().Add(1 * time.Second)
-
-	found := false
-	for time.Now().Before(deadline) {
-		if v, ok := replica.Get(ctx, key); ok && v != nil {
-			found = true
-
-			break
-		}
-
-		time.Sleep(25 * time.Millisecond)
-	}
-
-	if !found {
+	if !waitForHintDelivery(ctx, r, key, 1*time.Second) {
 		t.Fatalf("replica did not receive hinted handoff value")
 	}
 
-	// metrics assertions for hinted handoff (at least one queued & replayed, none dropped)
-	ms := p.Metrics()
-	if ms.HintedQueued < 1 {
-		t.Fatalf("expected HintedQueued >=1, got %d", ms.HintedQueued)
-	}
-
-	if ms.HintedReplayed < 1 {
-		t.Fatalf("expected HintedReplayed >=1, got %d", ms.HintedReplayed)
-	}
-
-	if ms.HintedDropped != 0 {
-		t.Fatalf("expected no HintedDropped, got %d", ms.HintedDropped)
-	}
+	assertHintedHandoffMetrics(t, p.Metrics())
 }

@@ -8,7 +8,7 @@ import (
 )
 
 // DisableHTTPForTest stops the internal HTTP server and clears transport (testing helper).
-func (dm *DistMemory) DisableHTTPForTest(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) DisableHTTPForTest(ctx context.Context) {
 	if dm.httpServer != nil {
 		err := dm.httpServer.stop(ctx)
 		if err != nil {
@@ -22,7 +22,7 @@ func (dm *DistMemory) DisableHTTPForTest(ctx context.Context) { //nolint:ireturn
 }
 
 // EnableHTTPForTest restarts HTTP server & transport if nodeAddr is set (testing helper).
-func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) {
 	if dm.httpServer != nil || dm.nodeAddr == "" {
 		return
 	}
@@ -56,7 +56,7 @@ func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) { //nolint:ireturn
 }
 
 // HintedQueueSize returns number of queued hints for a node (testing helper).
-func (dm *DistMemory) HintedQueueSize(nodeID string) int { //nolint:ireturn
+func (dm *DistMemory) HintedQueueSize(nodeID string) int {
 	dm.hintsMu.Lock()
 	defer dm.hintsMu.Unlock()
 
@@ -68,7 +68,7 @@ func (dm *DistMemory) HintedQueueSize(nodeID string) int { //nolint:ireturn
 }
 
 // StartHintReplayForTest forces starting hint replay loop (testing helper).
-func (dm *DistMemory) StartHintReplayForTest(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) StartHintReplayForTest(ctx context.Context) {
 	if dm.hintReplayInt <= 0 || dm.hintTTL <= 0 {
 		return
 	}

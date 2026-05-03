@@ -5,131 +5,75 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
+
+// pickNonAheadRequester returns the first cluster node that is not the
+// `ahead` replica — quorum-read tests need the read to come from a lagging
+// or correct node so the quorum fan-out forces reconciliation.
+func pickNonAheadRequester(dc *DistCluster, ahead *backend.DistMemory) *backend.DistMemory {
+	for _, n := range dc.Nodes {
+		if n.LocalNodeID() != ahead.LocalNodeID() {
+			return n
+		}
+	}
+
+	return dc.Nodes[0]
+}
 
 // TestDistMemoryStaleQuorum ensures quorum read returns newest version and repairs stale replicas.
 func TestDistMemoryStaleQuorum(t *testing.T) {
 	t.Parallel()
 
-	ring := cluster.NewRing(cluster.WithReplication(3))
-	membership := cluster.NewMembership(ring)
-	transport := backend.NewInProcessTransport()
-
-	n1 := cluster.NewNode("", "n1:0")
-	n2 := cluster.NewNode("", "n2:0")
-	n3 := cluster.NewNode("", "n3:0")
-
-	b1i, _ := backend.NewDistMemory(
-		context.TODO(),
-		backend.WithDistMembership(membership, n1),
-		backend.WithDistTransport(transport),
-		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
-	)
-	b2i, _ := backend.NewDistMemory(
-		context.TODO(),
-		backend.WithDistMembership(membership, n2),
-		backend.WithDistTransport(transport),
-		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
-	)
-	b3i, _ := backend.NewDistMemory(
-		context.TODO(),
-		backend.WithDistMembership(membership, n3),
-		backend.WithDistTransport(transport),
+	dc := SetupInProcessCluster(t, 3,
 		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
 	)
 
-	b1, ok := b1i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b1i to *backend.DistMemory")
-	}
+	const key = "sq-key"
 
-	b2, ok := b2i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b2i to *backend.DistMemory")
-	}
-
-	b3, ok := b3i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b3i to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, b1)
-	StopOnCleanup(t, b2)
-	StopOnCleanup(t, b3)
-
-	transport.Register(b1)
-	transport.Register(b2)
-	transport.Register(b3)
-
-	key := "sq-key"
-
-	owners := ring.Lookup(key)
+	owners := dc.Ring.Lookup(key)
 	if len(owners) != 3 {
 		t.Skip("replication factor !=3")
 	}
 
-	// Write initial version via primary
-	primary := owners[0]
 	item := &cache.Item{Key: key, Value: "v1"}
 
 	_ = item.Valid()
-	if primary == b1.LocalNodeID() {
-		_ = b1.Set(context.Background(), item)
-	} else if primary == b2.LocalNodeID() {
-		_ = b2.Set(context.Background(), item)
-	} else {
-		_ = b3.Set(context.Background(), item)
-	}
+	_ = dc.ByID(owners[0]).Set(context.Background(), item)
 
-	// Manually bump version on one replica to simulate a newer write that others missed
-	// Pick owners[1] as ahead replica
-	aheadID := owners[1]
-	ahead := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[aheadID]
-	ahead.DebugInject(&cache.Item{Key: key, Value: "v2", Version: 5, Origin: string(ahead.LocalNodeID()), LastUpdated: time.Now()})
+	// Bump version on owners[1] to simulate a newer write the others missed.
+	ahead := dc.ByID(owners[1])
+	ahead.DebugInject(&cache.Item{
+		Key: key, Value: "v2", Version: 5,
+		Origin: string(ahead.LocalNodeID()), LastUpdated: time.Now(),
+	})
+	dc.ByID(owners[2]).DebugDropLocal(key)
 
-	// Drop local copy on owners[2] to simulate stale/missing
-	lagID := owners[2]
-	lag := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[lagID]
-	lag.DebugDropLocal(key)
-
-	// Issue quorum read from a non-ahead node (choose primary if not ahead, else third)
-	requester := b1
-	if requester.LocalNodeID() == aheadID {
-		requester = b2
-	}
-
-	if requester.LocalNodeID() == aheadID {
-		requester = b3
-	}
-
-	got, ok := requester.Get(context.Background(), key)
+	got, ok := pickNonAheadRequester(dc, ahead).Get(context.Background(), key)
 	if !ok {
 		t.Fatalf("quorum get failed")
 	}
 
-	// Value stored as interface{} may be string (not []byte) in this test
-	if sval, okCast := got.Value.(string); !okCast || sval != "v2" {
+	sval, okCast := got.Value.(string)
+	if !okCast || sval != "v2" {
 		t.Fatalf("expected quorum to return newer version v2, got=%v (type %T)", got.Value, got.Value)
 	}
 
-	// Allow brief repair propagation
+	// Brief sleep to let the read-repair fan-out land on lagging replicas.
 	time.Sleep(50 * time.Millisecond)
 
-	// All owners should now have v2 (version 5)
 	for _, oid := range owners {
-		inst := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[oid]
-
-		it, ok2 := inst.Get(context.Background(), key)
+		it, ok2 := dc.ByID(oid).Get(context.Background(), key)
 		if !ok2 || it.Version != 5 {
 			t.Fatalf("owner %s not repaired to v2 (v5) -> (%v,%v)", oid, ok2, it)
 		}
 	}
 
-	// ReadRepair metric should have incremented somewhere
-	if b1.Metrics().ReadRepair+b2.Metrics().ReadRepair+b3.Metrics().ReadRepair == 0 {
+	totalRepair := dc.Nodes[0].Metrics().ReadRepair +
+		dc.Nodes[1].Metrics().ReadRepair +
+		dc.Nodes[2].Metrics().ReadRepair
+	if totalRepair == 0 {
 		t.Fatalf("expected read repair metric >0")
 	}
 }

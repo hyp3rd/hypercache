@@ -31,6 +31,50 @@ func allocatePort(tb testing.TB) string {
 	return addr
 }
 
+// makePhase1Node spins up a DistMemory backend wired for quorum reads/writes
+// across three nodes — extracted so each subtest helper stays under the
+// function-length budget.
+func makePhase1Node(ctx context.Context, t *testing.T, id, addr string, seeds []string) *backend.DistMemory {
+	t.Helper()
+
+	bm, err := backend.NewDistMemory(ctx,
+		backend.WithDistNode(id, addr),
+		backend.WithDistSeeds(seeds),
+		backend.WithDistReplication(3),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistHintReplayInterval(200*time.Millisecond),
+		backend.WithDistHintTTL(5*time.Second),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+		backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
+	)
+	if err != nil {
+		t.Fatalf("new dist memory: %v", err)
+	}
+
+	bk, ok := bm.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bm)
+	}
+
+	return bk
+}
+
+// awaitNodeReplication polls node for key until value matches or deadline
+// elapses; encodes the "give replication a moment" pattern without inlining
+// goto-control-flow into the test body.
+func awaitNodeReplication(ctx context.Context, node *backend.DistMemory, key string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if it, ok := node.Get(ctx, key); ok && valueOK(it.Value) {
+			return true
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return false
+}
+
 // TestDistPhase1BasicQuorum is a scaffolding test verifying three-node quorum Set/Get over HTTP transport.
 func TestDistPhase1BasicQuorum(t *testing.T) {
 	t.Parallel()
@@ -41,40 +85,19 @@ func TestDistPhase1BasicQuorum(t *testing.T) {
 	addrB := allocatePort(t)
 	addrC := allocatePort(t)
 
-	// create three nodes; we'll stop C's HTTP after start to simulate outage then restart
-	makeNode := func(id, addr string, seeds []string) *backend.DistMemory {
-		bm, err := backend.NewDistMemory(ctx,
-			backend.WithDistNode(id, addr),
-			backend.WithDistSeeds(seeds),
-			backend.WithDistReplication(3),
-			backend.WithDistVirtualNodes(32),
-			backend.WithDistHintReplayInterval(200*time.Millisecond),
-			backend.WithDistHintTTL(5*time.Second),
-			backend.WithDistReadConsistency(backend.ConsistencyQuorum),
-			backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
-		)
-		if err != nil {
-			t.Fatalf("new dist memory: %v", err)
-		}
+	nodeA := makePhase1Node(ctx, t, "A", addrA, []string{addrB, addrC})
+	nodeB := makePhase1Node(ctx, t, "B", addrB, []string{addrA, addrC})
+	nodeC := makePhase1Node(ctx, t, "C", addrC, []string{addrA, addrB})
 
-		bk, ok := bm.(*backend.DistMemory)
-		if !ok {
-			t.Fatalf("expected *backend.DistMemory, got %T", bm)
-		}
-
-		return bk
-	}
-
-	nodeA := makeNode("A", addrA, []string{addrB, addrC})
-	nodeB := makeNode("B", addrB, []string{addrA, addrC})
-	nodeC := makeNode("C", addrC, []string{addrA, addrB})
-	// defer cleanup of A and B
-	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
+	t.Cleanup(func() {
+		_ = nodeA.Stop(ctx)
+		_ = nodeB.Stop(ctx)
+		_ = nodeC.Stop(ctx)
+	})
 
 	// allow some time for ring initialization
 	time.Sleep(200 * time.Millisecond)
 
-	// Perform a write expecting replication across all three nodes
 	item := &cache.Item{Key: "k1", Value: []byte("v1"), Expiration: 0, Version: 1, Origin: "A", LastUpdated: time.Now()}
 
 	err := nodeA.Set(ctx, item)
@@ -82,113 +105,84 @@ func TestDistPhase1BasicQuorum(t *testing.T) {
 		t.Fatalf("set: %v", err)
 	}
 
-	// Quorum read from B should succeed (value may be []byte, string, or json.RawMessage)
-	if got, ok := nodeB.Get(ctx, "k1"); !ok {
+	got, ok := nodeB.Get(ctx, "k1")
+	if !ok {
 		t.Fatalf("expected quorum read via B: not found")
-	} else {
-		assertValue(t, got.Value)
 	}
 
-	// Basic propagation check loop (give replication a moment)
-	defer func() { _ = nodeC.Stop(ctx) }()
+	assertValue(t, got.Value)
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if it, ok := nodeC.Get(ctx, "k1"); ok {
-			if valueOK(it.Value) {
-				goto Done
-			}
-		}
-
-		time.Sleep(100 * time.Millisecond)
+	if awaitNodeReplication(ctx, nodeC, "k1", 3*time.Second) {
+		return
 	}
 
-	if it, ok := nodeC.Get(ctx, "k1"); !ok {
-		// Not fatal yet; we only created scaffolding – mark skip for now.
+	it, ok := nodeC.Get(ctx, "k1")
+	if !ok {
 		t.Skipf("hint replay not yet observable; will be validated after full wiring (missing item)")
-	} else {
-		if !valueOK(it.Value) {
-			t.Skipf("value mismatch after wait")
-		}
+
+		return
 	}
 
-Done:
+	if !valueOK(it.Value) {
+		t.Skipf("value mismatch after wait")
+	}
+}
+
+// matchV1Plain is the logical value tested by valueOK below.
+const matchV1Plain = "v1"
+
+// matchV1Base64 is the base64 encoding of "v1" — distributed transports
+// sometimes round-trip values as base64 strings.
+const matchV1Base64 = "djE=" // base64.StdEncoding.EncodeToString([]byte("v1"))
+
+// matchesV1 reports whether s represents logical "v1" — either as the
+// plain literal, the JSON-quoted literal, or a base64 form that decodes
+// to "v1". Centralizes the encoding-tolerance logic that valueOK fans out
+// over its supported value types.
+func matchesV1(s string) bool {
+	if s == matchV1Plain || s == "\""+matchV1Plain+"\"" {
+		return true
+	}
+
+	if s == matchV1Base64 {
+		b, err := base64.StdEncoding.DecodeString(s)
+
+		return err == nil && string(b) == matchV1Plain
+	}
+
+	return false
 }
 
 // valueOK returns true if the stored value matches logical "v1" across supported encodings.
-func valueOK(v any) bool { //nolint:ireturn
+func valueOK(v any) bool {
 	switch x := v.(type) {
 	case []byte:
-		if string(x) == "v1" {
-			return true
-		}
-
-		if s := string(x); s == "djE=" { // base64 of v1
-			b, err := base64.StdEncoding.DecodeString(s)
-			if err == nil && string(b) == "v1" {
-				return true
-			}
-		}
-
-		return false
+		return matchesV1(string(x))
 
 	case string:
-		if x == "v1" {
-			return true
-		}
-
-		if x == "djE=" { // base64 form
-			b, err := base64.StdEncoding.DecodeString(x)
-			if err == nil && string(b) == "v1" {
-				return true
-			}
-		}
-
-		return false
+		return matchesV1(x)
 
 	case json.RawMessage:
-		// could be "v1" or base64 inside quotes
 		if len(x) == 0 {
 			return false
 		}
 
-		// try as string literal
+		// Try as JSON string literal first; fall back to raw bytes.
 		var s string
 
 		err := json.Unmarshal(x, &s)
-		if err == nil {
-			if s == "v1" {
-				return true
-			}
-
-			if s == "djE=" {
-				b, err2 := base64.StdEncoding.DecodeString(s)
-				if err2 == nil && string(b) == "v1" {
-					return true
-				}
-			}
-		}
-
-		// fall back to raw compare
-		return string(x) == "v1" || string(x) == "\"v1\""
-
-	default:
-		s := fmt.Sprintf("%v", x)
-		if s == "v1" || s == "\"v1\"" {
+		if err == nil && matchesV1(s) {
 			return true
 		}
 
-		if s == "djE=" {
-			if b, err := base64.StdEncoding.DecodeString(s); err == nil && string(b) == "v1" {
-				return true
-			}
-		}
+		return matchesV1(string(x))
 
-		return false
+	default:
+		return matchesV1(fmt.Sprintf("%v", x))
 	}
 }
 
-func assertValue(t *testing.T, v any) { //nolint:ireturn
+func assertValue(t *testing.T, v any) {
 	t.Helper()
 
 	if !valueOK(v) {

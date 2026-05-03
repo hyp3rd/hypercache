@@ -16,66 +16,27 @@ func TestMerkleSyncConvergence(t *testing.T) {
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
-	bA, err := backend.NewDistMemory(ctx,
-		backend.WithDistNode("A", AllocatePort(t)),
-		backend.WithDistReplication(1),
-		backend.WithDistMerkleChunkSize(2),
-	)
-	if err != nil {
-		t.Fatalf("new dist memory A: %v", err)
-	}
+	dmA := newMerkleNode(t, transport, "A")
+	dmB := newMerkleNode(t, transport, "B")
 
-	dmA, ok := any(bA).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("expected *backend.DistMemory, got %T", bA)
-	}
-
-	StopOnCleanup(t, dmA)
-
-	bB, err := backend.NewDistMemory(ctx,
-		backend.WithDistNode("B", AllocatePort(t)),
-		backend.WithDistReplication(1),
-		backend.WithDistMerkleChunkSize(2),
-	)
-	if err != nil {
-		t.Fatalf("new dist memory B: %v", err)
-	}
-
-	dmB, ok := any(bB).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("expected *backend.DistMemory, got %T", bB)
-	}
-
-	StopOnCleanup(t, dmB)
-
-	dmA.SetTransport(transport)
-	dmB.SetTransport(transport)
-
-	// register for in-process lookups
-	transport.Register(dmA)
-	transport.Register(dmB)
-
-	// inject divergent data (A has extra/newer)
+	// Inject divergent data: A holds 5 newer keys, B holds older copies of the first 2.
 	for i := range 5 {
 		it := &cache.Item{Key: keyf("k", i), Value: []byte("vA"), Version: uint64(i + 1), Origin: "A", LastUpdated: time.Now()}
 		dmA.DebugInject(it)
 	}
 
-	// B shares only first 2 keys older versions
 	for i := range 2 {
 		it := &cache.Item{Key: keyf("k", i), Value: []byte("old"), Version: uint64(i), Origin: "B", LastUpdated: time.Now()}
 		dmB.DebugInject(it)
 	}
 
-	// Run sync B->A to pull newer
-	if err := dmB.SyncWith(ctx, string(dmA.LocalNodeID())); err != nil {
+	syncErr := dmB.SyncWith(ctx, string(dmA.LocalNodeID()))
+	if syncErr != nil && testing.Verbose() {
 		// HTTP transport fetch merkle unsupported; we rely on in-process
-		if testing.Verbose() {
-			t.Logf("sync error: %v", err)
-		}
+		t.Logf("sync error: %v", syncErr)
 	}
 
-	// Validate B now has all 5 keys with correct versions (>= A's)
+	// Validate B now has all 5 keys with correct versions (>= A's).
 	for i := range 5 {
 		k := keyf("k", i)
 		itA, _ := dmA.Get(ctx, k)

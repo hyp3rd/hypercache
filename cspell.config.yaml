@@ -27,10 +27,14 @@ ignorePaths:
   - "*.http"
   - compose.*.yaml
   - docs/mkdocs.yml
+  - bench-*.txt
+  - lint-*.txt
+  - race-*.log
 dictionaryDefinitions: []
 dictionaries: []
 words:
   - acks
+  - autosync
   - backpressure
   - benchmarkdist
   - benchmem
@@ -64,6 +68,7 @@ words:
   - excludeonly
   - exhaustruct
   - Fanout
+  - fatals
   - fctx
   - ferr
   - FLUSHALL
@@ -80,6 +85,8 @@ words:
   - gocache
   - goccy
   - gochecknoglobals
+  - goconst
+  - histogramcollector
   - gofiber
   - GOFILES
   - gofumpt
@@ -114,6 +121,7 @@ words:
   - Merkle
   - mfinal
   - Mgmt
+  - microbenchmark
   - mkdocs
   - mrand
   - mset
@@ -151,6 +159,7 @@ words:
   - stretchr
   - strfnv
   - strs
+  - subtest
   - subtests
   - sval
   - thelper

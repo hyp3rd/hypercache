@@ -11,58 +11,81 @@ import (
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
+// newHTTPMerkleNode constructs a DistMemory backend with an HTTP server
+// listening on the supplied address — used by the HTTP-transport merkle
+// tests where in-process transport isn't enough.
+//
+// Construction uses context.Background() rather than a caller-supplied ctx
+// because Stop runs from t.Cleanup at end-of-test, where the test ctx may
+// already be canceled — propagating the same ctx into Stop would leak the
+// HTTP listener. See StopOnCleanup for the same rationale.
+func newHTTPMerkleNode(t *testing.T, membership *cluster.Membership, id, addr string) *backend.DistMemory {
+	t.Helper()
+
+	node := cluster.NewNode("", addr)
+
+	bi, err := backend.NewDistMemory(context.Background(),
+		backend.WithDistMembership(membership, node),
+		backend.WithDistNode(id, addr),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("new %s: %v", id, err)
+	}
+
+	b, ok := bi.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bi)
+	}
+
+	StopOnCleanup(t, b)
+
+	return b
+}
+
+// waitForMerkleEndpoint polls a node's /internal/merkle HTTP endpoint until
+// it responds 200. Under -race the fiber listener can take seconds to start
+// accepting after Listen() returns, so a one-shot Get would race.
+func waitForMerkleEndpoint(ctx context.Context, baseURL string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/internal/merkle", nil)
+		if err != nil {
+			return false
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				return true
+			}
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	return false
+}
+
 // TestHTTPFetchMerkle ensures HTTP transport can fetch a remote Merkle tree and SyncWith works over HTTP.
 func TestHTTPFetchMerkle(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 
-	// shared ring/membership
 	ring := cluster.NewRing(cluster.WithReplication(1))
 	membership := cluster.NewMembership(ring)
 
-	// create two nodes with HTTP server enabled (dynamically allocated addresses)
 	addr1 := AllocatePort(t)
 	addr2 := AllocatePort(t)
 
-	n1 := cluster.NewNode("", addr1)
+	b1 := newHTTPMerkleNode(t, membership, "n1", addr1)
+	b2 := newHTTPMerkleNode(t, membership, "n2", addr2)
 
-	b1i, err := backend.NewDistMemory(ctx,
-		backend.WithDistMembership(membership, n1),
-		backend.WithDistNode("n1", addr1),
-		backend.WithDistMerkleChunkSize(2),
-	)
-	if err != nil {
-		t.Fatalf("b1: %v", err)
-	}
-
-	n2 := cluster.NewNode("", addr2)
-
-	b2i, err := backend.NewDistMemory(ctx,
-		backend.WithDistMembership(membership, n2),
-		backend.WithDistNode("n2", addr2),
-		backend.WithDistMerkleChunkSize(2),
-	)
-	if err != nil {
-		t.Fatalf("b2: %v", err)
-	}
-
-	b1, ok := b1i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b1i to *backend.DistMemory")
-	}
-
-	b2, ok := b2i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b2i to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, b1)
-	StopOnCleanup(t, b2)
-
-	// HTTP transport resolver maps node IDs to http base URLs.
 	resolver := func(id string) (string, bool) {
-		switch id { // node IDs same as provided
+		switch id {
 		case "n1":
 			return "http://" + b1.LocalNodeAddr(), true
 		case "n2":
@@ -71,62 +94,35 @@ func TestHTTPFetchMerkle(t *testing.T) {
 
 		return "", false
 	}
+
 	// 5s transport timeout (was 2s) — under -race the fiber listener can take
 	// >2s to accept its first request, which made SyncWith time out spuriously.
 	transport := backend.NewDistHTTPTransport(5*time.Second, resolver)
 	b1.SetTransport(transport)
 	b2.SetTransport(transport)
 
-	// ensure membership has both before writes (already upserted in constructors)
-	// write some keys to b1 only
-	for i := range 5 { // direct inject to sidestep replication/forwarding complexity
+	// Direct inject on b1 to sidestep replication/forwarding complexity.
+	for i := range 5 {
 		item := &cache.Item{Key: httpKey(i), Value: []byte("v"), Version: uint64(i + 1), Origin: "n1", LastUpdated: time.Now()}
 		b1.DebugInject(item)
 	}
 
-	// Poll the HTTP merkle endpoint until it actually responds 200. Under
-	// -race the fiber listener can take seconds to start accepting requests
-	// even after Listen() returns; a single-shot Get is racy.
-	merkleReady := false
-
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+b1.LocalNodeAddr()+"/internal/merkle", nil)
-		if reqErr != nil {
-			t.Fatalf("build merkle request: %v", reqErr)
-		}
-
-		resp, getErr := http.DefaultClient.Do(req)
-		if getErr == nil {
-			_ = resp.Body.Close()
-
-			if resp.StatusCode == http.StatusOK {
-				merkleReady = true
-
-				break
-			}
-		}
-
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	if !merkleReady {
+	if !waitForMerkleEndpoint(ctx, "http://"+b1.LocalNodeAddr(), 10*time.Second) {
 		t.Fatal("merkle endpoint did not become ready within deadline")
 	}
 
-	// b2 sync from b1 via HTTP transport
-	if err := b2.SyncWith(ctx, "n1"); err != nil {
-		t.Fatalf("sync: %v", err)
+	syncErr := b2.SyncWith(ctx, "n1")
+	if syncErr != nil {
+		t.Fatalf("sync: %v", syncErr)
 	}
 
-	// Validate keys present on b2. Allow brief retry to absorb any async tail
-	// in sync's apply path (each missing key is retried once).
+	// Validate keys present on b2. Each missing key is retried once to absorb
+	// any async tail in sync's apply path.
 	for i := range 5 {
 		if _, ok := b2.Get(ctx, httpKey(i)); ok {
 			continue
 		}
 
-		// One retry: re-sync and check again.
 		err := b2.SyncWith(ctx, "n1")
 		if err != nil {
 			t.Fatalf("re-sync: %v", err)

@@ -11,6 +11,17 @@ import (
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
 
+// Test fixture keys/values shared across the table-driven Set/Get/GetOrSet/
+// GetMultiple tests in this package. Extracted as constants to satisfy
+// `goconst` and to reduce typo risk when adding new subtests.
+const (
+	testKey1   = "key1"
+	testKey2   = "key2"
+	testKey3   = "key3"
+	testValue1 = "value1"
+	testValue2 = "value2"
+)
+
 func TestHyperCache_Set(t *testing.T) { //nolint:paralleltest // subtests share cache instance and depend on insertion order
 	tests := []struct {
 		name          string
@@ -22,18 +33,18 @@ func TestHyperCache_Set(t *testing.T) { //nolint:paralleltest // subtests share 
 	}{
 		{
 			name:          "set with valid key and value",
-			key:           "key1",
-			value:         "value1",
+			key:           testKey1,
+			value:         testValue1,
 			expiry:        0,
-			expectedValue: "value1",
+			expectedValue: testValue1,
 			expectedErr:   nil,
 		},
 		{
 			name:          "set with valid key and value with expiry",
-			key:           "key2",
-			value:         "value2",
+			key:           testKey2,
+			value:         testValue2,
 			expiry:        time.Second,
-			expectedValue: "value2",
+			expectedValue: testValue2,
 			expectedErr:   nil,
 		},
 		{
@@ -54,7 +65,7 @@ func TestHyperCache_Set(t *testing.T) { //nolint:paralleltest // subtests share 
 		},
 		{
 			name:          "overwrite existing key",
-			key:           "key1",
+			key:           testKey1,
 			value:         "new_value1",
 			expiry:        0,
 			expectedValue: "new_value1",
@@ -62,7 +73,7 @@ func TestHyperCache_Set(t *testing.T) { //nolint:paralleltest // subtests share 
 		},
 		{
 			name:          "update expiry of existing key",
-			key:           "key1",
+			key:           testKey1,
 			value:         "new_value1",
 			expiry:        time.Second,
 			expectedValue: "new_value1",

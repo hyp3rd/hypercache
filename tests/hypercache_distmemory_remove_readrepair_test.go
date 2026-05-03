@@ -4,60 +4,18 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hyp3rd/hypercache/internal/cluster"
-	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
-
-// helper to build two-node replicated cluster.
-//
-//nolint:revive // confusing-results: two backends + ring is the natural shape; named returns add no clarity here
-func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, *cluster.Ring) {
-	t.Helper()
-
-	ring := cluster.NewRing(cluster.WithReplication(2))
-	membership := cluster.NewMembership(ring)
-	transport := backend.NewInProcessTransport()
-	n1 := cluster.NewNode("", "node1:0")
-	n2 := cluster.NewNode("", "node2:0")
-
-	b1i, err := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n1), backend.WithDistTransport(transport))
-	if err != nil {
-		t.Fatalf("b1: %v", err)
-	}
-
-	b2i, err := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
-	if err != nil {
-		t.Fatalf("b2: %v", err)
-	}
-
-	b1, ok := b1i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b1i to *backend.DistMemory")
-	}
-
-	b2, ok := b2i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b2i to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, b1)
-	StopOnCleanup(t, b2)
-
-	transport.Register(b1)
-	transport.Register(b2)
-
-	return b1, b2, ring
-}
 
 // TestDistMemoryRemoveReplication ensures that Remove replicates deletions across replicas.
 func TestDistMemoryRemoveReplication(t *testing.T) {
 	t.Parallel()
 
-	b1, b2, ring := newTwoNodeCluster(t)
-	key := "remove-key"
+	dc := SetupInProcessClusterRF(t, 2, 2)
 
-	owners := ring.Lookup(key)
+	const key = "remove-key"
+
+	owners := dc.Ring.Lookup(key)
 	if len(owners) == 0 {
 		t.Fatalf("no owners")
 	}
@@ -69,46 +27,31 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 		t.Fatalf("valid: %v", err)
 	}
 
-	// write via primary
-	if owners[0] == b1.LocalNodeID() { // local helper we add below
-		err := b1.Set(context.Background(), item)
-		if err != nil {
-			t.Fatalf("set: %v", err)
-		}
-	} else {
-		err := b2.Set(context.Background(), item)
-		if err != nil {
-			t.Fatalf("set: %v", err)
-		}
+	primary := dc.ByID(owners[0])
+
+	err = primary.Set(context.Background(), item)
+	if err != nil {
+		t.Fatalf("set: %v", err)
 	}
 
-	// assert item readable from both nodes
-	if _, ok := b1.Get(context.Background(), key); !ok {
+	if _, ok := dc.Nodes[0].Get(context.Background(), key); !ok {
 		t.Fatalf("b1 missing pre-remove")
 	}
 
-	if _, ok := b2.Get(context.Background(), key); !ok {
+	if _, ok := dc.Nodes[1].Get(context.Background(), key); !ok {
 		t.Fatalf("b2 missing pre-remove")
 	}
 
-	// remove via primary
-	if owners[0] == b1.LocalNodeID() {
-		err := b1.Remove(context.Background(), key)
-		if err != nil {
-			t.Fatalf("remove: %v", err)
-		}
-	} else {
-		err := b2.Remove(context.Background(), key)
-		if err != nil {
-			t.Fatalf("remove: %v", err)
-		}
+	err = primary.Remove(context.Background(), key)
+	if err != nil {
+		t.Fatalf("remove: %v", err)
 	}
 
-	if _, ok := b1.Get(context.Background(), key); ok {
+	if _, ok := dc.Nodes[0].Get(context.Background(), key); ok {
 		t.Fatalf("b1 still has key after remove")
 	}
 
-	if _, ok := b2.Get(context.Background(), key); ok {
+	if _, ok := dc.Nodes[1].Get(context.Background(), key); ok {
 		t.Fatalf("b2 still has key after remove")
 	}
 }
@@ -117,12 +60,13 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 func TestDistMemoryReadRepair(t *testing.T) {
 	t.Parallel()
 
-	b1, b2, ring := newTwoNodeCluster(t)
-	key := "rr-key"
+	dc := SetupInProcessClusterRF(t, 2, 2)
 
-	owners := ring.Lookup(key)
-	if len(owners) == 0 {
-		t.Fatalf("no owners")
+	const key = "rr-key"
+
+	owners := dc.Ring.Lookup(key)
+	if len(owners) < 2 {
+		t.Skip("replication factor <2")
 	}
 
 	item := &cache.Item{Key: key, Value: "val"}
@@ -132,82 +76,37 @@ func TestDistMemoryReadRepair(t *testing.T) {
 		t.Fatalf("valid: %v", err)
 	}
 
-	// write via primary
-	if owners[0] == b1.LocalNodeID() {
-		err := b1.Set(context.Background(), item)
-		if err != nil {
-			t.Fatalf("set: %v", err)
-		}
-	} else {
-		err := b2.Set(context.Background(), item)
-		if err != nil {
-			t.Fatalf("set: %v", err)
-		}
+	primary := dc.ByID(owners[0])
+
+	err = primary.Set(context.Background(), item)
+	if err != nil {
+		t.Fatalf("set: %v", err)
 	}
 
-	// determine replica node (owners[1]) and drop local copy there manually
-	if len(owners) < 2 {
-		t.Skip("replication factor <2")
-	}
+	replicaNode := dc.ByID(owners[1])
+	replicaNode.DebugDropLocal(key)
 
-	replica := owners[1]
-	// optional: t.Logf("owners: %v primary=%s replica=%s", owners, owners[0], replica)
-	if replica == b1.LocalNodeID() {
-		b1.DebugDropLocal(key)
-	} else {
-		b2.DebugDropLocal(key)
-	}
-
-	// ensure dropped locally
-	if replica == b1.LocalNodeID() && b1.LocalContains(key) {
+	if replicaNode.LocalContains(key) {
 		t.Fatalf("replica still has key after drop")
 	}
 
-	if replica == b2.LocalNodeID() && b2.LocalContains(key) {
-		t.Fatalf("replica still has key after drop")
-	}
-
-	// issue Get from a non-owner node to trigger forwarding, then verify owners repaired.
-	// choose a requester: use node that is neither primary nor replica if possible; with 2 nodes this means primary forwards to replica or
-	// vice versa.
-	requester := b1
-	if owners[0] == b1.LocalNodeID() && replica == b2.LocalNodeID() {
-		requester = b2 // request from replica to forward to primary
-	} else if owners[0] == b2.LocalNodeID() && replica == b1.LocalNodeID() {
-		requester = b1
-	}
+	// Issue Get from the replica side so the read fans out to the primary,
+	// which surfaces the missing entry and triggers read-repair.
+	requester := replicaNode
 
 	if _, ok := requester.Get(context.Background(), key); !ok {
 		t.Fatalf("get for read-repair failed")
 	}
 
-	// after forwarding, both owners should have key locally again
-	if owners[0] == b1.LocalNodeID() && !b1.LocalContains(key) {
+	if !primary.LocalContains(key) {
 		t.Fatalf("primary missing after read repair")
 	}
 
-	if owners[0] == b2.LocalNodeID() && !b2.LocalContains(key) {
-		t.Fatalf("primary missing after read repair")
-	}
-
-	if replica == b1.LocalNodeID() && !b1.LocalContains(key) {
+	if !replicaNode.LocalContains(key) {
 		t.Fatalf("replica missing after read repair")
 	}
 
-	if replica == b2.LocalNodeID() && !b2.LocalContains(key) {
-		t.Fatalf("replica missing after read repair")
-	}
-
-	// metrics should show at least one read repair
-	var repaired bool
-
-	if replica == b1.LocalNodeID() {
-		repaired = b1.Metrics().ReadRepair > 0
-	} else {
-		repaired = b2.Metrics().ReadRepair > 0
-	}
-
-	if !repaired {
+	if replicaNode.Metrics().ReadRepair == 0 {
 		t.Fatalf("expected read-repair metric increment")
 	}
 }

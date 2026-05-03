@@ -27,7 +27,7 @@ const statusThreshold = 300
 
 // NewDistHTTPTransport constructs a DistHTTPTransport with the given timeout and
 // nodeID->baseURL resolver. Timeout <=0 defaults to 2s.
-func NewDistHTTPTransport(timeout time.Duration, resolver func(string) (string, bool)) *DistHTTPTransport { //nolint:ireturn
+func NewDistHTTPTransport(timeout time.Duration, resolver func(string) (string, bool)) *DistHTTPTransport {
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
@@ -41,7 +41,7 @@ const (
 )
 
 // ForwardSet sends a Set/Replicate request to a remote node.
-func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error { //nolint:ireturn
+func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error {
 	reqBody := httpSetRequest{
 		Key:        item.Key,
 		Value:      item.Value,
@@ -100,7 +100,7 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 }
 
 // ForwardGet fetches a single item from a remote node.
-func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID, key string) (*cache.Item, bool, error) { //nolint:ireturn
+func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID, key string) (*cache.Item, bool, error) {
 	// prefer canonical endpoint
 	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/internal/get", url.Values{
 		"key": {key},
@@ -148,7 +148,7 @@ func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID, key string) 
 	return item, true, nil
 }
 
-func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
+func decodeGetBody(r io.Reader) (*cache.Item, bool, error) {
 	var raw map[string]json.RawMessage
 
 	dec := json.NewDecoder(r)
@@ -199,7 +199,7 @@ func decodeGetBody(r io.Reader) (*cache.Item, bool, error) { //nolint:ireturn
 }
 
 // ForwardRemove propagates a delete operation to a remote node.
-func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error { //nolint:ireturn
+func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error {
 	// prefer canonical endpoint
 	hreq, err := t.newNodeRequest(ctx, http.MethodDelete, nodeID, "/internal/del", url.Values{
 		"key":       {key},
@@ -240,7 +240,7 @@ func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID, key strin
 }
 
 // Health performs a health probe against a remote node.
-func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error { //nolint:ireturn
+func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error {
 	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/health", nil, nil)
 	if err != nil {
 		return ewrap.Wrap(err, errMsgNewRequest)
@@ -277,7 +277,7 @@ func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error { /
 }
 
 // FetchMerkle retrieves a Merkle tree snapshot from a remote node.
-func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error) { //nolint:ireturn
+func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error) {
 	if t == nil {
 		return nil, errNoTransport
 	}
@@ -331,7 +331,7 @@ func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*Me
 }
 
 // ListKeys returns all keys from a remote node (expensive; used for tests / anti-entropy fallback).
-func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]string, error) { //nolint:ireturn
+func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]string, error) {
 	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/internal/keys", nil, nil)
 	if err != nil {
 		return nil, ewrap.Wrap(err, errMsgNewRequest)
@@ -374,7 +374,7 @@ func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]stri
 	return body.Keys, nil
 }
 
-func (t *DistHTTPTransport) resolveBaseURL(nodeID string) (*url.URL, error) { //nolint:ireturn
+func (t *DistHTTPTransport) resolveBaseURL(nodeID string) (*url.URL, error) {
 	if t == nil || t.baseURLFn == nil {
 		return nil, errNoTransport
 	}
