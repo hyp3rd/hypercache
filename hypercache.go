@@ -55,13 +55,13 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	evictCh                    chan bool           // manual eviction trigger
 	evictionAlgorithmName      string              // name of eviction algorithm
 	evictionAlgorithm          eviction.IAlgorithm // eviction algorithm impl
+	evictionShardCount         int                 // number of eviction-algo shards (default 32; <=1 disables sharding)
 	expirationInterval         time.Duration       // interval for expiration loop
 	evictionInterval           time.Duration       // interval for eviction loop
 	shouldEvict                atomic.Bool         // proactive eviction enabled
 	maxEvictionCount           uint                // max items per eviction run
 	maxCacheSize               int64               // hard memory limit (MB), 0 = unlimited
 	memoryAllocation           atomic.Int64        // current memory usage (bytes)
-	mutex                      sync.RWMutex        // protects eviction algorithm
 	once                       sync.Once           // ensures background loops start once
 	statsCollectorName         string              // configured stats collector name
 	// StatsCollector to collect cache statistics
@@ -83,7 +83,11 @@ type touchBackend interface {
 //   - The maximum cache size in bytes is set to 0 (no limitations).
 func NewInMemoryWithDefaults(ctx context.Context, capacity int) (*HyperCache[backend.InMemory], error) {
 	// Initialize the configuration
-	config := NewConfig[backend.InMemory](constants.InMemoryBackend)
+	config, err := NewConfig[backend.InMemory](constants.InMemoryBackend)
+	if err != nil {
+		return nil, err
+	}
+
 	// Set the default options
 	config.HyperCacheOptions = []Option[backend.InMemory]{
 		WithEvictionInterval[backend.InMemory](constants.DefaultEvictionInterval),
@@ -282,6 +286,10 @@ func newHyperCacheBase[T backend.IBackendConstrain](b backend.IBackend[T]) *Hype
 		evictCh:            make(chan bool, 1),
 		expirationInterval: constants.DefaultExpirationInterval,
 		evictionInterval:   constants.DefaultEvictionInterval,
+		// Default eviction shard count matches pkg/cache/v2.ShardCount so a
+		// key's data shard and eviction shard map to the same logical position.
+		// Users can override with WithEvictionShardCount; <=1 disables sharding.
+		evictionShardCount: cache.ShardCount,
 	}
 }
 
@@ -302,19 +310,30 @@ func configureEvictionSettings[T backend.IBackendConstrain](hc *HyperCache[T]) {
 }
 
 // initEvictionAlgorithm initializes the eviction algorithm for the cache.
+//
+// When evictionShardCount > 1 (default 32) the algorithm is wrapped in
+// eviction.Sharded — same hash as ConcurrentMap, so a key's data shard and
+// eviction shard align. This eliminates the global eviction-algorithm mutex
+// at the cost of strict global LRU/LFU ordering. shardCount <= 1 keeps the
+// previous single-instance behavior.
 func initEvictionAlgorithm[T backend.IBackendConstrain](hc *HyperCache[T]) error {
 	maxEvictionCount, err := converters.ToInt(hc.maxEvictionCount)
 	if err != nil {
 		return err
 	}
 
-	if hc.evictionAlgorithmName == "" {
-		// Use the default eviction algorithm if none is specified
-		hc.evictionAlgorithm, err = eviction.NewLRUAlgorithm(maxEvictionCount)
-	} else {
-		// Use the specified eviction algorithm
-		hc.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hc.evictionAlgorithmName, maxEvictionCount)
+	algorithmName := hc.evictionAlgorithmName
+	if algorithmName == "" {
+		algorithmName = "lru"
 	}
+
+	if hc.evictionShardCount > 1 {
+		hc.evictionAlgorithm, err = eviction.NewSharded(algorithmName, maxEvictionCount, hc.evictionShardCount)
+
+		return err
+	}
+
+	hc.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(algorithmName, maxEvictionCount)
 
 	return err
 }
@@ -384,6 +403,7 @@ func (hyperCache *HyperCache[T]) startBackgroundJobs(ctx context.Context) {
 func (hyperCache *HyperCache[T]) startExpirationRoutine(ctx context.Context) {
 	go func() {
 		var tick *time.Ticker
+
 		if hyperCache.expirationInterval > 0 {
 			tick = time.NewTicker(hyperCache.expirationInterval)
 		}
@@ -399,6 +419,7 @@ func (hyperCache *HyperCache[T]) startExpirationRoutine(ctx context.Context) {
 // handleExpirationSelect processes one select iteration; returns true if caller should exit.
 func (hyperCache *HyperCache[T]) handleExpirationSelect(ctx context.Context, tick *time.Ticker) bool {
 	var tickC <-chan time.Time
+
 	if tick != nil {
 		tickC = tick.C
 	}
@@ -411,6 +432,7 @@ func (hyperCache *HyperCache[T]) handleExpirationSelect(ctx context.Context, tic
 		// manual/coalesced trigger
 		hyperCache.expirationLoop(ctx)
 		hyperCache.expirationSignalPending.Store(false)
+
 		// drain any queued triggers quickly
 		for draining := true; draining; {
 			select {
@@ -556,12 +578,11 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 				break
 			}
 
-			// Protect eviction algorithm access
-			hyperCache.mutex.Lock()
-
+			// Each eviction algorithm provides its own internal mutex; no
+			// outer lock needed. The Evict() -> Remove() window below is
+			// already non-atomic by design (other workers may insert items
+			// between the two calls); a wider lock would not change that.
 			key, ok := hyperCache.evictionAlgorithm.Evict()
-			hyperCache.mutex.Unlock()
-
 			if !ok {
 				// no more items to evict
 				break
@@ -599,11 +620,7 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 // evictItem is a helper function that removes an item from the cache and returns the key of the evicted item.
 // If no item can be evicted, it returns a false.
 func (hyperCache *HyperCache[T]) evictItem(ctx context.Context) (string, bool) {
-	hyperCache.mutex.Lock()
-
 	key, ok := hyperCache.evictionAlgorithm.Evict()
-	hyperCache.mutex.Unlock()
-
 	if !ok {
 		// no more items to evict
 		return "", false
@@ -656,10 +673,9 @@ func (hyperCache *HyperCache[T]) Set(ctx context.Context, key string, value any,
 		return err
 	}
 
-	// Set the item in the eviction algorithm
-	hyperCache.mutex.Lock()
+	// Set the item in the eviction algorithm. The algorithm protects its own
+	// state internally; no outer lock needed.
 	hyperCache.evictionAlgorithm.Set(key, item.Value)
-	hyperCache.mutex.Unlock()
 
 	// If the cache is at capacity, evict an item when the eviction interval is zero
 	if hyperCache.shouldEvict.Load() && hyperCache.backend.Count(ctx) > hyperCache.backend.Capacity() {
@@ -769,16 +785,16 @@ func (hyperCache *HyperCache[T]) GetOrSet(ctx context.Context, key string, value
 		return nil, err
 	}
 
-	go func() {
-		// Set the item in the eviction algorithm
-		hyperCache.mutex.Lock()
-		hyperCache.evictionAlgorithm.Set(key, item.Value)
-		hyperCache.mutex.Unlock()
-		// If the cache is at capacity, evict an item when the eviction interval is zero
-		if hyperCache.shouldEvict.Load() && hyperCache.backend.Count(ctx) > hyperCache.backend.Capacity() {
-			hyperCache.evictItem(ctx)
-		}
-	}()
+	// Set the item in the eviction algorithm synchronously. The previous bare
+	// goroutine had no panic recovery, no shutdown coordination with Stop(),
+	// and let the caller observe a key whose eviction tracking had not yet
+	// been recorded. The algorithm's own internal mutex provides safety.
+	hyperCache.evictionAlgorithm.Set(key, item.Value)
+
+	// If the cache is at capacity, evict an item when the eviction interval is zero
+	if hyperCache.shouldEvict.Load() && hyperCache.backend.Count(ctx) > hyperCache.backend.Capacity() {
+		hyperCache.evictItem(ctx)
+	}
 
 	return value, nil
 }
@@ -805,6 +821,7 @@ func (hyperCache *HyperCache[T]) GetMultiple(ctx context.Context, keys ...string
 			hyperCache.execTriggerExpiration()
 		} else {
 			hyperCache.touchItem(ctx, key, item) // Update the last access time and access count
+
 			// Add the item to the result map
 			result[key] = item.Value
 		}
@@ -877,9 +894,7 @@ func (hyperCache *HyperCache[T]) Remove(ctx context.Context, keys ...string) err
 		if ok {
 			// remove the item from the cacheBackend and update the memory allocation
 			hyperCache.memoryAllocation.Add(-item.Size)
-			hyperCache.mutex.Lock()
 			hyperCache.evictionAlgorithm.Delete(key)
-			hyperCache.mutex.Unlock()
 		}
 	}
 
@@ -911,9 +926,7 @@ func (hyperCache *HyperCache[T]) Clear(ctx context.Context) error {
 	}
 
 	for _, item := range items {
-		hyperCache.mutex.Lock()
 		hyperCache.evictionAlgorithm.Delete(item.Key)
-		hyperCache.mutex.Unlock()
 	}
 
 	// reset the memory allocation
@@ -934,6 +947,7 @@ func (hyperCache *HyperCache[T]) SetCapacity(ctx context.Context, capacity int) 
 	hyperCache.backend.SetCapacity(capacity)
 	// evaluate again if the cache should evict items proactively
 	hyperCache.shouldEvict.Swap(hyperCache.evictionInterval == 0 && hyperCache.backend.Capacity() > 0)
+
 	// if the cache size is greater than the new capacity, evict items
 	if hyperCache.backend.Count(ctx) > hyperCache.Capacity() {
 		hyperCache.evictionLoop(ctx)
@@ -1017,16 +1031,11 @@ func (hyperCache *HyperCache[T]) Stop(ctx context.Context) error {
 	return nil
 }
 
-// GetStats returns the stats collected by the cache.
+// GetStats returns the stats collected by the cache. Thread-safety is
+// delegated to the configured StatsCollector implementation (the default
+// HistogramStatsCollector is fully thread-safe with no global lock).
 func (hyperCache *HyperCache[T]) GetStats() stats.Stats {
-	// Lock the cache's mutex to ensure thread-safety
-	hyperCache.mutex.RLock()
-	defer hyperCache.mutex.RUnlock()
-
-	// Get the stats from the stats collector
-	statsOut := hyperCache.StatsCollector.GetStats()
-
-	return statsOut
+	return hyperCache.StatsCollector.GetStats()
 }
 
 // DistMetrics returns distributed backend metrics if the underlying backend is DistMemory.

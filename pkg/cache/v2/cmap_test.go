@@ -6,7 +6,14 @@ import (
 	"time"
 )
 
+const (
+	concurrentWrites = 100
+	concurrentReads  = 50
+)
+
 func TestNew(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
 	if len(cm.shards) != ShardCount {
 		t.Errorf("Expected %d shards, got %d", ShardCount, len(cm.shards))
@@ -30,6 +37,8 @@ func TestNew(t *testing.T) {
 }
 
 func TestGetShardIndex(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		key string
 	}{
@@ -41,6 +50,8 @@ func TestGetShardIndex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
+			t.Parallel()
+
 			index := getShardIndex(tt.key)
 			if index >= ShardCount32 {
 				t.Errorf("Shard index %d exceeds shard count %d", index, ShardCount32)
@@ -50,6 +61,8 @@ func TestGetShardIndex(t *testing.T) {
 }
 
 func TestGetShard(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
 
 	shard := cm.GetShard("test")
@@ -65,6 +78,8 @@ func TestGetShard(t *testing.T) {
 }
 
 func TestSetAndGet(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
 	item := &Item{
 		Value:      "test_value",
@@ -92,6 +107,8 @@ func TestSetAndGet(t *testing.T) {
 }
 
 func TestHas(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
 	item := &Item{
 		Value:      "test_value",
@@ -112,6 +129,8 @@ func TestHas(t *testing.T) {
 }
 
 func TestPop(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
 	item := &Item{
 		Value:      "test_value",
@@ -139,6 +158,8 @@ func TestPop(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
 	item := &Item{
 		Value:      "test_value",
@@ -157,6 +178,8 @@ func TestRemove(t *testing.T) {
 }
 
 func TestCount(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
 
 	if cm.Count() != 0 {
@@ -187,7 +210,49 @@ func TestCount(t *testing.T) {
 	}
 }
 
+// TestCount_SetExistingKeyDoesNotIncrement guards the per-shard atomic Count
+// implementation against the obvious mistake: re-Setting an existing key must
+// not increment the shard counter. Without the existence check, Count drifts
+// every time a key is overwritten.
+func TestCount_SetExistingKeyDoesNotIncrement(t *testing.T) {
+	t.Parallel()
+
+	cm := New()
+	item := &Item{Value: "v", Expiration: time.Hour}
+
+	cm.Set("key1", item)
+
+	if got := cm.Count(); got != 1 {
+		t.Fatalf("after first Set: Count = %d, want 1", got)
+	}
+
+	// Overwrite the same key 100x; Count must stay at 1.
+	for range 100 {
+		cm.Set("key1", item)
+	}
+
+	if got := cm.Count(); got != 1 {
+		t.Errorf("after 100 overwrites: Count = %d, want 1", got)
+	}
+
+	// Removing a non-existent key must not decrement.
+	cm.Remove("never_set")
+
+	if got := cm.Count(); got != 1 {
+		t.Errorf("after Remove(missing): Count = %d, want 1", got)
+	}
+
+	// Clear resets all shards to 0.
+	cm.Clear()
+
+	if got := cm.Count(); got != 0 {
+		t.Errorf("after Clear: Count = %d, want 0", got)
+	}
+}
+
 func TestIterBuffered(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
 	items := map[string]*Item{
 		"key1": {Value: "value1", Expiration: time.Hour},
@@ -220,6 +285,8 @@ func TestIterBuffered(t *testing.T) {
 }
 
 func TestClear(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
 	items := map[string]*Item{
 		"key1": {Value: "value1", Expiration: time.Hour},
@@ -244,39 +311,36 @@ func TestClear(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
 	cm := New()
-	wg := sync.WaitGroup{}
+
+	var wg sync.WaitGroup
 
 	// Concurrent writes
-	for i := range 100 {
-		wg.Add(1)
-
-		go func(i int) {
-			defer wg.Done()
-
+	for i := range concurrentWrites {
+		wg.Go(func() {
 			item := &Item{
 				Value:      i,
 				Expiration: time.Hour,
 			}
-			cm.Set(string(rune(i)), item)
-		}(i)
+			cm.Set(string(rune(i)), item) //nolint:gosec // test fixture, i bounded far below int32 max
+		})
 	}
 
 	// Concurrent reads
-	for i := range 50 {
-		wg.Add(1)
-
-		go func(i int) {
-			defer wg.Done()
-
-			cm.Get(string(rune(i)))
-		}(i)
+	for i := range concurrentReads {
+		wg.Go(func() {
+			cm.Get(string(rune(i))) //nolint:gosec // test fixture, i bounded far below int32 max
+		})
 	}
 
 	wg.Wait()
 }
 
 func TestSnapshotPanic(t *testing.T) {
+	t.Parallel()
+
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("Expected panic for uninitialized ConcurrentMap")
@@ -284,6 +348,7 @@ func TestSnapshotPanic(t *testing.T) {
 	}()
 
 	var cm ConcurrentMap
+
 	snapshot(&cm)
 }
 

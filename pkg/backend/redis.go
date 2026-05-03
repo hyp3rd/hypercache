@@ -54,6 +54,7 @@ func NewRedis(redisOptions ...Option[Redis]) (IBackend[Redis], error) {
 	// Check if the serializer is nil
 	if rb.Serializer == nil {
 		var err error
+
 		// Set a the serializer to default to `msgpack`
 		rb.Serializer, err = serializer.New("msgpack")
 		if err != nil {

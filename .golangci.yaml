@@ -14,7 +14,7 @@ run:
   issues-exit-code: 2
   # Include test files or not.
   # Default: true
-  tests: false
+  tests: true
   # List of build tags, all linters use it.
   # Default: []
   # build-tags:
@@ -49,29 +49,65 @@ linters:
   # https://golangci-lint.run/usage/linters/#enabled-by-default
   default: all
   enable:
+    - gomodguard_v2
     - wsl_v5
   disable:
     - exhaustruct
     - depguard
+    - gomodguard
     - ireturn
     - lll
     - tagliatelle
     - wsl
+    # testpackage: project consistently uses internal _test packages
+    # (access to unexported helpers without re-exporting). Documented choice.
+    - testpackage
+
+  exclusions:
+    # Path-based exclusions for rules that produce false-positive noise on test
+    # code without corresponding signal. Production code remains under the full
+    # rule set; only `_test.go` files are exempted from these specific rules.
+    #
+    # Justification per rule:
+    #   - funlen / cyclop / gocognit: tests legitimately have long bodies
+    #     (setup -> many actions -> many assertions); splitting into helpers
+    #     adds noise without surfacing real defects.
+    #   - dupl: table-driven test bodies repeat by design.
+    #   - gocritic: subjective stylistic suggestions, low signal on tests.
+    #   - goconst: short fixture strings ("v1", "key1") naturally repeat in
+    #     tests; constants would obscure intent.
+    #   - noinlineerr: stylistic preference, not a defect.
+    #   - revive function-length / cognitive-complexity / cyclomatic: same
+    #     reasons as funlen / cyclop / gocognit (revive's variants).
+    rules:
+      - path: _test\.go$
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+          - dupl
+          - gocritic
+          - goconst
+          - noinlineerr
+      - path: _test\.go$
+        linters:
+          - revive
+        text: '^(function-length|cognitive-complexity|cyclomatic):'
 
   settings:
     cyclop:
       # The maximal code complexity to report.
       # Default: 10
-      max-complexity: 12
+      max-complexity: 15
     errcheck:
       # Report about not checking of errors in type assertions: `a := b.(MyStruct)`.
       # Such cases aren't reported by default.
       # Default: false
       check-type-assertions: true
-      # report about assignment of errors to blank identifier: `num, _ := strconv.Atoi(numStr)`.
-      # Such cases aren't reported by default.
-      # Default: false
-      check-blank: true
+      # check-blank flagged `_ = f()` which is the explicit "I read this, I'm
+      # ignoring it" idiom. Disabled — silent error drops (`f()` with no `_`)
+      # are still caught by the default errcheck pass.
+      check-blank: false
       # To disable the errcheck built-in exclude list.
       # See `-excludeonly` option in https://github.com/kisielk/errcheck#excluding-functions for details.
       # Default: false
@@ -82,7 +118,7 @@ linters:
         - fmt.Fprintf
         - fmt.Fprintln
     funlen:
-      lines: 100
+      lines: 150
     lll:
       # Max line length, lines longer will be reported.
       # '\t' is counted as 1 character by default, and can be changed with the tab-width option.
@@ -97,6 +133,13 @@ linters:
         - "0666"
         - "0755"
         - "2"
+
+    goconst:
+      # Default: 3 — too aggressive for tests where short fixture strings ("A",
+      # "B", "v") naturally repeat. Bumped so it surfaces real duplication only.
+      min-occurrences: 5
+      # Default: 3 — single-character literals are rarely worth a constant.
+      min-len: 3
 
     ireturn:
       # ireturn does not allow using `allow` and `reject` settings at the same time.
@@ -121,28 +164,30 @@ linters:
     revive:
       enable-all-rules: true
       rules:
+        # add-constant: paranoid — fires on every literal in tests (port numbers,
+        # iteration counts, fixture strings). Keeping it on creates more nolints
+        # than insight. Re-enable per-package if it provides real signal there.
         - name: add-constant
-          severity: warning
-          disabled: false
-          arguments:
-            - max-lit-count: "3"
-              allow-strs: '"","get","path","key"'
-              allow-ints: "-1,0,1,2,10"
-              allow-floats: "0.0,1.0"
+          disabled: true
+
+        # unnecessary-format: pedantic. `t.Fatalf("msg")` -> `t.Fatal("msg")` is
+        # a stylistic preference, not a defect.
+        - name: unnecessary-format
+          disabled: true
 
         - name: cognitive-complexity
           severity: warning
           disabled: false
-          arguments: [15]
+          arguments: [ 15 ]
 
         - name: cyclomatic
-          arguments: [15]
+          arguments: [ 15 ]
 
         # - name: function-length
         #   arguments: [80, 0]
 
         - name: max-public-structs
-          arguments: [10]
+          arguments: [ 10 ]
 
         - name: nested-structs
           disabled: true
@@ -151,7 +196,7 @@ linters:
           disabled: true
 
         - name: line-length-limit
-          arguments: [160]
+          arguments: [ 150 ]
 
         - name: var-naming
           disabled: true
@@ -221,7 +266,9 @@ linters:
       # The minimum length of a variable's name that is considered "long".
       # Variable names that are at least this long will be ignored.
       # Default: 3
-      min-name-length: 2
+      # Set to 1: single-letter loop indices (i, k) and short-scope helpers
+      # (a, b for two-node tests; c for clients; m for metrics) are idiomatic.
+      min-name-length: 1
       # Check method receivers.
       # Default: false
       check-receiver: false
@@ -341,7 +388,7 @@ formatters:
     golines:
       # Target maximum line length.
       # Default: 100
-      max-len: 140
+      max-len: 150
       # Length of a tabulation.
       # Default: 4
       # tab-len: 8

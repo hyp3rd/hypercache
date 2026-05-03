@@ -4,6 +4,8 @@ import "testing"
 
 // Test that when two items have equal frequency, the older (least-recent) is evicted first.
 func TestLFU_EvictsOldestOnTie_InsertOrder(t *testing.T) {
+	t.Parallel()
+
 	lfu, err := NewLFUAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewLFUAlgorithm error: %v", err)
@@ -35,6 +37,8 @@ func TestLFU_EvictsOldestOnTie_InsertOrder(t *testing.T) {
 
 // Test that recency is used to break ties after accesses with equalized frequency.
 func TestLFU_EvictsOldestOnTie_AccessOrder(t *testing.T) {
+	t.Parallel()
+
 	lfu, err := NewLFUAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewLFUAlgorithm error: %v", err)
@@ -65,6 +69,8 @@ func TestLFU_EvictsOldestOnTie_AccessOrder(t *testing.T) {
 }
 
 func TestLFU_ZeroCapacity_NoOp(t *testing.T) {
+	t.Parallel()
+
 	lfu, err := NewLFUAlgorithm(0)
 	if err != nil {
 		t.Fatalf("NewLFUAlgorithm error: %v", err)
@@ -82,6 +88,8 @@ func TestLFU_ZeroCapacity_NoOp(t *testing.T) {
 }
 
 func TestLFU_Delete_RemovesItem(t *testing.T) {
+	t.Parallel()
+
 	lfu, err := NewLFUAlgorithm(2)
 	if err != nil {
 		t.Fatalf("NewLFUAlgorithm error: %v", err)

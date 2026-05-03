@@ -1,0 +1,21 @@
+ok  	github.com/hyp3rd/hypercache	4.069s
+?   	github.com/hyp3rd/hypercache/internal/cluster	[no test files]
+?   	github.com/hyp3rd/hypercache/internal/constants	[no test files]
+?   	github.com/hyp3rd/hypercache/internal/dist	[no test files]
+?   	github.com/hyp3rd/hypercache/internal/introspect	[no test files]
+?   	github.com/hyp3rd/hypercache/internal/libs/serializer	[no test files]
+?   	github.com/hyp3rd/hypercache/internal/sentinel	[no test files]
+?   	github.com/hyp3rd/hypercache/internal/telemetry/attrs	[no test files]
+?   	github.com/hyp3rd/hypercache/internal/transport	[no test files]
+?   	github.com/hyp3rd/hypercache/pkg/backend	[no test files]
+?   	github.com/hyp3rd/hypercache/pkg/backend/redis	[no test files]
+?   	github.com/hyp3rd/hypercache/pkg/backend/rediscluster	[no test files]
+ok  	github.com/hyp3rd/hypercache/pkg/cache	2.752s
+ok  	github.com/hyp3rd/hypercache/pkg/cache/v2	1.418s
+ok  	github.com/hyp3rd/hypercache/pkg/eviction	2.675s
+?   	github.com/hyp3rd/hypercache/pkg/middleware	[no test files]
+ok  	github.com/hyp3rd/hypercache/pkg/stats	6.676s
+ok  	github.com/hyp3rd/hypercache/tests	133.985s
+ok  	github.com/hyp3rd/hypercache/tests/benchmark	3.283s [no tests to run]
+ok  	github.com/hyp3rd/hypercache/tests/benchmarkdist	3.904s [no tests to run]
+ok  	github.com/hyp3rd/hypercache/tests/integration	100.730s

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,13 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyp3rd/hypercache/internal/cluster"
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
+// errUnexpectedStatus is the sentinel returned when the dist node health
+// endpoint reports a non-OK status during the readiness poll.
+var errUnexpectedStatus = errors.New("unexpected dist node health status")
+
 // TestDistRebalanceJoin verifies keys are migrated to a new node after join.
 func TestDistRebalanceJoin(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	// Initial cluster: 2 nodes.
@@ -23,8 +29,8 @@ func TestDistRebalanceJoin(t *testing.T) {
 	addrB := allocatePort(t)
 
 	nodeA := mustDistNode(
-		t,
 		ctx,
+		t,
 		"A",
 		addrA,
 		[]string{addrB},
@@ -34,8 +40,8 @@ func TestDistRebalanceJoin(t *testing.T) {
 	)
 
 	nodeB := mustDistNode(
-		t,
 		ctx,
+		t,
 		"B",
 		addrB,
 		[]string{addrA},
@@ -70,8 +76,8 @@ func TestDistRebalanceJoin(t *testing.T) {
 	addrC := allocatePort(t)
 
 	nodeC := mustDistNode(
-		t,
 		ctx,
+		t,
 		"C",
 		addrC,
 		[]string{addrA, addrB},
@@ -113,6 +119,8 @@ func TestDistRebalanceJoin(t *testing.T) {
 
 // TestDistRebalanceThrottle simulates saturation causing throttle metric increments.
 func TestDistRebalanceThrottle(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	addrA := allocatePort(t)
@@ -127,9 +135,9 @@ func TestDistRebalanceThrottle(t *testing.T) {
 		backend.WithDistRebalanceMaxConcurrent(1),
 	}
 
-	nodeA := mustDistNode(t, ctx, "A", addrA, []string{addrB}, opts...)
+	nodeA := mustDistNode(ctx, t, "A", addrA, []string{addrB}, opts...)
+	nodeB := mustDistNode(ctx, t, "B", addrB, []string{addrA}, opts...)
 
-	nodeB := mustDistNode(t, ctx, "B", addrB, []string{addrA}, opts...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
 	// Populate many keys on A.
@@ -147,7 +155,7 @@ func TestDistRebalanceThrottle(t *testing.T) {
 	// Add third node to force migrations while concurrency=1, which should queue batches.
 	addrC := allocatePort(t)
 
-	nodeC := mustDistNode(t, ctx, "C", addrC, []string{addrA, addrB}, opts...)
+	nodeC := mustDistNode(ctx, t, "C", addrC, []string{addrA, addrB}, opts...)
 	defer func() { _ = nodeC.Stop(ctx) }()
 
 	// propagate membership like in join test
@@ -167,13 +175,15 @@ func TestDistRebalanceThrottle(t *testing.T) {
 // Helpers.
 
 func mustDistNode(
-	t *testing.T,
 	ctx context.Context,
+	t *testing.T,
 	id, addr string,
 	seeds []string,
 	extra ...backend.DistMemoryOption,
 ) *backend.DistMemory {
-	opts := []backend.DistMemoryOption{
+	t.Helper()
+
+	opts := []backend.DistMemoryOption{ //nolint:prealloc // literal helper-builder list, append-once with extra below
 		backend.WithDistNode(id, addr),
 		backend.WithDistSeeds(seeds),
 		backend.WithDistHintReplayInterval(200 * time.Millisecond),
@@ -189,9 +199,14 @@ func mustDistNode(
 		t.Fatalf("new dist memory: %v", err)
 	}
 
-	waitForDistNodeHealth(t, addr)
+	waitForDistNodeHealth(ctx, t, addr)
 
-	return bm.(*backend.DistMemory)
+	bk, ok := bm.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bm)
+	}
+
+	return bk
 }
 
 func cacheKey(i int) string { return "k" + strconv.Itoa(i) }
@@ -217,7 +232,7 @@ func ownedPrimaryCount(dm *backend.DistMemory, keys []string) int {
 
 	c := 0
 
-	self := cluster.NodeID(dm.LocalNodeID())
+	self := dm.LocalNodeID()
 	for _, k := range keys {
 		owners := ring.Lookup(k)
 		if len(owners) > 0 && owners[0] == self {
@@ -228,7 +243,7 @@ func ownedPrimaryCount(dm *backend.DistMemory, keys []string) int {
 	return c
 }
 
-func waitForDistNodeHealth(t *testing.T, addr string) {
+func waitForDistNodeHealth(ctx context.Context, t *testing.T, addr string) {
 	t.Helper()
 
 	client := &http.Client{Timeout: 100 * time.Millisecond}
@@ -238,7 +253,12 @@ func waitForDistNodeHealth(t *testing.T, addr string) {
 	var lastErr error
 
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(healthURL)
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+		if reqErr != nil {
+			t.Fatalf("build health request: %v", reqErr)
+		}
+
+		resp, err := client.Do(req)
 		if err == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
@@ -247,7 +267,7 @@ func waitForDistNodeHealth(t *testing.T, addr string) {
 				return
 			}
 
-			lastErr = fmt.Errorf("unexpected status %d", resp.StatusCode)
+			lastErr = fmt.Errorf("%w: %d", errUnexpectedStatus, resp.StatusCode)
 		} else {
 			lastErr = err
 		}

@@ -1,4 +1,4 @@
-package tests
+package benchmark
 
 import (
 	"context"
@@ -19,13 +19,16 @@ func BenchmarkHyperCache_Set(b *testing.B) {
 
 	for i := range b.N {
 		// Store a value in the cache with a key and expiration duration
-		cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), "value", time.Hour)
+		_ = cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), "value", time.Hour)
 	}
 }
 
 func BenchmarkHyperCache_Set_Proactive_Eviction(b *testing.B) {
 	// Create a new HyperCache with a capacity of 100000
-	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	config, err := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	if err != nil {
+		b.Fatal(err)
+	}
 
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](0),
@@ -41,6 +44,6 @@ func BenchmarkHyperCache_Set_Proactive_Eviction(b *testing.B) {
 
 	for i := 0; b.Loop(); i++ {
 		// Store a value in the cache with a key and expiration duration
-		cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), "value", time.Hour)
+		_ = cache.Set(context.TODO(), fmt.Sprintf("key-%d", i), "value", time.Hour)
 	}
 }

@@ -4,7 +4,8 @@
 //
 // Example usage:
 //
-//	config := hypercache.NewConfig[string]("inmemory")
+//	config, err := hypercache.NewConfig[string]("inmemory")
+//	if err != nil { /* ... */ }
 //	cache := hypercache.NewHyperCache[string](config)
 //	cache.Set("key", "value", time.Hour)
 //	value, found := cache.Get("key")
@@ -14,7 +15,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hyp3rd/ewrap"
+
 	"github.com/hyp3rd/hypercache/internal/constants"
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
@@ -44,9 +48,13 @@ type Config[T backend.IBackendConstrain] struct {
 //
 // Each of the above options can be overridden by passing a different option to the `NewConfig` function.
 // It can be used to configure `HyperCache` and its backend and customize the behavior of the cache.
-func NewConfig[T backend.IBackendConstrain](backendType string) *Config[T] {
+//
+// NewConfig returns sentinel.ErrParamCannotBeEmpty if backendType is empty or
+// whitespace-only. Previous versions panicked in that case; v2 returns the
+// error so callers can handle invalid configuration without unwinding.
+func NewConfig[T backend.IBackendConstrain](backendType string) (*Config[T], error) {
 	if strings.TrimSpace(backendType) == "" {
-		panic("empty backend type")
+		return nil, ewrap.Wrap(sentinel.ErrParamCannotBeEmpty, "backendType")
 	}
 
 	return &Config[T]{
@@ -60,7 +68,7 @@ func NewConfig[T backend.IBackendConstrain](backendType string) *Config[T] {
 			WithEvictionAlgorithm[T]("lfu"),
 			WithEvictionInterval[T](constants.DefaultEvictionInterval),
 		},
-	}
+	}, nil
 }
 
 // Option is a function type that can be used to configure the `HyperCache` struct.
@@ -96,6 +104,20 @@ func WithMaxCacheSize[T backend.IBackendConstrain](maxCacheSize int64) Option[T]
 		}
 
 		cache.maxCacheSize = maxCacheSize
+	}
+}
+
+// WithEvictionShardCount sets the number of independent eviction-algorithm
+// shards. Default 32 (matches pkg/cache/v2.ShardCount). Must be a positive
+// power of two; values <= 1 disable sharding (single global eviction
+// instance — strict global LRU/LFU order, but single-mutex contention).
+//
+// With sharding enabled, total capacity is split as ceil(capacity/n) per
+// shard. Eviction order is per-shard, not strict global. See
+// pkg/eviction.Sharded for full semantics.
+func WithEvictionShardCount[T backend.IBackendConstrain](shardCount int) Option[T] {
+	return func(cache *HyperCache[T]) {
+		cache.evictionShardCount = shardCount
 	}
 }
 

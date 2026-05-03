@@ -10,7 +10,11 @@ import (
 )
 
 // helper to build two-node replicated cluster.
-func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, *cluster.Ring) { //nolint:thelper
+//
+//nolint:revive // confusing-results: two backends + ring is the natural shape; named returns add no clarity here
+func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, *cluster.Ring) {
+	t.Helper()
+
 	ring := cluster.NewRing(cluster.WithReplication(2))
 	membership := cluster.NewMembership(ring)
 	transport := backend.NewInProcessTransport()
@@ -27,8 +31,18 @@ func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, 
 		t.Fatalf("b2: %v", err)
 	}
 
-	b1 := b1i.(*backend.DistMemory) //nolint:forcetypeassert
-	b2 := b2i.(*backend.DistMemory) //nolint:forcetypeassert
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
 
 	transport.Register(b1)
 	transport.Register(b2)
@@ -38,6 +52,8 @@ func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, 
 
 // TestDistMemoryRemoveReplication ensures that Remove replicates deletions across replicas.
 func TestDistMemoryRemoveReplication(t *testing.T) {
+	t.Parallel()
+
 	b1, b2, ring := newTwoNodeCluster(t)
 	key := "remove-key"
 
@@ -99,6 +115,8 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 
 // TestDistMemoryReadRepair ensures a stale replica is healed on read.
 func TestDistMemoryReadRepair(t *testing.T) {
+	t.Parallel()
+
 	b1, b2, ring := newTwoNodeCluster(t)
 	key := "rr-key"
 
@@ -182,6 +200,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 
 	// metrics should show at least one read repair
 	var repaired bool
+
 	if replica == b1.LocalNodeID() {
 		repaired = b1.Metrics().ReadRepair > 0
 	} else {

@@ -8,6 +8,7 @@ import (
 	fiber "github.com/gofiber/fiber/v3"
 	"github.com/hyp3rd/ewrap"
 
+	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/stats"
 )
@@ -122,7 +123,9 @@ func (s *ManagementHTTPServer) Start(ctx context.Context, hc managementCache) er
 	s.ln = ln
 
 	go func() { // serve in background (optional server errors are ignored intentionally)
-		err = s.app.Listener(ln)
+		// Suppress fiber's startup banner so tests at -count=N do not drown
+		// real failures under hundreds of "INFO Server started on..." lines.
+		err = s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true})
 		if err != nil { // optional server; log hook could be added in future
 			_ = err
 		}
@@ -216,19 +219,19 @@ func (s *ManagementHTTPServer) registerDistributed(useAuth func(fiber.Handler) f
 		if dist, ok := hc.(managementCacheDistOpt); ok {
 			m := dist.DistMetrics()
 			if m == nil {
-				return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "dist metrics not available"})
+				return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: "dist metrics not available"})
 			}
 
 			return fiberCtx.JSON(m)
 		}
 
-		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgUnsupportedDistributedBackend})
 	}))
 	s.app.Get("/dist/owners", useAuth(func(fiberCtx fiber.Ctx) error {
 		if dist, ok := hc.(managementCacheDistOpt); ok {
 			key := fiberCtx.Query("key")
 			if key == "" {
-				return fiberCtx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
+				return fiberCtx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 			}
 
 			owners := dist.ClusterOwners(key)
@@ -236,7 +239,7 @@ func (s *ManagementHTTPServer) registerDistributed(useAuth func(fiber.Handler) f
 			return fiberCtx.JSON(fiber.Map{"key": key, "owners": owners})
 		}
 
-		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgUnsupportedDistributedBackend})
 	}))
 }
 
@@ -248,7 +251,7 @@ func (s *ManagementHTTPServer) registerCluster(useAuth func(fiber.Handler) fiber
 			return fiberCtx.JSON(fiber.Map{"replication": replication, "virtualNodes": vnodes, "members": members})
 		}
 
-		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgUnsupportedDistributedBackend})
 	}))
 	s.app.Get("/cluster/ring", useAuth(func(fiberCtx fiber.Ctx) error {
 		if mi, ok := hc.(membershipIntrospect); ok {
@@ -257,14 +260,14 @@ func (s *ManagementHTTPServer) registerCluster(useAuth func(fiber.Handler) fiber
 			return fiberCtx.JSON(fiber.Map{"count": len(spots), "vnodes": spots})
 		}
 
-		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgUnsupportedDistributedBackend})
 	}))
 	s.app.Get("/cluster/heartbeat", useAuth(func(fiberCtx fiber.Ctx) error { // heartbeat metrics
 		if mi, ok := hc.(membershipIntrospect); ok {
 			return fiberCtx.JSON(mi.DistHeartbeatMetrics())
 		}
 
-		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "distributed backend unsupported"})
+		return fiberCtx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgUnsupportedDistributedBackend})
 	}))
 }
 

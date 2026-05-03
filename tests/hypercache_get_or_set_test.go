@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/longbridgeapp/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
 
-func TestHyperCache_GetOrSet(t *testing.T) {
+func TestHyperCache_GetOrSet(t *testing.T) { //nolint:paralleltest // subtests share cache instance and depend on insertion order
 	tests := []struct {
 		name          string
 		key           string
@@ -71,9 +71,9 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 		},
 	}
 	cache, err := hypercache.NewInMemoryWithDefaults(context.TODO(), 10)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
-	for _, test := range tests {
+	for _, test := range tests { //nolint:paralleltest // subtests share cache instance
 		t.Run(test.name, func(t *testing.T) {
 			var (
 				val any
@@ -84,11 +84,11 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 
 			val, err = cache.GetOrSet(context.TODO(), test.key, test.value, test.expiry)
 			if !shouldExpire {
-				assert.Equal(t, test.expectedErr, err)
+				require.Equal(t, test.expectedErr, err)
 			}
 
 			if err == nil && !shouldExpire {
-				assert.Equal(t, test.expectedValue, val)
+				require.Equal(t, test.expectedValue, val)
 			}
 
 			if shouldExpire {
@@ -96,18 +96,18 @@ func TestHyperCache_GetOrSet(t *testing.T) {
 				time.Sleep(2 * time.Millisecond)
 
 				_, err = cache.GetOrSet(context.TODO(), test.key, test.value, test.expiry)
-				assert.Equal(t, test.expectedErr, err)
+				require.Equal(t, test.expectedErr, err)
 			}
 
 			// Check if the value has been set in the cache
 			if err == nil {
 				val, ok := cache.Get(context.TODO(), test.key)
-				assert.True(t, ok)
-				assert.Equal(t, test.expectedValue, val)
+				require.True(t, ok)
+				require.Equal(t, test.expectedValue, val)
 			} else {
 				val, ok := cache.Get(context.TODO(), test.key)
-				assert.False(t, ok)
-				assert.Nil(t, val)
+				require.False(t, ok)
+				require.Nil(t, val)
 			}
 		})
 	}

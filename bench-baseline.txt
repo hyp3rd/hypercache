@@ -1,0 +1,51 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/hyp3rd/hypercache/tests/benchmark
+cpu: Apple M4 Pro
+BenchmarkHyperCache_SetParallel-14               	 6676305	       711.9 ns/op	     218 B/op	       3 allocs/op
+BenchmarkHyperCache_SetParallel-14               	 6438765	       729.0 ns/op	     220 B/op	       3 allocs/op
+BenchmarkHyperCache_SetParallel-14               	 6961741	       807.6 ns/op	     218 B/op	       3 allocs/op
+BenchmarkHyperCache_SetParallel-14               	 6262878	       710.7 ns/op	     223 B/op	       3 allocs/op
+BenchmarkHyperCache_SetParallel-14               	 6871442	       789.8 ns/op	     217 B/op	       3 allocs/op
+BenchmarkHyperCache_GetParallel-14               	54231619	        88.86 ns/op	     135 B/op	       2 allocs/op
+BenchmarkHyperCache_GetParallel-14               	53125920	        89.61 ns/op	     135 B/op	       2 allocs/op
+BenchmarkHyperCache_GetParallel-14               	53083129	        89.39 ns/op	     135 B/op	       2 allocs/op
+BenchmarkHyperCache_GetParallel-14               	54015073	        88.35 ns/op	     135 B/op	       2 allocs/op
+BenchmarkHyperCache_GetParallel-14               	54414236	        91.13 ns/op	     135 B/op	       2 allocs/op
+BenchmarkHyperCache_GetOrSetParallel-14          	 6655920	       748.5 ns/op	     218 B/op	       3 allocs/op
+BenchmarkHyperCache_GetOrSetParallel-14          	 6446132	       738.8 ns/op	     220 B/op	       3 allocs/op
+BenchmarkHyperCache_GetOrSetParallel-14          	 6796017	       777.4 ns/op	     217 B/op	       3 allocs/op
+BenchmarkHyperCache_GetOrSetParallel-14          	 6508280	       712.7 ns/op	     220 B/op	       3 allocs/op
+BenchmarkHyperCache_GetOrSetParallel-14          	 6980356	       783.1 ns/op	     219 B/op	       3 allocs/op
+BenchmarkHyperCache_MixedParallel-14             	33034370	       167.5 ns/op	     157 B/op	       3 allocs/op
+BenchmarkHyperCache_MixedParallel-14             	29370020	       165.6 ns/op	     159 B/op	       3 allocs/op
+BenchmarkHyperCache_MixedParallel-14             	32026545	       180.1 ns/op	     158 B/op	       3 allocs/op
+BenchmarkHyperCache_MixedParallel-14             	28606334	       168.0 ns/op	     160 B/op	       3 allocs/op
+BenchmarkHyperCache_MixedParallel-14             	31824206	       178.5 ns/op	     158 B/op	       3 allocs/op
+BenchmarkHyperCache_Get-14                       	40344086	       110.3 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Get-14                       	43160210	       113.0 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Get-14                       	43770510	       112.1 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Get-14                       	43183962	       114.3 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Get-14                       	43036879	       111.4 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Get_ProactiveEviction-14     	42927090	       112.1 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Get_ProactiveEviction-14     	43338003	       114.9 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Get_ProactiveEviction-14     	40403430	       113.5 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Get_ProactiveEviction-14     	42223924	       116.6 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Get_ProactiveEviction-14     	41546704	       117.6 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_List-14                      	46045465	       105.6 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_List-14                      	45772118	       101.4 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_List-14                      	47736949	       101.0 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_List-14                      	46948050	        99.45 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_List-14                      	46891046	        99.97 ns/op	     128 B/op	       1 allocs/op
+BenchmarkHyperCache_Set-14                       	12900670	       469.6 ns/op	     222 B/op	       3 allocs/op
+BenchmarkHyperCache_Set-14                       	 8785929	       479.5 ns/op	     255 B/op	       3 allocs/op
+BenchmarkHyperCache_Set-14                       	12034856	       488.7 ns/op	     227 B/op	       3 allocs/op
+BenchmarkHyperCache_Set-14                       	10504384	       520.1 ns/op	     238 B/op	       3 allocs/op
+BenchmarkHyperCache_Set-14                       	11103819	       486.2 ns/op	     233 B/op	       3 allocs/op
+BenchmarkHyperCache_Set_Proactive_Eviction-14    	 4011253	      1260 ns/op	     454 B/op	       6 allocs/op
+BenchmarkHyperCache_Set_Proactive_Eviction-14    	 3742882	      1231 ns/op	     454 B/op	       6 allocs/op
+BenchmarkHyperCache_Set_Proactive_Eviction-14    	 4316617	      1150 ns/op	     454 B/op	       6 allocs/op
+BenchmarkHyperCache_Set_Proactive_Eviction-14    	 4342858	      1120 ns/op	     454 B/op	       6 allocs/op
+BenchmarkHyperCache_Set_Proactive_Eviction-14    	 3557096	      1353 ns/op	     454 B/op	       6 allocs/op
+PASS
+ok  	github.com/hyp3rd/hypercache/tests/benchmark	259.760s

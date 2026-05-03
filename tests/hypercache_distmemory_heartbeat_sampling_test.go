@@ -21,11 +21,15 @@ func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest
 	n2 := cluster.NewNode("", "n2")
 	n3 := cluster.NewNode("", "n3")
 
+	// Intervals chosen to tolerate the 3-5x slowdown imposed by -race -count=10
+	// under shuffle. Previous values (interval=15ms, dead=90ms) were tight
+	// enough that under heavy parallel test load the heartbeat goroutine could
+	// starve and never advance the dead transition within deadline.
 	b1i, _ := backend.NewDistMemory(
 		ctx,
 		backend.WithDistMembership(membership, n1),
 		backend.WithDistTransport(transport),
-		backend.WithDistHeartbeat(15*time.Millisecond, 40*time.Millisecond, 90*time.Millisecond),
+		backend.WithDistHeartbeat(80*time.Millisecond, 320*time.Millisecond, 640*time.Millisecond),
 		backend.WithDistHeartbeatSample(0), // probe all peers per tick for deterministic transition
 	)
 
@@ -34,9 +38,24 @@ func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest
 	b2i, _ := backend.NewDistMemory(ctx, backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
 	b3i, _ := backend.NewDistMemory(ctx, backend.WithDistMembership(membership, n3), backend.WithDistTransport(transport))
 
-	b1 := b1i.(*backend.DistMemory)
-	b2 := b2i.(*backend.DistMemory)
-	b3 := b3i.(*backend.DistMemory)
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
 
 	transport.Register(b1)
 	transport.Register(b2)
@@ -69,7 +88,11 @@ func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest
 	snap := b1.DistMembershipSnapshot()
 	verAny := snap["version"]
 
-	ver, _ := verAny.(uint64)
+	ver, ok := verAny.(uint64)
+	if !ok {
+		t.Fatalf("expected version to be uint64, got %T (%v)", verAny, verAny)
+	}
+
 	if ver < 3 { // initial upserts already increment version; tolerate timing variance
 		t.Fatalf("expected membership version >=4, got %v", verAny)
 	}

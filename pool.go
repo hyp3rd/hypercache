@@ -8,7 +8,18 @@ import (
 type JobFunc func() error
 
 // WorkerPool is a pool of workers that can execute jobs concurrently.
+//
+// Enqueue is safe to call concurrently with Shutdown. After Shutdown returns,
+// further Enqueue calls silently drop the job — this prevents races during
+// graceful cache shutdown where background loops (expiration, eviction) may
+// still attempt to enqueue work after Stop() has begun.
 type WorkerPool struct {
+	// shutdownMu protects the closed flag and serializes Shutdown vs Enqueue
+	// so Shutdown cannot close pool.jobs while an Enqueue is mid-send.
+	// Enqueue takes RLock (concurrent senders allowed); Shutdown takes Lock.
+	shutdownMu sync.RWMutex
+	closed     bool
+
 	workers   int
 	jobs      chan JobFunc
 	wg        sync.WaitGroup
@@ -30,17 +41,37 @@ func NewWorkerPool(workers int) *WorkerPool {
 	return pool
 }
 
-// Enqueue adds a job to the worker pool.
+// Enqueue adds a job to the worker pool. If the pool has been shut down,
+// the job is silently dropped (see WorkerPool docstring).
 func (pool *WorkerPool) Enqueue(job JobFunc) {
+	pool.shutdownMu.RLock()
+	defer pool.shutdownMu.RUnlock()
+
+	if pool.closed {
+		return
+	}
+
 	pool.wg.Add(1)
 
 	pool.jobs <- job
 }
 
-// Shutdown shuts down the worker pool. It waits for all jobs to finish.
+// Shutdown shuts down the worker pool. It waits for all enqueued jobs to
+// finish before returning. Idempotent — repeat calls are no-ops.
 func (pool *WorkerPool) Shutdown() {
-	// Stop accepting new jobs and let workers drain the queue
+	pool.shutdownMu.Lock()
+
+	if pool.closed {
+		pool.shutdownMu.Unlock()
+
+		return
+	}
+
+	pool.closed = true
+	// Close jobs while holding the write lock so no Enqueue can race the close.
 	close(pool.jobs)
+	pool.shutdownMu.Unlock()
+
 	// Wait for all enqueued jobs to complete
 	pool.wg.Wait()
 	// Now signal any lingering workers to exit select loop

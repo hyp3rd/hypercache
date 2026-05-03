@@ -5,30 +5,42 @@ import (
 	"testing"
 	"time"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestMerkleDeleteTombstone ensures a deleted key does not resurrect via sync.
 func TestMerkleDeleteTombstone(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
 	a, _ := backend.NewDistMemory(
 		ctx,
-		backend.WithDistNode("A", "127.0.0.1:9501"),
+		backend.WithDistNode("A", AllocatePort(t)),
 		backend.WithDistReplication(1),
 		backend.WithDistMerkleChunkSize(2),
 	)
 	b, _ := backend.NewDistMemory(
 		ctx,
-		backend.WithDistNode("B", "127.0.0.1:9502"),
+		backend.WithDistNode("B", AllocatePort(t)),
 		backend.WithDistReplication(1),
 		backend.WithDistMerkleChunkSize(2),
 	)
 
-	da := any(a).(*backend.DistMemory)
-	db := any(b).(*backend.DistMemory)
+	da, ok := any(a).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast a to *backend.DistMemory")
+	}
+
+	db, ok := any(b).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, da)
+	StopOnCleanup(t, db)
 
 	da.SetTransport(transport)
 	db.SetTransport(transport)

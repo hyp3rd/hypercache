@@ -4,29 +4,41 @@ import (
 	"context"
 	"testing"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
 // TestMerkleEmptyTrees ensures diff between two empty trees is empty and SyncWith is no-op.
 func TestMerkleEmptyTrees(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
 	a, _ := backend.NewDistMemory(
 		ctx,
-		backend.WithDistNode("A", "127.0.0.1:9201"),
+		backend.WithDistNode("A", AllocatePort(t)),
 		backend.WithDistReplication(1),
 		backend.WithDistMerkleChunkSize(2),
 	)
 	b, _ := backend.NewDistMemory(
 		ctx,
-		backend.WithDistNode("B", "127.0.0.1:9202"),
+		backend.WithDistNode("B", AllocatePort(t)),
 		backend.WithDistReplication(1),
 		backend.WithDistMerkleChunkSize(2),
 	)
 
-	da := any(a).(*backend.DistMemory)
-	db := any(b).(*backend.DistMemory)
+	da, ok := any(a).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast a to *backend.DistMemory")
+	}
+
+	db, ok := any(b).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, da)
+	StopOnCleanup(t, db)
 
 	da.SetTransport(transport)
 	db.SetTransport(transport)

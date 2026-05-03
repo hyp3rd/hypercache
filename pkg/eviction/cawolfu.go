@@ -4,17 +4,21 @@ import (
 	"sync"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
-	"github.com/hyp3rd/hypercache/pkg/cache"
 )
 
 // CAWOLFU is an eviction algorithm that uses the Cache-Aware Write-Optimized LFU (CAWOLFU) policy to select items for eviction.
+//
+// Concurrency: every method acquires c.mutex for the duration of the
+// operation, so the items map needs no internal concurrency machinery —
+// a plain map is sufficient. Previously this used pkg/cache.ConcurrentMap
+// (v1) whose shard locks were redundant under cawolfu's own mutex.
 type CAWOLFU struct {
-	mutex    sync.Mutex                                // protects all CAWOLFU operations
-	items    cache.ConcurrentMap[string, *CAWOLFUNode] // concurrent map to store the items in the cache
-	list     *CAWOLFULinkedList                        // linked list to store the items in the cache, with the most frequently used items at the front
-	length   int                                       // number of items in the cache
-	cap      int                                       // capacity of the cache
-	nodePool sync.Pool                                 // pool of CAWOLFUNode values for memory reuse
+	mutex    sync.Mutex              // protects all CAWOLFU operations
+	items    map[string]*CAWOLFUNode // map to store the items in the cache
+	list     *CAWOLFULinkedList      // linked list to store the items in the cache, with the most frequently used items at the front
+	length   int                     // number of items in the cache
+	cap      int                     // capacity of the cache
+	nodePool sync.Pool               // pool of CAWOLFUNode values for memory reuse
 }
 
 // CAWOLFUNode is a struct that represents a node in the linked list. It has a key, value, and access count field.
@@ -39,7 +43,7 @@ func NewCAWOLFU(capacity int) (*CAWOLFU, error) {
 	}
 
 	return &CAWOLFU{
-		items: cache.New[*CAWOLFUNode](),
+		items: make(map[string]*CAWOLFUNode),
 		list:  &CAWOLFULinkedList{},
 		cap:   capacity,
 		nodePool: sync.Pool{
@@ -62,23 +66,16 @@ func (c *CAWOLFU) Evict() (string, bool) {
 	node := c.list.tail
 	c.list.remove(node)
 
-	err := c.items.Remove(node.key)
-	if err == nil {
-		c.length--
+	delete(c.items, node.key)
 
-		// Preserve key before resetting the node for pool reuse
-		evictedKey := node.key
-		resetCAWOLFUNode(node)
-		c.nodePool.Put(node)
+	c.length--
 
-		return evictedKey, true
-	}
-
-	// If map/list out of sync, forcibly clean up
+	// Preserve key before resetting the node for pool reuse
+	evictedKey := node.key
 	resetCAWOLFUNode(node)
 	c.nodePool.Put(node)
 
-	return "", false
+	return evictedKey, true
 }
 
 // Set adds a new item to the cache with the given key.
@@ -92,7 +89,7 @@ func (c *CAWOLFU) Set(key string, value any) {
 	}
 
 	// If key exists, update value and count, move to front
-	if node, ok := c.items.Get(key); ok {
+	if node, ok := c.items[key]; ok {
 		node.value = value
 		node.count++
 		c.moveToFront(node)
@@ -106,19 +103,18 @@ func (c *CAWOLFU) Set(key string, value any) {
 			return
 		}
 
-		node := c.list.tail
-		c.list.remove(node)
+		evicted := c.list.tail
+		c.list.remove(evicted)
 
-		err := c.items.Remove(node.key)
-		if err == nil {
-			c.length--
-		}
+		delete(c.items, evicted.key)
 
-		// always recycle node
-		resetCAWOLFUNode(node)
-		c.nodePool.Put(node)
+		c.length--
 
-		if node.key == key { // same key evicted, abort insert
+		evictedKey := evicted.key
+		resetCAWOLFUNode(evicted)
+		c.nodePool.Put(evicted)
+
+		if evictedKey == key { // same key evicted, abort insert
 			return
 		}
 	}
@@ -131,7 +127,7 @@ func (c *CAWOLFU) Set(key string, value any) {
 	node.key = key
 	node.value = value
 	node.count = 1
-	c.items.Set(key, node)
+	c.items[key] = node
 	c.addToFront(node)
 
 	c.length++
@@ -142,7 +138,7 @@ func (c *CAWOLFU) Get(key string) (any, bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	node, ok := c.items.Get(key)
+	node, ok := c.items[key]
 	if !ok {
 		return nil, false
 	}
@@ -182,17 +178,13 @@ func (c *CAWOLFU) Delete(key string) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	node, ok := c.items.Get(key)
+	node, ok := c.items[key]
 	if !ok {
 		return
 	}
 
 	c.list.remove(node)
-
-	err := c.items.Remove(key)
-	if err != nil {
-		return
-	}
+	delete(c.items, key)
 
 	c.length--
 

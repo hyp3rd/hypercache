@@ -20,7 +20,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultTimeout)
 	defer cancel()
 	// Create a new HyperCache with a capacity of 100
-	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	config, err := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+
+		return
+	}
+
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](constants.DefaultEvictionInterval),
 		hypercache.WithEvictionAlgorithm[backend.InMemory](constants.DefaultEvictionAlgorithm),

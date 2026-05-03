@@ -1,4 +1,4 @@
-package tests
+package benchmark
 
 import (
 	"context"
@@ -14,7 +14,7 @@ func BenchmarkHyperCache_List(b *testing.B) {
 
 	for b.Loop() {
 		// Store a value in the cache with a key and expiration duration
-		cache.Set(context.TODO(), "key", "value", time.Hour)
+		_ = cache.Set(context.TODO(), "key", "value", time.Hour)
 	}
 
 	list, _ := cache.List(context.TODO())

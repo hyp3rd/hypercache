@@ -9,13 +9,17 @@ import (
 	"testing"
 	"time"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // allocatePort listens on :0 then closes to get a free port.
 func allocatePort(tb testing.TB) string {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	tb.Helper()
+
+	var lc net.ListenConfig
+
+	l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		tb.Fatalf("listen: %v", err)
 	}
@@ -29,6 +33,8 @@ func allocatePort(tb testing.TB) string {
 
 // TestDistPhase1BasicQuorum is a scaffolding test verifying three-node quorum Set/Get over HTTP transport.
 func TestDistPhase1BasicQuorum(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	addrA := allocatePort(t)
@@ -51,7 +57,12 @@ func TestDistPhase1BasicQuorum(t *testing.T) {
 			t.Fatalf("new dist memory: %v", err)
 		}
 
-		return bm.(*backend.DistMemory)
+		bk, ok := bm.(*backend.DistMemory)
+		if !ok {
+			t.Fatalf("expected *backend.DistMemory, got %T", bm)
+		}
+
+		return bk
 	}
 
 	nodeA := makeNode("A", addrA, []string{addrB, addrC})
@@ -113,7 +124,8 @@ func valueOK(v any) bool { //nolint:ireturn
 		}
 
 		if s := string(x); s == "djE=" { // base64 of v1
-			if b, err := base64.StdEncoding.DecodeString(s); err == nil && string(b) == "v1" {
+			b, err := base64.StdEncoding.DecodeString(s)
+			if err == nil && string(b) == "v1" {
 				return true
 			}
 		}
@@ -126,7 +138,8 @@ func valueOK(v any) bool { //nolint:ireturn
 		}
 
 		if x == "djE=" { // base64 form
-			if b, err := base64.StdEncoding.DecodeString(x); err == nil && string(b) == "v1" {
+			b, err := base64.StdEncoding.DecodeString(x)
+			if err == nil && string(b) == "v1" {
 				return true
 			}
 		}
@@ -149,7 +162,8 @@ func valueOK(v any) bool { //nolint:ireturn
 			}
 
 			if s == "djE=" {
-				if b, err2 := base64.StdEncoding.DecodeString(s); err2 == nil && string(b) == "v1" {
+				b, err2 := base64.StdEncoding.DecodeString(s)
+				if err2 == nil && string(b) == "v1" {
 					return true
 				}
 			}
@@ -175,6 +189,8 @@ func valueOK(v any) bool { //nolint:ireturn
 }
 
 func assertValue(t *testing.T, v any) { //nolint:ireturn
+	t.Helper()
+
 	if !valueOK(v) {
 		t.Fatalf("unexpected value representation: %T %v", v, v)
 	}

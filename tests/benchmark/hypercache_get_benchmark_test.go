@@ -1,4 +1,4 @@
-package tests
+package benchmark
 
 import (
 	"context"
@@ -15,7 +15,7 @@ func BenchmarkHyperCache_Get(b *testing.B) {
 	cache, _ := hypercache.NewInMemoryWithDefaults(context.TODO(), 1000)
 
 	// Store a value in the cache with a key and expiration duration
-	cache.Set(context.TODO(), "key", "value", time.Hour)
+	_ = cache.Set(context.TODO(), "key", "value", time.Hour)
 
 	for b.Loop() {
 		// Retrieve the value from the cache using the key
@@ -25,7 +25,10 @@ func BenchmarkHyperCache_Get(b *testing.B) {
 
 func BenchmarkHyperCache_Get_ProactiveEviction(b *testing.B) {
 	// Create a new HyperCache with a capacity of 1000
-	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	config, err := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	if err != nil {
+		b.Fatal(err)
+	}
 
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](0),
@@ -40,7 +43,7 @@ func BenchmarkHyperCache_Get_ProactiveEviction(b *testing.B) {
 	cache, _ := hypercache.New(context.TODO(), hypercache.GetDefaultManager(), config)
 
 	// Store a value in the cache with a key and expiration duration
-	cache.Set(context.TODO(), "key", "value", time.Hour)
+	_ = cache.Set(context.TODO(), "key", "value", time.Hour)
 
 	for b.Loop() {
 		// Retrieve the value from the cache using the key

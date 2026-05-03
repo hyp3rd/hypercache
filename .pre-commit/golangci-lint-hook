@@ -23,7 +23,7 @@ if [[ -f "${ROOT_DIR}/.project-settings.env" ]]; then
 	# shellcheck disable=SC1090
 	source "${ROOT_DIR}/.project-settings.env"
 fi
-GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v2.11.4}"
+GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v2.12.1}"
 
 # #######################################
 # Install dependencies to run the pre-commit hook

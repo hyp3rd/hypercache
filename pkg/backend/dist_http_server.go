@@ -10,6 +10,7 @@ import (
 	fiber "github.com/gofiber/fiber/v3"
 	"github.com/hyp3rd/ewrap"
 
+	"github.com/hyp3rd/hypercache/internal/constants"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -52,7 +53,7 @@ func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) { //no
 
 		unmarshalErr := json.Unmarshal(body, &req)
 		if unmarshalErr != nil { // separated to satisfy noinlineerr
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": unmarshalErr.Error()})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: unmarshalErr.Error()})
 		}
 
 		it := &cache.Item{ // LastUpdated set to now for replicated writes
@@ -77,7 +78,7 @@ func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) { //no
 
 		unmarshalErr := json.Unmarshal(body, &req)
 		if unmarshalErr != nil { // separated to satisfy noinlineerr
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": unmarshalErr.Error()})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: unmarshalErr.Error()})
 		}
 
 		it := &cache.Item{ // LastUpdated set to now for replicated writes
@@ -100,12 +101,12 @@ func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) { //noli
 	s.app.Get("/internal/cache/get", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 		}
 
 		owners := dm.lookupOwners(key)
 		if len(owners) == 0 {
-			return fctx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not owner"})
+			return fctx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: "not owner"})
 		}
 
 		if it, ok := dm.shardFor(key).items.Get(key); ok {
@@ -119,12 +120,12 @@ func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) { //noli
 	s.app.Get("/internal/get", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 		}
 
 		owners := dm.lookupOwners(key)
 		if len(owners) == 0 {
-			return fctx.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not owner"})
+			return fctx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: "not owner"})
 		}
 
 		if it, ok := dm.shardFor(key).items.Get(key); ok {
@@ -140,12 +141,12 @@ func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { /
 	s.app.Delete("/internal/cache/remove", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 		}
 
 		replicate, parseErr := strconv.ParseBool(fctx.Query("replicate", "false"))
 		if parseErr != nil {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid replicate"})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "invalid replicate"})
 		}
 
 		dm.applyRemove(ctx, key, replicate)
@@ -157,12 +158,12 @@ func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { /
 	s.app.Delete("/internal/del", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
 		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing key"})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
 		}
 
 		replicate, parseErr := strconv.ParseBool(fctx.Query("replicate", "false"))
 		if parseErr != nil {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid replicate"})
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "invalid replicate"})
 		}
 
 		dm.applyRemove(ctx, key, replicate)
@@ -189,6 +190,7 @@ func (s *distHTTPServer) registerMerkle(_ context.Context, dm *DistMemory) { //n
 	// naive keys listing for anti-entropy (testing only). Not efficient for large datasets.
 	s.app.Get("/internal/keys", func(fctx fiber.Ctx) error {
 		var keys []string
+
 		for _, shard := range dm.shards {
 			if shard == nil {
 				continue
@@ -215,7 +217,10 @@ func (s *distHTTPServer) listen(ctx context.Context) error { //nolint:ireturn
 	s.ln = ln
 
 	go func() { // capture server errors (ignored intentionally for now)
-		serveErr := s.app.Listener(ln)
+		// DisableStartupMessage avoids fiber's per-instance banner spam,
+		// which would otherwise flood test output at -count=N (see hundreds of
+		// "INFO Server started on..." lines drowning real failures).
+		serveErr := s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true})
 		if serveErr != nil { // separated for noinlineerr linter
 			_ = serveErr
 		}

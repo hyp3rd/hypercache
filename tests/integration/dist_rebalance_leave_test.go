@@ -5,12 +5,14 @@ import (
 	"testing"
 	"time"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestDistRebalanceLeave verifies keys are redistributed after a node leaves.
 func TestDistRebalanceLeave(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	// Start 3 nodes.
@@ -24,10 +26,10 @@ func TestDistRebalanceLeave(t *testing.T) {
 		backend.WithDistRebalanceInterval(100 * time.Millisecond),
 	}
 
-	nodeA := mustDistNode(t, ctx, "A", addrA, []string{addrB, addrC}, opts...)
-	nodeB := mustDistNode(t, ctx, "B", addrB, []string{addrA, addrC}, opts...)
+	nodeA := mustDistNode(ctx, t, "A", addrA, []string{addrB, addrC}, opts...)
+	nodeB := mustDistNode(ctx, t, "B", addrB, []string{addrA, addrC}, opts...)
 
-	nodeC := mustDistNode(t, ctx, "C", addrC, []string{addrA, addrB}, opts...)
+	nodeC := mustDistNode(ctx, t, "C", addrC, []string{addrA, addrB}, opts...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx); _ = nodeC.Stop(ctx) }()
 
 	// Insert keys through A.
@@ -52,15 +54,10 @@ func TestDistRebalanceLeave(t *testing.T) {
 	// Allow multiple rebalance ticks.
 	time.Sleep(1200 * time.Millisecond)
 
-	// After removal, C should not be primary for any sampled key and ownership redistributed to A/B.
-	sample := sampleKeys(totalKeys)
-
-	ownedC := ownedPrimaryCount(nodeC, sample)
-	if ownedC != 0 {
-		// Ring on C still includes itself; test focuses on redistribution observed from surviving nodes.
-		// So we only assert A and B now have some keys formerly held by C via migration metrics.
-		// Continue without failing here; main assertion below.
-	}
+	// We deliberately do not assert on ownedPrimaryCount(nodeC, ...) here:
+	// node C still has itself in its own ring view, so it may still report
+	// itself as primary for sampled keys. The redistribution we care about
+	// is observed via migration metrics on surviving nodes, asserted below.
 
 	// Migration metrics on surviving nodes should have increased (some keys moved off departed node C).
 	migrated := nodeA.Metrics().RebalancedKeys + nodeB.Metrics().RebalancedKeys

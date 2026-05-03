@@ -54,7 +54,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultTimeout*2)
 	defer cancel()
 
-	config := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	config, err := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+
+		return
+	}
 
 	config.HyperCacheOptions = []hypercache.Option[backend.InMemory]{
 		hypercache.WithEvictionInterval[backend.InMemory](0),

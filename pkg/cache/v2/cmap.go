@@ -23,6 +23,7 @@ package v2
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,10 +41,16 @@ type ConcurrentMap struct {
 }
 
 // ConcurrentMapShard is a "thread" safe string to `*cache.Item` map shard.
+//
+// count tracks len(items) under the same lock as items, but as an atomic so
+// Count() (sum of 32 shard counts) can read it without acquiring any locks.
+// This eliminates the lock-storm in the eviction inner loop's per-iteration
+// Count() check.
 type ConcurrentMapShard struct {
 	sync.RWMutex
 
 	items map[string]*Item
+	count atomic.Int64
 }
 
 // New creates a new concurrent map.
@@ -73,28 +80,20 @@ func (cm *ConcurrentMap) GetShard(key string) *ConcurrentMapShard {
 }
 
 // getShardIndex calculates the shard index for the given key.
+// Uses the shared Hash function so other packages (eviction.Sharded)
+// route the same key to the same logical shard.
 func getShardIndex(key string) uint32 {
-	// Inline FNV-1a 32-bit hashing to avoid allocations.
-	const (
-		fnvOffset32 = 2166136261
-		fnvPrime32  = 16777619
-	)
-
-	var sum uint32 = fnvOffset32
-	for i := range key { // Go 1.22+ integer range over string indices
-		sum ^= uint32(key[i])
-
-		sum *= fnvPrime32
-	}
-
-	// Calculate the shard index using a bitwise AND operation.
-	return sum & (ShardCount32 - 1)
+	return Hash(key) & (ShardCount32 - 1)
 }
 
 // Set sets the given value under the specified key.
 func (cm *ConcurrentMap) Set(key string, value *Item) {
 	shard := cm.GetShard(key)
 	shard.Lock()
+
+	if _, existed := shard.items[key]; !existed {
+		shard.count.Add(1)
+	}
 
 	shard.items[key] = value
 	shard.Unlock()
@@ -105,6 +104,7 @@ func (cm *ConcurrentMap) Get(key string) (*Item, bool) {
 	// Get shard
 	shard := cm.GetShard(key)
 	shard.RLock()
+
 	// Get item from shard.
 	item, ok := shard.items[key]
 	shard.RUnlock()
@@ -154,6 +154,7 @@ func (cm *ConcurrentMap) Has(key string) bool {
 	// Get shard
 	shard := cm.GetShard(key)
 	shard.RLock()
+
 	// Get item from shard.
 	_, ok := shard.items[key]
 	shard.RUnlock()
@@ -174,6 +175,7 @@ func (cm *ConcurrentMap) Pop(key string) (*Item, bool) {
 	}
 
 	delete(shard.items, key)
+	shard.count.Add(-1)
 	shard.Unlock()
 
 	return item, ok
@@ -213,11 +215,13 @@ func snapshot(cm *ConcurrentMap) []chan Tuple {
 	chans := make([]chan Tuple, ShardCount)
 	wg := sync.WaitGroup{}
 	wg.Add(ShardCount)
+
 	// Foreach shard.
 	for index, shard := range cm.shards {
 		go func(index int, shard *ConcurrentMapShard) {
 			// Foreach key, value pair.
 			shard.RLock()
+
 			// Determine capacity and copy to a local slice to shorten lock hold time.
 			n := len(shard.items)
 
@@ -269,7 +273,12 @@ func (cm *ConcurrentMap) Remove(key string) {
 	// Get map shard.
 	shard := cm.GetShard(key)
 	shard.Lock()
-	delete(shard.items, key)
+
+	if _, existed := shard.items[key]; existed {
+		delete(shard.items, key)
+		shard.count.Add(-1)
+	}
+
 	shard.Unlock()
 }
 
@@ -280,20 +289,24 @@ func (cm *ConcurrentMap) Clear() {
 		shard.Lock()
 
 		shard.items = make(map[string]*Item)
+		shard.count.Store(0)
 		shard.Unlock()
 	}
 }
 
 // Count returns the number of items in the map.
+//
+// Lock-free: each shard maintains its cardinality as an atomic.Int64
+// (mutated under the shard lock alongside items). Count() is the sum of
+// the 32 atomics. The previous implementation walked all 32 shard RLocks
+// per call, which serialized with writers and was the dominant cost in
+// the eviction inner loop's `for backend.Count(ctx) > backend.Capacity()`.
 func (cm *ConcurrentMap) Count() int {
-	count := 0
+	var total int64
 
 	for _, shard := range cm.shards {
-		shard.RLock()
-
-		count += len(shard.items)
-		shard.RUnlock()
+		total += shard.count.Load()
 	}
 
-	return count
+	return int(total)
 }

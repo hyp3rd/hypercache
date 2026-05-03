@@ -34,8 +34,11 @@ jobs:
             ${{ runner.os }}-go-${{ steps.settings.outputs.go_version }}-
       - name: Modules
         run: go mod download
-      - name: Test (race + coverage)
-        run: RUN_INTEGRATION_TEST=yes go test -race -coverprofile=coverage.out ./...
+      - name: Test (race + shuffle + repeated)
+        run: >
+          RUN_INTEGRATION_TEST=yes
+          go test -race -count=10 -shuffle=on -timeout=15m
+          -coverprofile=coverage.out ./...
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v6
         with:

@@ -16,7 +16,10 @@ import (
 
 // TestManagementHTTPDistMemory validates management endpoints for the experimental DistMemory backend.
 func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
-	cfg := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
+	cfg, err := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
 
 	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
 		hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:0"), // ephemeral port
@@ -57,7 +60,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	metricsBody := getJSON(t, baseURL+"/dist/metrics")
 	if _, ok := metricsBody["ForwardGet"]; !ok { // one exported field
 		// could be 404 if backend unsupported (should not be here)
-		if e, hasErr := metricsBody["error"]; hasErr {
+		if e, hasErr := metricsBody[constants.ErrorLabel]; hasErr {
 			t.Fatalf("/dist/metrics returned error: %v", e)
 		}
 
@@ -68,7 +71,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	// /dist/owners
 	ownersBody := getJSON(t, baseURL+"/dist/owners?key=alpha")
 	if _, ok := ownersBody["owners"]; !ok {
-		if e, hasErr := ownersBody["error"]; hasErr {
+		if e, hasErr := ownersBody[constants.ErrorLabel]; hasErr {
 			t.Fatalf("/dist/owners returned error: %v", e)
 		}
 
@@ -78,7 +81,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	// /cluster/members
 	membersBody := getJSON(t, baseURL+"/cluster/members")
 	if _, ok := membersBody["members"]; !ok {
-		if e, hasErr := membersBody["error"]; hasErr {
+		if e, hasErr := membersBody[constants.ErrorLabel]; hasErr {
 			t.Fatalf("/cluster/members returned error: %v", e)
 		}
 
@@ -88,7 +91,7 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 	// /cluster/ring
 	ringBody := getJSON(t, baseURL+"/cluster/ring")
 	if _, ok := ringBody["vnodes"]; !ok {
-		if e, hasErr := ringBody["error"]; hasErr {
+		if e, hasErr := ringBody[constants.ErrorLabel]; hasErr {
 			t.Fatalf("/cluster/ring returned error: %v", e)
 		}
 
@@ -97,10 +100,13 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
 }
 
 // waitForMgmt waits until management HTTP server is bound and responsive.
-func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) string { //nolint:thelper
+func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) string {
+	t.Helper()
+
 	deadline := time.Now().Add(2 * time.Second)
 
 	var addr string
+
 	for time.Now().Before(deadline) {
 		addr = hc.ManagementHTTPAddress()
 		if addr != "" {
@@ -126,12 +132,15 @@ func waitForMgmt(t *testing.T, hc *hypercache.HyperCache[backend.DistMemory]) st
 	return "http://" + addr
 }
 
-func getJSON(t *testing.T, url string) map[string]any { //nolint:thelper
+func getJSON(t *testing.T, url string) map[string]any {
+	t.Helper()
+
 	resp, err := http.Get(url) //nolint:noctx,gosec
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+
+	defer func() { _ = resp.Body.Close() }()
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {

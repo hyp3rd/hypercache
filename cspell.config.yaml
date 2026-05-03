@@ -148,8 +148,10 @@ words:
   - SLRU
   - staticcheck
   - stdlib
+  - stretchr
   - strfnv
   - strs
+  - subtests
   - sval
   - thelper
   - toplevel
@@ -157,6 +159,7 @@ words:
   - traefik
   - ugorji
   - unmarshals
+  - unsharded
   - upserted
   - upserts
   - varnamelen

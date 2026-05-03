@@ -18,7 +18,7 @@ func (dm *DistMemory) DisableHTTPForTest(ctx context.Context) { //nolint:ireturn
 		dm.httpServer = nil
 	}
 
-	dm.transport = nil
+	dm.storeTransport(nil)
 }
 
 // EnableHTTPForTest restarts HTTP server & transport if nodeAddr is set (testing helper).
@@ -52,7 +52,7 @@ func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) { //nolint:ireturn
 		return "", false
 	}
 
-	dm.transport = NewDistHTTPTransport(2*time.Second, resolver)
+	dm.storeTransport(NewDistHTTPTransport(2*time.Second, resolver))
 }
 
 // HintedQueueSize returns number of queued hints for a node (testing helper).

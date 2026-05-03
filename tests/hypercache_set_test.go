@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/longbridgeapp/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
 
-func TestHyperCache_Set(t *testing.T) {
+func TestHyperCache_Set(t *testing.T) { //nolint:paralleltest // subtests share cache instance and depend on insertion order
 	tests := []struct {
 		name          string
 		key           string
@@ -70,19 +70,19 @@ func TestHyperCache_Set(t *testing.T) {
 		},
 	}
 	cache, err := hypercache.NewInMemoryWithDefaults(context.TODO(), 10)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
-	defer cache.Stop(context.TODO())
+	t.Cleanup(func() { _ = cache.Stop(context.TODO()) })
 
-	for _, test := range tests {
+	for _, test := range tests { //nolint:paralleltest // subtests share cache instance
 		t.Run(test.name, func(t *testing.T) {
 			err = cache.Set(context.TODO(), test.key, test.value, test.expiry)
-			assert.Equal(t, test.expectedErr, err)
+			require.Equal(t, test.expectedErr, err)
 
 			if err == nil {
 				val, ok := cache.Get(context.TODO(), test.key)
-				assert.True(t, ok)
-				assert.Equal(t, test.expectedValue, val)
+				require.True(t, ok)
+				require.Equal(t, test.expectedValue, val)
 			}
 		})
 	}

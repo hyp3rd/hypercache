@@ -3,6 +3,8 @@ package eviction
 import "testing"
 
 func TestCAWOLFU_EvictsLeastFrequentTail(t *testing.T) {
+	t.Parallel()
+
 	c, err := NewCAWOLFU(2)
 	if err != nil {
 		t.Fatalf("NewCAWOLFU error: %v", err)
@@ -10,6 +12,7 @@ func TestCAWOLFU_EvictsLeastFrequentTail(t *testing.T) {
 
 	c.Set("a", 1)
 	c.Set("b", 2)
+
 	// bump 'a' so 'b' is less frequent
 	if _, ok := c.Get("a"); !ok {
 		t.Fatalf("expected to get 'a'")
@@ -26,12 +29,16 @@ func TestCAWOLFU_EvictsLeastFrequentTail(t *testing.T) {
 		t.Fatalf("expected 'a' to remain in cache")
 	}
 
-	if v, ok := c.Get("c"); !ok || v.(int) != 3 {
-		t.Fatalf("expected 'c'=3 in cache, got %v, ok=%v", v, ok)
+	if v, ok := c.Get("c"); !ok {
+		t.Fatalf("expected 'c' present, got ok=%v", ok)
+	} else if got, ok := v.(int); !ok || got != 3 {
+		t.Fatalf("expected 'c'=3 in cache, got %v", v)
 	}
 }
 
 func TestCAWOLFU_EvictMethodOrder(t *testing.T) {
+	t.Parallel()
+
 	c, err := NewCAWOLFU(2)
 	if err != nil {
 		t.Fatalf("NewCAWOLFU error: %v", err)
@@ -39,6 +46,7 @@ func TestCAWOLFU_EvictMethodOrder(t *testing.T) {
 
 	c.Set("a", 1)
 	c.Set("b", 2)
+
 	// Without additional access, tail is 'a' (inserted first with same count)
 	key, ok := c.Evict()
 	if !ok || key != "a" {
@@ -52,6 +60,8 @@ func TestCAWOLFU_EvictMethodOrder(t *testing.T) {
 }
 
 func TestCAWOLFU_ZeroCapacity_NoOp(t *testing.T) {
+	t.Parallel()
+
 	c, err := NewCAWOLFU(0)
 	if err != nil {
 		t.Fatalf("NewCAWOLFU error: %v", err)
@@ -69,6 +79,8 @@ func TestCAWOLFU_ZeroCapacity_NoOp(t *testing.T) {
 }
 
 func TestCAWOLFU_Delete_RemovesItem(t *testing.T) {
+	t.Parallel()
+
 	c, err := NewCAWOLFU(2)
 	if err != nil {
 		t.Fatalf("NewCAWOLFU error: %v", err)

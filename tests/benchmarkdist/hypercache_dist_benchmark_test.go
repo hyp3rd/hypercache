@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	backend "github.com/hyp3rd/hypercache/pkg/backend"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -19,9 +19,20 @@ func BenchmarkDistMemory_Set(b *testing.B) {
 	n2, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("N2", "N2"))...)
 	n3, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("N3", "N3"))...)
 
-	d1 := any(n1).(*backend.DistMemory)
-	d2 := any(n2).(*backend.DistMemory)
-	d3 := any(n3).(*backend.DistMemory)
+	d1, ok := any(n1).(*backend.DistMemory)
+	if !ok {
+		b.Fatalf("failed to cast n1 to *backend.DistMemory")
+	}
+
+	d2, ok := any(n2).(*backend.DistMemory)
+	if !ok {
+		b.Fatalf("failed to cast n2 to *backend.DistMemory")
+	}
+
+	d3, ok := any(n3).(*backend.DistMemory)
+	if !ok {
+		b.Fatalf("failed to cast n3 to *backend.DistMemory")
+	}
 
 	d1.SetTransport(transport)
 	d2.SetTransport(transport)
@@ -49,9 +60,20 @@ func BenchmarkDistMemory_Get(b *testing.B) {
 	n2, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("N2", "N2"))...)
 	n3, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("N3", "N3"))...)
 
-	d1 := any(n1).(*backend.DistMemory)
-	d2 := any(n2).(*backend.DistMemory)
-	d3 := any(n3).(*backend.DistMemory)
+	d1, ok := any(n1).(*backend.DistMemory)
+	if !ok {
+		b.Fatalf("failed to cast n1 to *backend.DistMemory")
+	}
+
+	d2, ok := any(n2).(*backend.DistMemory)
+	if !ok {
+		b.Fatalf("failed to cast n2 to *backend.DistMemory")
+	}
+
+	d3, ok := any(n3).(*backend.DistMemory)
+	if !ok {
+		b.Fatalf("failed to cast n3 to *backend.DistMemory")
+	}
 
 	d1.SetTransport(transport)
 	d2.SetTransport(transport)
