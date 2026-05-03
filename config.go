@@ -107,6 +107,20 @@ func WithMaxCacheSize[T backend.IBackendConstrain](maxCacheSize int64) Option[T]
 	}
 }
 
+// WithEvictionShardCount sets the number of independent eviction-algorithm
+// shards. Default 32 (matches pkg/cache/v2.ShardCount). Must be a positive
+// power of two; values <= 1 disable sharding (single global eviction
+// instance — strict global LRU/LFU order, but single-mutex contention).
+//
+// With sharding enabled, total capacity is split as ceil(capacity/n) per
+// shard. Eviction order is per-shard, not strict global. See
+// pkg/eviction.Sharded for full semantics.
+func WithEvictionShardCount[T backend.IBackendConstrain](shardCount int) Option[T] {
+	return func(cache *HyperCache[T]) {
+		cache.evictionShardCount = shardCount
+	}
+}
+
 // WithEvictionAlgorithm is an option that sets the eviction algorithm name field of the `HyperCache` struct.
 // The eviction algorithm name determines which eviction algorithm will be used to evict items from the cache.
 // The eviction algorithm name must be one of the following:

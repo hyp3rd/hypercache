@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hyp3rd/ewrap"
 )
 
 func TestWorkerPool_EnqueueAndShutdown(t *testing.T) {
@@ -37,7 +39,7 @@ func TestWorkerPool_EnqueueAndShutdown(t *testing.T) {
 
 func TestWorkerPool_JobErrorHandling(t *testing.T) {
 	pool := NewWorkerPool(2)
-	expectedErr := errors.New("job error")
+	expectedErr := ewrap.New("job error")
 	pool.Enqueue(func() error {
 		return expectedErr
 	})

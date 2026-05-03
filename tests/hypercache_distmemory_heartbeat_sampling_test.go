@@ -21,11 +21,15 @@ func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest
 	n2 := cluster.NewNode("", "n2")
 	n3 := cluster.NewNode("", "n3")
 
+	// Intervals chosen to tolerate the 3-5x slowdown imposed by -race -count=10
+	// under shuffle. Previous values (interval=15ms, dead=90ms) were tight
+	// enough that under heavy parallel test load the heartbeat goroutine could
+	// starve and never advance the dead transition within deadline.
 	b1i, _ := backend.NewDistMemory(
 		ctx,
 		backend.WithDistMembership(membership, n1),
 		backend.WithDistTransport(transport),
-		backend.WithDistHeartbeat(15*time.Millisecond, 40*time.Millisecond, 90*time.Millisecond),
+		backend.WithDistHeartbeat(80*time.Millisecond, 320*time.Millisecond, 640*time.Millisecond),
 		backend.WithDistHeartbeatSample(0), // probe all peers per tick for deterministic transition
 	)
 

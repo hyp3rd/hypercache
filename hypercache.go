@@ -55,6 +55,7 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	evictCh                    chan bool           // manual eviction trigger
 	evictionAlgorithmName      string              // name of eviction algorithm
 	evictionAlgorithm          eviction.IAlgorithm // eviction algorithm impl
+	evictionShardCount         int                 // number of eviction-algo shards (default 32; <=1 disables sharding)
 	expirationInterval         time.Duration       // interval for expiration loop
 	evictionInterval           time.Duration       // interval for eviction loop
 	shouldEvict                atomic.Bool         // proactive eviction enabled
@@ -285,6 +286,10 @@ func newHyperCacheBase[T backend.IBackendConstrain](b backend.IBackend[T]) *Hype
 		evictCh:            make(chan bool, 1),
 		expirationInterval: constants.DefaultExpirationInterval,
 		evictionInterval:   constants.DefaultEvictionInterval,
+		// Default eviction shard count matches pkg/cache/v2.ShardCount so a
+		// key's data shard and eviction shard map to the same logical position.
+		// Users can override with WithEvictionShardCount; <=1 disables sharding.
+		evictionShardCount: cache.ShardCount,
 	}
 }
 
@@ -305,19 +310,30 @@ func configureEvictionSettings[T backend.IBackendConstrain](hc *HyperCache[T]) {
 }
 
 // initEvictionAlgorithm initializes the eviction algorithm for the cache.
+//
+// When evictionShardCount > 1 (default 32) the algorithm is wrapped in
+// eviction.Sharded — same hash as ConcurrentMap, so a key's data shard and
+// eviction shard align. This eliminates the global eviction-algorithm mutex
+// at the cost of strict global LRU/LFU ordering. shardCount <= 1 keeps the
+// previous single-instance behavior.
 func initEvictionAlgorithm[T backend.IBackendConstrain](hc *HyperCache[T]) error {
 	maxEvictionCount, err := converters.ToInt(hc.maxEvictionCount)
 	if err != nil {
 		return err
 	}
 
-	if hc.evictionAlgorithmName == "" {
-		// Use the default eviction algorithm if none is specified
-		hc.evictionAlgorithm, err = eviction.NewLRUAlgorithm(maxEvictionCount)
-	} else {
-		// Use the specified eviction algorithm
-		hc.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(hc.evictionAlgorithmName, maxEvictionCount)
+	algorithmName := hc.evictionAlgorithmName
+	if algorithmName == "" {
+		algorithmName = "lru"
 	}
+
+	if hc.evictionShardCount > 1 {
+		hc.evictionAlgorithm, err = eviction.NewSharded(algorithmName, maxEvictionCount, hc.evictionShardCount)
+
+		return err
+	}
+
+	hc.evictionAlgorithm, err = eviction.NewEvictionAlgorithm(algorithmName, maxEvictionCount)
 
 	return err
 }

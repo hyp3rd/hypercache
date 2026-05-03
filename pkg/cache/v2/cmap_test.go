@@ -192,6 +192,44 @@ func TestCount(t *testing.T) {
 	}
 }
 
+// TestCount_SetExistingKeyDoesNotIncrement guards the per-shard atomic Count
+// implementation against the obvious mistake: re-Setting an existing key must
+// not increment the shard counter. Without the existence check, Count drifts
+// every time a key is overwritten.
+func TestCount_SetExistingKeyDoesNotIncrement(t *testing.T) {
+	cm := New()
+	item := &Item{Value: "v", Expiration: time.Hour}
+
+	cm.Set("key1", item)
+
+	if got := cm.Count(); got != 1 {
+		t.Fatalf("after first Set: Count = %d, want 1", got)
+	}
+
+	// Overwrite the same key 100x; Count must stay at 1.
+	for range 100 {
+		cm.Set("key1", item)
+	}
+
+	if got := cm.Count(); got != 1 {
+		t.Errorf("after 100 overwrites: Count = %d, want 1", got)
+	}
+
+	// Removing a non-existent key must not decrement.
+	cm.Remove("never_set")
+
+	if got := cm.Count(); got != 1 {
+		t.Errorf("after Remove(missing): Count = %d, want 1", got)
+	}
+
+	// Clear resets all shards to 0.
+	cm.Clear()
+
+	if got := cm.Count(); got != 0 {
+		t.Errorf("after Clear: Count = %d, want 0", got)
+	}
+}
+
 func TestIterBuffered(t *testing.T) {
 	cm := New()
 	items := map[string]*Item{

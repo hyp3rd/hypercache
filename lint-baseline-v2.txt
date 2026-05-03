@@ -1,0 +1,4138 @@
+tests/hypercache_distmemory_heartbeat_test.go:14:1: calculated cyclomatic complexity for function TestDistMemoryHeartbeatLiveness is 27, max is 15 (cyclop)
+func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
+^
+tests/hypercache_distmemory_integration_test.go:15:1: calculated cyclomatic complexity for function TestDistMemoryForwardingReplication is 16, max is 15 (cyclop)
+func TestDistMemoryForwardingReplication(t *testing.T) {
+^
+tests/hypercache_distmemory_remove_readrepair_test.go:113:1: calculated cyclomatic complexity for function TestDistMemoryReadRepair is 27, max is 15 (cyclop)
+func TestDistMemoryReadRepair(t *testing.T) {
+^
+tests/hypercache_distmemory_stale_quorum_test.go:14:1: calculated cyclomatic complexity for function TestDistMemoryStaleQuorum is 16, max is 15 (cyclop)
+func TestDistMemoryStaleQuorum(t *testing.T) {
+^
+tests/hypercache_distmemory_versioning_test.go:17:1: calculated cyclomatic complexity for function TestDistMemoryVersioningQuorum is 16, max is 15 (cyclop)
+func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
+^
+tests/hypercache_http_merkle_test.go:15:1: calculated cyclomatic complexity for function TestHTTPFetchMerkle is 17, max is 15 (cyclop)
+func TestHTTPFetchMerkle(t *testing.T) {
+^
+tests/integration/dist_phase1_test.go:115:1: calculated cyclomatic complexity for function valueOK is 25, max is 15 (cyclop)
+func valueOK(v any) bool { //nolint:ireturn
+^
+pkg/eviction/cawolfu_test.go:1: 1-91 lines are duplicate of `pkg/eviction/lru_test.go:1-92` (dupl)
+package eviction
+
+import "testing"
+
+func TestCAWOLFU_EvictsLeastFrequentTail(t *testing.T) {
+	c, err := NewCAWOLFU(2)
+	if err != nil {
+		t.Fatalf("NewCAWOLFU error: %v", err)
+	}
+
+	c.Set("a", 1)
+	c.Set("b", 2)
+
+	// bump 'a' so 'b' is less frequent
+	if _, ok := c.Get("a"); !ok {
+		t.Fatalf("expected to get 'a'")
+	}
+
+	// Insert 'c' -> evict tail ('b')
+	c.Set("c", 3)
+
+	if _, ok := c.Get("b"); ok {
+		t.Fatalf("expected 'b' to be evicted")
+	}
+
+	if _, ok := c.Get("a"); !ok {
+		t.Fatalf("expected 'a' to remain in cache")
+	}
+
+	if v, ok := c.Get("c"); !ok || v.(int) != 3 {
+		t.Fatalf("expected 'c'=3 in cache, got %v, ok=%v", v, ok)
+	}
+}
+
+func TestCAWOLFU_EvictMethodOrder(t *testing.T) {
+	c, err := NewCAWOLFU(2)
+	if err != nil {
+		t.Fatalf("NewCAWOLFU error: %v", err)
+	}
+
+	c.Set("a", 1)
+	c.Set("b", 2)
+
+	// Without additional access, tail is 'a' (inserted first with same count)
+	key, ok := c.Evict()
+	if !ok || key != "a" {
+		t.Fatalf("expected to evict 'a' first, got %q ok=%v", key, ok)
+	}
+
+	key, ok = c.Evict()
+	if !ok || key != "b" {
+		t.Fatalf("expected to evict 'b' second, got %q ok=%v", key, ok)
+	}
+}
+
+func TestCAWOLFU_ZeroCapacity_NoOp(t *testing.T) {
+	c, err := NewCAWOLFU(0)
+	if err != nil {
+		t.Fatalf("NewCAWOLFU error: %v", err)
+	}
+
+	c.Set("a", 1)
+
+	if _, ok := c.Get("a"); ok {
+		t.Fatalf("expected Get to miss on zero-capacity cache")
+	}
+
+	if key, ok := c.Evict(); ok || key != "" {
+		t.Fatalf("expected no eviction on zero-capacity, got %q ok=%v", key, ok)
+	}
+}
+
+func TestCAWOLFU_Delete_RemovesItem(t *testing.T) {
+	c, err := NewCAWOLFU(2)
+	if err != nil {
+		t.Fatalf("NewCAWOLFU error: %v", err)
+	}
+
+	c.Set("a", 1)
+	c.Set("b", 2)
+	c.Delete("a")
+
+	if _, ok := c.Get("a"); ok {
+		t.Fatalf("expected 'a' to be deleted")
+	}
+
+	key, ok := c.Evict()
+	if !ok || key != "b" {
+		t.Fatalf("expected to evict 'b' as remaining item, got %q ok=%v", key, ok)
+	}
+}
+pkg/eviction/lru_test.go:1: 1-92 lines are duplicate of `pkg/eviction/cawolfu_test.go:1-91` (dupl)
+package eviction
+
+import "testing"
+
+func TestLRU_EvictsLeastRecentlyUsedOnSet(t *testing.T) {
+	lru, err := NewLRUAlgorithm(2)
+	if err != nil {
+		t.Fatalf("NewLRUAlgorithm error: %v", err)
+	}
+
+	lru.Set("a", 1)
+	lru.Set("b", 2)
+
+	// Access "a" so that "b" becomes the least recently used
+	if _, ok := lru.Get("a"); !ok {
+		t.Fatalf("expected to get 'a'")
+	}
+
+	// Insert "c"; should evict "b"
+	lru.Set("c", 3)
+
+	if _, ok := lru.Get("b"); ok {
+		t.Fatalf("expected 'b' to be evicted")
+	}
+
+	if _, ok := lru.Get("a"); !ok {
+		t.Fatalf("expected 'a' to remain in cache")
+	}
+
+	if v, ok := lru.Get("c"); !ok || v.(int) != 3 {
+		t.Fatalf("expected 'c'=3 in cache, got %v, ok=%v", v, ok)
+	}
+}
+
+func TestLRU_EvictMethodOrder(t *testing.T) {
+	lru, err := NewLRUAlgorithm(2)
+	if err != nil {
+		t.Fatalf("NewLRUAlgorithm error: %v", err)
+	}
+
+	lru.Set("a", 1)
+	lru.Set("b", 2)
+
+	// After two inserts, tail should be "a"
+	key, ok := lru.Evict()
+	if !ok || key != "a" {
+		t.Fatalf("expected to evict 'a' first, got %q ok=%v", key, ok)
+	}
+
+	key, ok = lru.Evict()
+	if !ok || key != "b" {
+		t.Fatalf("expected to evict 'b' second, got %q ok=%v", key, ok)
+	}
+}
+
+func TestLRU_ZeroCapacity_NoOp(t *testing.T) {
+	lru, err := NewLRUAlgorithm(0)
+	if err != nil {
+		t.Fatalf("NewLRUAlgorithm error: %v", err)
+	}
+
+	lru.Set("a", 1)
+
+	if _, ok := lru.Get("a"); ok {
+		t.Fatalf("expected Get to miss on zero-capacity cache")
+	}
+
+	if key, ok := lru.Evict(); ok || key != "" {
+		t.Fatalf("expected no eviction on zero-capacity, got %q ok=%v", key, ok)
+	}
+}
+
+func TestLRU_Delete_RemovesItem(t *testing.T) {
+	lru, err := NewLRUAlgorithm(2)
+	if err != nil {
+		t.Fatalf("NewLRUAlgorithm error: %v", err)
+	}
+
+	lru.Set("a", 1)
+	lru.Set("b", 2)
+	lru.Delete("a")
+
+	if _, ok := lru.Get("a"); ok {
+		t.Fatalf("expected 'a' to be deleted")
+	}
+
+	// Evict should not return deleted key
+	key, ok := lru.Evict()
+	if !ok || key != "b" {
+		t.Fatalf("expected to evict 'b' as remaining item, got %q ok=%v", key, ok)
+	}
+}
+tests/integration/dist_rebalance_test.go:256:14: do not define dynamic errors, use wrapped static errors instead: "fmt.Errorf(\"unexpected status %d\", resp.StatusCode)" (err113)
+			lastErr = fmt.Errorf("unexpected status %d", resp.StatusCode)
+			          ^
+pkg/eviction/arc_test.go:14:35: Error return value is not checked (errcheck)
+	if v, ok := arc.Get("a"); !ok || v.(int) != 1 {
+	                                 ^
+pkg/eviction/arc_test.go:78:35: Error return value is not checked (errcheck)
+	if v, ok := arc.Get("a"); !ok || v.(int) != 10 {
+	                                 ^
+pkg/eviction/cawolfu_test.go:30:33: Error return value is not checked (errcheck)
+	if v, ok := c.Get("c"); !ok || v.(int) != 3 {
+	                               ^
+tests/hypercache_get_multiple_test.go:30:14: Error return value of `cache.Set` is not checked (errcheck)
+				cache.Set(context.TODO(), "key1", 1, 0)
+				         ^
+tests/hypercache_get_multiple_test.go:31:14: Error return value of `cache.Set` is not checked (errcheck)
+				cache.Set(context.TODO(), "key2", 2, 0)
+				         ^
+tests/hypercache_get_multiple_test.go:32:14: Error return value of `cache.Set` is not checked (errcheck)
+				cache.Set(context.TODO(), "key3", 3, 0)
+				         ^
+tests/hypercache_mgmt_dist_test.go:142:23: Error return value of `resp.Body.Close` is not checked (errcheck)
+	defer resp.Body.Close()
+	                     ^
+tests/hypercache_set_test.go:75:18: Error return value of `cache.Stop` is not checked (errcheck)
+	defer cache.Stop(context.TODO())
+	                ^
+tests/hypercache_trigger_eviction_test.go:19:15: Error return value of `hc.Stop` is not checked (errcheck)
+	defer hc.Stop(context.TODO())
+	             ^
+tests/management_http_test.go:34:15: Error return value of `hc.Stop` is not checked (errcheck)
+	defer hc.Stop(ctx)
+	             ^
+pkg/eviction/arc_test.go:14:35: type assertion must be checked (forcetypeassert)
+	if v, ok := arc.Get("a"); !ok || v.(int) != 1 {
+	                                 ^
+pkg/eviction/arc_test.go:78:35: type assertion must be checked (forcetypeassert)
+	if v, ok := arc.Get("a"); !ok || v.(int) != 10 {
+	                                 ^
+pkg/eviction/cawolfu_test.go:30:33: type assertion must be checked (forcetypeassert)
+	if v, ok := c.Get("c"); !ok || v.(int) != 3 {
+	                               ^
+tests/hypercache_distmemory_heartbeat_sampling_test.go:13:6: Function 'TestHeartbeatSamplingAndTransitions' has too many statements (44 > 40) (funlen)
+func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest
+     ^
+tests/hypercache_distmemory_heartbeat_test.go:14:6: Function 'TestDistMemoryHeartbeatLiveness' has too many statements (75 > 40) (funlen)
+func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
+     ^
+tests/hypercache_distmemory_integration_test.go:15:6: Function 'TestDistMemoryForwardingReplication' has too many statements (49 > 40) (funlen)
+func TestDistMemoryForwardingReplication(t *testing.T) {
+     ^
+tests/hypercache_distmemory_stale_quorum_test.go:14:6: Function 'TestDistMemoryStaleQuorum' has too many statements (57 > 40) (funlen)
+func TestDistMemoryStaleQuorum(t *testing.T) {
+     ^
+tests/hypercache_distmemory_tiebreak_test.go:15:6: Function 'TestDistMemoryVersionTieBreak' has too many statements (44 > 40) (funlen)
+func TestDistMemoryVersionTieBreak(t *testing.T) { //nolint:paralleltest
+     ^
+tests/hypercache_distmemory_versioning_test.go:17:6: Function 'TestDistMemoryVersioningQuorum' has too many statements (51 > 40) (funlen)
+func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
+     ^
+tests/hypercache_distmemory_write_quorum_test.go:76:6: Function 'TestWriteQuorumFailure' has too many statements (47 > 40) (funlen)
+func TestWriteQuorumFailure(t *testing.T) {
+     ^
+tests/hypercache_http_merkle_test.go:15:6: Function 'TestHTTPFetchMerkle' has too many statements (56 > 40) (funlen)
+func TestHTTPFetchMerkle(t *testing.T) {
+     ^
+tests/management_http_test.go:19:6: Function 'TestManagementHTTP_BasicEndpoints' has too many statements (42 > 40) (funlen)
+func TestManagementHTTP_BasicEndpoints(t *testing.T) {
+     ^
+tests/hypercache_distmemory_heartbeat_test.go:14:1: cognitive complexity 41 of func `TestDistMemoryHeartbeatLiveness` is high (> 30) (gocognit)
+func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
+^
+tests/integration/dist_phase1_test.go:115:1: cognitive complexity 42 of func `valueOK` is high (> 30) (gocognit)
+func valueOK(v any) bool { //nolint:ireturn
+^
+pkg/cache/cmap_test.go:50:9: string `test` has 15 occurrences, make it a constant (goconst)
+	key := "test"
+	       ^
+pkg/cache/cmap_test.go:68:3: string `key1` has 7 occurrences, make it a constant (goconst)
+		"key1": 1,
+		^
+pkg/cache/cmap_test.go:69:3: string `key2` has 7 occurrences, make it a constant (goconst)
+		"key2": 2,
+		^
+pkg/cache/cmap_test.go:70:3: string `key3` has 5 occurrences, make it a constant (goconst)
+		"key3": 3,
+		^
+pkg/cache/item_test.go:34:21: string `test` has 15 occurrences, make it a constant (goconst)
+	item := &Item{Key: "test", Value: "value"}
+	                   ^
+pkg/cache/v2/cmap_test.go:75:15: string `test_value` has 5 occurrences, make it a constant (goconst)
+		Value:      "test_value",
+		            ^
+tests/hypercache_get_multiple_test.go:26:25: string `key1` has 12 occurrences, make it a constant (goconst)
+			keys:       []string{"key1", "key2", "key3"},
+			                     ^
+tests/hypercache_get_multiple_test.go:26:33: string `key2` has 9 occurrences, make it a constant (goconst)
+			keys:       []string{"key1", "key2", "key3"},
+			                             ^
+tests/hypercache_get_multiple_test.go:26:41: string `key3` has 6 occurrences, make it a constant (goconst)
+			keys:       []string{"key1", "key2", "key3"},
+			                                     ^
+tests/hypercache_get_or_set_test.go:27:19: string `value1` has 7 occurrences, make it a constant (goconst)
+			value:         "value1",
+			               ^
+tests/hypercache_get_or_set_test.go:35:19: string `value2` has 6 occurrences, make it a constant (goconst)
+			value:         "value2",
+			               ^
+tests/hypercache_get_test.go:27:19: string `key1` has 12 occurrences, make it a constant (goconst)
+			key:           "key1",
+			               ^
+tests/hypercache_get_test.go:28:19: string `value1` has 7 occurrences, make it a constant (goconst)
+			value:         "value1",
+			               ^
+tests/hypercache_get_test.go:35:19: string `key2` has 9 occurrences, make it a constant (goconst)
+			key:           "key2",
+			               ^
+tests/hypercache_get_test.go:36:19: string `value2` has 6 occurrences, make it a constant (goconst)
+			value:         "value2",
+			               ^
+tests/hypercache_set_test.go:25:19: string `key1` has 12 occurrences, make it a constant (goconst)
+			key:           "key1",
+			               ^
+tests/hypercache_set_test.go:26:19: string `value1` has 7 occurrences, make it a constant (goconst)
+			value:         "value1",
+			               ^
+tests/hypercache_set_test.go:33:19: string `key2` has 9 occurrences, make it a constant (goconst)
+			key:           "key2",
+			               ^
+tests/hypercache_set_test.go:34:19: string `value2` has 6 occurrences, make it a constant (goconst)
+			value:         "value2",
+			               ^
+tests/hypercache_distmemory_stale_quorum_test.go:77:2: ifElseChain: rewrite if-else to switch statement (gocritic)
+	if primary == b1.LocalNodeID() {
+	^
+tests/integration/dist_phase1_test.go:105:9: elseif: can replace 'else {if cond {}}' with 'else if cond {}' (gocritic)
+	} else {
+	       ^
+tests/hypercache_get_multiple_test.go:30:5: G104: Errors unhandled (gosec)
+				cache.Set(context.TODO(), "key1", 1, 0)
+				^
+tests/hypercache_get_multiple_test.go:31:5: G104: Errors unhandled (gosec)
+				cache.Set(context.TODO(), "key2", 2, 0)
+				^
+tests/hypercache_get_multiple_test.go:32:5: G104: Errors unhandled (gosec)
+				cache.Set(context.TODO(), "key3", 3, 0)
+				^
+pkg/cache/v2/cmap_test.go:266:22: G115: integer overflow conversion int -> rune (gosec)
+			cm.Set(string(rune(i)), item)
+			                  ^
+pkg/cache/v2/cmap_test.go:277:22: G115: integer overflow conversion int -> rune (gosec)
+			cm.Get(string(rune(i)))
+			                  ^
+pkg/stats/histogramcollector_test.go:291:17: G115: integer overflow conversion uint64 -> int64 (gosec)
+	growth := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+	               ^
+pkg/stats/histogramcollector_test.go:291:42: G115: integer overflow conversion uint64 -> int64 (gosec)
+	growth := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+	                                        ^
+tests/hypercache_http_merkle_test.go:134:58: G115: integer overflow conversion int -> rune (gosec)
+func httpKey(i int) string { return "hkey:" + string(rune('a'+i)) }
+                                                         ^
+tests/hypercache_http_merkle_test.go:92:24: net/http.Get must not be called. use net/http.NewRequestWithContext and (*net/http.Client).Do(*http.Request) (noctx)
+		resp, err := http.Get("http://" + b1.LocalNodeAddr() + "/internal/merkle")
+		                     ^
+tests/integration/dist_phase1_test.go:20:22: net.Listen must not be called. use (*net.ListenConfig).Listen (noctx)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	                    ^
+tests/management_http_test.go:58:25: (*net/http.Client).Get must not be called. use (*net/http.Client).Do(*http.Request) (noctx)
+	resp, err := client.Get("http://" + addr + "/health")
+	                       ^
+tests/management_http_test.go:68:24: (*net/http.Client).Get must not be called. use (*net/http.Client).Do(*http.Request) (noctx)
+	resp, err = client.Get("http://" + addr + "/stats")
+	                      ^
+tests/management_http_test.go:85:24: (*net/http.Client).Get must not be called. use (*net/http.Client).Do(*http.Request) (noctx)
+	resp, err = client.Get("http://" + addr + "/config")
+	                      ^
+tests/hypercache_http_merkle_test.go:111:5: avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...` (noinlineerr)
+	if err := b2.SyncWith(ctx, "n1"); err != nil {
+	   ^
+tests/integration/dist_phase1_test.go:123:10: avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...` (noinlineerr)
+			if b, err := base64.StdEncoding.DecodeString(s); err == nil && string(b) == "v1" {
+			      ^
+tests/merkle_sync_test.go:69:5: avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...` (noinlineerr)
+	if err := dmB.SyncWith(ctx, string(dmA.LocalNodeID())); err != nil {
+	   ^
+pkg/cache/cmap_test.go:19:1: Function TestNew missing the call to method parallel (paralleltest)
+func TestNew(t *testing.T) {
+^
+pkg/cache/cmap_test.go:30:1: Function TestNewStringer missing the call to method parallel (paralleltest)
+func TestNewStringer(t *testing.T) {
+^
+pkg/cache/cmap_test.go:37:1: Function TestNewWithCustomShardingFunction missing the call to method parallel (paralleltest)
+func TestNewWithCustomShardingFunction(t *testing.T) {
+^
+pkg/cache/cmap_test.go:48:1: Function TestSetAndGet missing the call to method parallel (paralleltest)
+func TestSetAndGet(t *testing.T) {
+^
+pkg/cache/cmap_test.go:65:1: Function TestMSet missing the call to method parallel (paralleltest)
+func TestMSet(t *testing.T) {
+^
+pkg/cache/cmap_test.go:82:1: Function TestUpsert missing the call to method parallel (paralleltest)
+func TestUpsert(t *testing.T) {
+^
+pkg/cache/cmap_test.go:113:1: Function TestSetIfAbsent missing the call to method parallel (paralleltest)
+func TestSetIfAbsent(t *testing.T) {
+^
+pkg/cache/cmap_test.go:133:1: Function TestHas missing the call to method parallel (paralleltest)
+func TestHas(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:14:1: Function TestNew missing the call to method parallel (paralleltest)
+func TestNew(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:37:1: Function TestGetShardIndex missing the call to method parallel (paralleltest)
+func TestGetShardIndex(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:47:2: Range statement for test TestGetShardIndex missing the call to method parallel in test Run (paralleltest)
+	for _, tt := range tests {
+	^
+pkg/cache/v2/cmap_test.go:57:1: Function TestGetShard missing the call to method parallel (paralleltest)
+func TestGetShard(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:72:1: Function TestSetAndGet missing the call to method parallel (paralleltest)
+func TestSetAndGet(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:99:1: Function TestHas missing the call to method parallel (paralleltest)
+func TestHas(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:119:1: Function TestPop missing the call to method parallel (paralleltest)
+func TestPop(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:146:1: Function TestRemove missing the call to method parallel (paralleltest)
+func TestRemove(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:164:1: Function TestCount missing the call to method parallel (paralleltest)
+func TestCount(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:195:1: Function TestIterBuffered missing the call to method parallel (paralleltest)
+func TestIterBuffered(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:227:1: Function TestClear missing the call to method parallel (paralleltest)
+func TestClear(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:251:1: Function TestConcurrentAccess missing the call to method parallel (paralleltest)
+func TestConcurrentAccess(t *testing.T) {
+^
+pkg/cache/v2/cmap_test.go:284:1: Function TestSnapshotPanic missing the call to method parallel (paralleltest)
+func TestSnapshotPanic(t *testing.T) {
+^
+pkg/eviction/arc_test.go:5:1: Function TestARC_BasicSetGetAndEvict missing the call to method parallel (paralleltest)
+func TestARC_BasicSetGetAndEvict(t *testing.T) {
+^
+pkg/eviction/arc_test.go:29:1: Function TestARC_ZeroCapacity_NoOp missing the call to method parallel (paralleltest)
+func TestARC_ZeroCapacity_NoOp(t *testing.T) {
+^
+pkg/eviction/arc_test.go:46:1: Function TestARC_Delete_RemovesResidentAndGhost missing the call to method parallel (paralleltest)
+func TestARC_Delete_RemovesResidentAndGhost(t *testing.T) {
+^
+pkg/eviction/arc_test.go:65:1: Function TestARC_B1GhostHitPromotesToT2 missing the call to method parallel (paralleltest)
+func TestARC_B1GhostHitPromotesToT2(t *testing.T) {
+^
+pkg/eviction/cawolfu_test.go:5:1: Function TestCAWOLFU_EvictsLeastFrequentTail missing the call to method parallel (paralleltest)
+func TestCAWOLFU_EvictsLeastFrequentTail(t *testing.T) {
+^
+pkg/eviction/cawolfu_test.go:35:1: Function TestCAWOLFU_EvictMethodOrder missing the call to method parallel (paralleltest)
+func TestCAWOLFU_EvictMethodOrder(t *testing.T) {
+^
+pkg/eviction/cawolfu_test.go:56:1: Function TestCAWOLFU_ZeroCapacity_NoOp missing the call to method parallel (paralleltest)
+func TestCAWOLFU_ZeroCapacity_NoOp(t *testing.T) {
+^
+pkg/eviction/cawolfu_test.go:73:1: Function TestCAWOLFU_Delete_RemovesItem missing the call to method parallel (paralleltest)
+func TestCAWOLFU_Delete_RemovesItem(t *testing.T) {
+^
+pkg/eviction/clock_test.go:5:1: Function TestClock_EvictsWhenHandFindsColdPage missing the call to method parallel (paralleltest)
+func TestClock_EvictsWhenHandFindsColdPage(t *testing.T) {
+^
+pkg/eviction/clock_test.go:48:1: Function TestClock_ZeroCapacity_NoOp missing the call to method parallel (paralleltest)
+func TestClock_ZeroCapacity_NoOp(t *testing.T) {
+^
+pkg/eviction/clock_test.go:65:1: Function TestClock_Delete_RemovesItem missing the call to method parallel (paralleltest)
+func TestClock_Delete_RemovesItem(t *testing.T) {
+^
+pkg/eviction/lfu_test.go:6:1: Function TestLFU_EvictsOldestOnTie_InsertOrder missing the call to method parallel (paralleltest)
+func TestLFU_EvictsOldestOnTie_InsertOrder(t *testing.T) {
+^
+pkg/eviction/lfu_test.go:37:1: Function TestLFU_EvictsOldestOnTie_AccessOrder missing the call to method parallel (paralleltest)
+func TestLFU_EvictsOldestOnTie_AccessOrder(t *testing.T) {
+^
+pkg/eviction/lfu_test.go:67:1: Function TestLFU_ZeroCapacity_NoOp missing the call to method parallel (paralleltest)
+func TestLFU_ZeroCapacity_NoOp(t *testing.T) {
+^
+pkg/eviction/lfu_test.go:84:1: Function TestLFU_Delete_RemovesItem missing the call to method parallel (paralleltest)
+func TestLFU_Delete_RemovesItem(t *testing.T) {
+^
+pkg/eviction/lru_test.go:5:1: Function TestLRU_EvictsLeastRecentlyUsedOnSet missing the call to method parallel (paralleltest)
+func TestLRU_EvictsLeastRecentlyUsedOnSet(t *testing.T) {
+^
+pkg/eviction/lru_test.go:35:1: Function TestLRU_EvictMethodOrder missing the call to method parallel (paralleltest)
+func TestLRU_EvictMethodOrder(t *testing.T) {
+^
+pkg/eviction/lru_test.go:56:1: Function TestLRU_ZeroCapacity_NoOp missing the call to method parallel (paralleltest)
+func TestLRU_ZeroCapacity_NoOp(t *testing.T) {
+^
+pkg/eviction/lru_test.go:73:1: Function TestLRU_Delete_RemovesItem missing the call to method parallel (paralleltest)
+func TestLRU_Delete_RemovesItem(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:12:1: Function TestHistogramStatsCollector_BasicAggregates missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_BasicAggregates(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:51:1: Function TestHistogramStatsCollector_DecrStoresNegative missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_DecrStoresNegative(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:71:1: Function TestHistogramStatsCollector_Median missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_Median(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:91:1: Function TestHistogramStatsCollector_Percentile missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_Percentile(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:115:1: Function TestHistogramStatsCollector_EmptyStat missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_EmptyStat(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:136:1: Function TestHistogramStatsCollector_BoundedSamples missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_BoundedSamples(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:173:1: Function TestHistogramStatsCollector_ConcurrentRecord missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_ConcurrentRecord(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:226:1: Function TestHistogramStatsCollector_GetStatsSnapshotIsolated missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_GetStatsSnapshotIsolated(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:254:1: Function TestHistogramStatsCollector_NoMemoryLeak missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
+^
+pkg/stats/histogramcollector_test.go:307:1: Function TestHistogramStatsCollector_AtomicMinMaxRace missing the call to method parallel (paralleltest)
+func TestHistogramStatsCollector_AtomicMinMaxRace(t *testing.T) {
+^
+tests/integration/dist_rebalance_replica_diff_test.go:21:2: Consider preallocating baseOpts with capacity 4 (prealloc)
+	baseOpts := []backend.DistMemoryOption{
+	^
+tests/integration/dist_rebalance_replica_diff_throttle_test.go:20:2: Consider preallocating base with capacity 5 (prealloc)
+	base := []backend.DistMemoryOption{
+	^
+tests/integration/dist_rebalance_test.go:177:2: Consider preallocating opts with capacity 6 + len(extra) (prealloc)
+	opts := []backend.DistMemoryOption{
+	^
+pkg/stats/histogramcollector_test.go:137:8: const cap has same name as predeclared identifier (predeclared)
+	const cap = 8
+	      ^
+pkg/stats/histogramcollector_test.go:259:8: const cap has same name as predeclared identifier (predeclared)
+	const cap = 1024
+	      ^
+pkg/cache/cmap_test.go:38:25: unused-parameter: parameter 'key' seems to be unused, consider removing or renaming it as _ (revive)
+	customSharding := func(key string) uint32 {
+	                       ^
+pkg/cache/cmap_test.go:169:37: unused-parameter: parameter 'k' seems to be unused, consider removing or renaming it as _ (revive)
+	removed := cmap.RemoveCb(key, func(k string, v int, exists bool) bool {
+	                                   ^
+pkg/cache/cmap_test.go:423:22: unused-parameter: parameter 't' seems to be unused, consider removing or renaming it as _ (revive)
+func TestConcurrency(t *testing.T) {
+                     ^
+pkg/cache/v2/cmap_test.go:251:27: unused-parameter: parameter 't' seems to be unused, consider removing or renaming it as _ (revive)
+func TestConcurrentAccess(t *testing.T) {
+                          ^
+pkg/cache/v2/cmap_test.go:257:3: use-waitgroup-go: replace wg.Add()...go {...wg.Done()...} with wg.Go(...) (revive)
+		wg.Add(1)
+		^
+pkg/cache/v2/cmap_test.go:272:3: use-waitgroup-go: replace wg.Add()...go {...wg.Done()...} with wg.Go(...) (revive)
+		wg.Add(1)
+		^
+pkg/eviction/cawolfu.go:14: line-length-limit: line is 151 characters, out of limit 150 (revive)
+	list     *CAWOLFULinkedList                        // linked list to store the items in the cache, with the most frequently used items at the front
+pkg/stats/histogramcollector_test.go:137:2: redefines-builtin-id: redefinition of the built-in function cap (revive)
+	const cap = 8
+	^
+pkg/stats/histogramcollector_test.go:259:2: redefines-builtin-id: redefinition of the built-in function cap (revive)
+	const cap = 1024
+	^
+pkg/stats/histogramcollector_test.go:268:2: call-to-gc: explicit call to the garbage collector (revive)
+	runtime.GC()
+	^
+pkg/stats/histogramcollector_test.go:281:2: call-to-gc: explicit call to the garbage collector (revive)
+	runtime.GC()
+	^
+tests/benchmark/hypercache_concurrency_benchmark_test.go:1:9: package-directory-mismatch: package name "tests" does not match directory name "benchmark" (revive)
+package tests
+        ^
+tests/benchmark/hypercache_list_benchmark_test.go:1:9: package-directory-mismatch: package name "tests" does not match directory name "benchmark" (revive)
+package tests
+        ^
+tests/benchmark/hypercache_set_benchmark_test.go:1:9: package-directory-mismatch: package name "tests" does not match directory name "benchmark" (revive)
+package tests
+        ^
+tests/hypercache_distmemory_heartbeat_sampling_test.go:13:1: function-length: maximum number of lines per function exceeded; max 75 but got 79 (revive)
+func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest
+	ctx := context.Background()
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// three peers plus local
+	n1 := cluster.NewNode("", "n1")
+	n2 := cluster.NewNode("", "n2")
+	n3 := cluster.NewNode("", "n3")
+
+	b1i, _ := backend.NewDistMemory(
+		ctx,
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistHeartbeat(15*time.Millisecond, 40*time.Millisecond, 90*time.Millisecond),
+		backend.WithDistHeartbeatSample(0), // probe all peers per tick for deterministic transition
+	)
+
+	_ = b1i // for clarity
+
+	b2i, _ := backend.NewDistMemory(ctx, backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
+	b3i, _ := backend.NewDistMemory(ctx, backend.WithDistMembership(membership, n3), backend.WithDistTransport(transport))
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	// Unregister b2 to simulate failure so it becomes suspect then dead.
+	transport.Unregister(string(n2.ID))
+
+	// Wait long enough for dead transition. Because of sampling (k=1) we give generous time window.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		m := b1.Metrics()
+		if m.NodesDead > 0 { // transition observed
+			break
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	mfinal := b1.Metrics()
+	if mfinal.NodesSuspect == 0 {
+		t.Fatalf("expected at least one suspect transition, got 0")
+	}
+
+	if mfinal.NodesDead == 0 {
+		t.Fatalf("expected at least one dead transition, got 0")
+	}
+
+	// ensure membership version advanced beyond initial additions (>= number of transitions + initial upserts)
+	snap := b1.DistMembershipSnapshot()
+	verAny := snap["version"]
+
+	ver, _ := verAny.(uint64)
+	if ver < 3 { // initial upserts already increment version; tolerate timing variance
+		t.Fatalf("expected membership version >=4, got %v", verAny)
+	}
+
+	_ = b3 // silence linter for now (future: more assertions)
+}
+tests/hypercache_distmemory_heartbeat_sampling_test.go:87:12: unchecked-type-assertion: type cast result is unchecked in verAny.(uint64) - type assertion result ignored (revive)
+	ver, _ := verAny.(uint64)
+	          ^
+tests/hypercache_distmemory_heartbeat_test.go:14:1: cognitive-complexity: function TestDistMemoryHeartbeatLiveness has cognitive complexity 41 (> max enabled 15) (revive)
+func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
+	// Intervals chosen so the test tolerates the 3-5x slowdown imposed by
+	// the race detector. Previous values (interval=30ms, dead=120ms) were
+	// tight enough that a delayed heartbeat tick could push *alive* nodes
+	// past deadAfter under -race, removing them from membership.
+	interval := 80 * time.Millisecond
+	suspectAfter := 4 * interval // 320ms
+	deadAfter := 8 * interval    // 640ms
+
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// nodes
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	// backend for node1 with heartbeat enabled
+	b1i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistHeartbeat(interval, suspectAfter, deadAfter),
+	)
+	if err != nil {
+		t.Fatalf("b1: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+
+	// add peers (without heartbeat loops themselves)
+	b2i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("b2: %v", err)
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b2)
+
+	b3i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("b3: %v", err)
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	// Wait until heartbeat marks peers alive (initial success probes)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		aliveCount := 0
+		for _, n := range membership.List() {
+			if n.State == cluster.NodeAlive {
+				aliveCount++
+			}
+		}
+
+		if aliveCount == 3 {
+			break
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Simulate node2 becoming unresponsive by removing it from transport registry.
+	// (Simplest way: do not respond to health; drop entry.)
+	transport.Unregister(string(n2.ID))
+
+	// Wait until node2 transitions to suspect then removed.
+	var sawSuspect bool
+
+	deadline = time.Now().Add(2 * deadAfter)
+	for time.Now().Before(deadline) {
+		foundN2 := false
+		for _, n := range membership.List() {
+			if n.ID == n2.ID {
+				foundN2 = true
+
+				if n.State == cluster.NodeSuspect {
+					sawSuspect = true
+				}
+			}
+		}
+
+		if !foundN2 && sawSuspect {
+			break
+		} // removed after suspicion observed
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if !sawSuspect {
+		t.Fatalf("node2 never became suspect")
+	}
+
+	// ensure removed
+	for _, n := range membership.List() {
+		if n.ID == n2.ID {
+			t.Fatalf("node2 still present, state=%s", n.State)
+		}
+	}
+
+	// Node3 should remain alive; ensure not removed
+	n3Present := false
+	for _, n := range membership.List() {
+		if n.ID == n3.ID {
+			n3Present = true
+
+			if n.State != cluster.NodeAlive {
+				t.Fatalf("node3 not alive: %s", n.State)
+			}
+		}
+	}
+
+	if !n3Present {
+		t.Fatalf("node3 missing")
+	}
+
+	// Metrics sanity: at least one heartbeat failure and success recorded.
+	m := b1.Metrics()
+	if m.HeartbeatFailure == 0 {
+		t.Errorf("expected heartbeat failures > 0")
+	}
+
+	if m.HeartbeatSuccess == 0 {
+		t.Errorf("expected heartbeat successes > 0")
+	}
+
+	if m.NodesRemoved == 0 {
+		t.Errorf("expected nodes removed metric > 0")
+	}
+}
+tests/hypercache_distmemory_heartbeat_test.go:14:1: cyclomatic: function TestDistMemoryHeartbeatLiveness has cyclomatic complexity 27 (> max enabled 15) (revive)
+func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
+	// Intervals chosen so the test tolerates the 3-5x slowdown imposed by
+	// the race detector. Previous values (interval=30ms, dead=120ms) were
+	// tight enough that a delayed heartbeat tick could push *alive* nodes
+	// past deadAfter under -race, removing them from membership.
+	interval := 80 * time.Millisecond
+	suspectAfter := 4 * interval // 320ms
+	deadAfter := 8 * interval    // 640ms
+
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// nodes
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	// backend for node1 with heartbeat enabled
+	b1i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistHeartbeat(interval, suspectAfter, deadAfter),
+	)
+	if err != nil {
+		t.Fatalf("b1: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+
+	// add peers (without heartbeat loops themselves)
+	b2i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("b2: %v", err)
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b2)
+
+	b3i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("b3: %v", err)
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	// Wait until heartbeat marks peers alive (initial success probes)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		aliveCount := 0
+		for _, n := range membership.List() {
+			if n.State == cluster.NodeAlive {
+				aliveCount++
+			}
+		}
+
+		if aliveCount == 3 {
+			break
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Simulate node2 becoming unresponsive by removing it from transport registry.
+	// (Simplest way: do not respond to health; drop entry.)
+	transport.Unregister(string(n2.ID))
+
+	// Wait until node2 transitions to suspect then removed.
+	var sawSuspect bool
+
+	deadline = time.Now().Add(2 * deadAfter)
+	for time.Now().Before(deadline) {
+		foundN2 := false
+		for _, n := range membership.List() {
+			if n.ID == n2.ID {
+				foundN2 = true
+
+				if n.State == cluster.NodeSuspect {
+					sawSuspect = true
+				}
+			}
+		}
+
+		if !foundN2 && sawSuspect {
+			break
+		} // removed after suspicion observed
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if !sawSuspect {
+		t.Fatalf("node2 never became suspect")
+	}
+
+	// ensure removed
+	for _, n := range membership.List() {
+		if n.ID == n2.ID {
+			t.Fatalf("node2 still present, state=%s", n.State)
+		}
+	}
+
+	// Node3 should remain alive; ensure not removed
+	n3Present := false
+	for _, n := range membership.List() {
+		if n.ID == n3.ID {
+			n3Present = true
+
+			if n.State != cluster.NodeAlive {
+				t.Fatalf("node3 not alive: %s", n.State)
+			}
+		}
+	}
+
+	if !n3Present {
+		t.Fatalf("node3 missing")
+	}
+
+	// Metrics sanity: at least one heartbeat failure and success recorded.
+	m := b1.Metrics()
+	if m.HeartbeatFailure == 0 {
+		t.Errorf("expected heartbeat failures > 0")
+	}
+
+	if m.HeartbeatSuccess == 0 {
+		t.Errorf("expected heartbeat successes > 0")
+	}
+
+	if m.NodesRemoved == 0 {
+		t.Errorf("expected nodes removed metric > 0")
+	}
+}
+tests/hypercache_distmemory_heartbeat_test.go:14:1: function-length: maximum number of statements per function exceeded; max 50 but got 75 (revive)
+func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
+	// Intervals chosen so the test tolerates the 3-5x slowdown imposed by
+	// the race detector. Previous values (interval=30ms, dead=120ms) were
+	// tight enough that a delayed heartbeat tick could push *alive* nodes
+	// past deadAfter under -race, removing them from membership.
+	interval := 80 * time.Millisecond
+	suspectAfter := 4 * interval // 320ms
+	deadAfter := 8 * interval    // 640ms
+
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// nodes
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	// backend for node1 with heartbeat enabled
+	b1i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistHeartbeat(interval, suspectAfter, deadAfter),
+	)
+	if err != nil {
+		t.Fatalf("b1: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+
+	// add peers (without heartbeat loops themselves)
+	b2i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("b2: %v", err)
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b2)
+
+	b3i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("b3: %v", err)
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	// Wait until heartbeat marks peers alive (initial success probes)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		aliveCount := 0
+		for _, n := range membership.List() {
+			if n.State == cluster.NodeAlive {
+				aliveCount++
+			}
+		}
+
+		if aliveCount == 3 {
+			break
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Simulate node2 becoming unresponsive by removing it from transport registry.
+	// (Simplest way: do not respond to health; drop entry.)
+	transport.Unregister(string(n2.ID))
+
+	// Wait until node2 transitions to suspect then removed.
+	var sawSuspect bool
+
+	deadline = time.Now().Add(2 * deadAfter)
+	for time.Now().Before(deadline) {
+		foundN2 := false
+		for _, n := range membership.List() {
+			if n.ID == n2.ID {
+				foundN2 = true
+
+				if n.State == cluster.NodeSuspect {
+					sawSuspect = true
+				}
+			}
+		}
+
+		if !foundN2 && sawSuspect {
+			break
+		} // removed after suspicion observed
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if !sawSuspect {
+		t.Fatalf("node2 never became suspect")
+	}
+
+	// ensure removed
+	for _, n := range membership.List() {
+		if n.ID == n2.ID {
+			t.Fatalf("node2 still present, state=%s", n.State)
+		}
+	}
+
+	// Node3 should remain alive; ensure not removed
+	n3Present := false
+	for _, n := range membership.List() {
+		if n.ID == n3.ID {
+			n3Present = true
+
+			if n.State != cluster.NodeAlive {
+				t.Fatalf("node3 not alive: %s", n.State)
+			}
+		}
+	}
+
+	if !n3Present {
+		t.Fatalf("node3 missing")
+	}
+
+	// Metrics sanity: at least one heartbeat failure and success recorded.
+	m := b1.Metrics()
+	if m.HeartbeatFailure == 0 {
+		t.Errorf("expected heartbeat failures > 0")
+	}
+
+	if m.HeartbeatSuccess == 0 {
+		t.Errorf("expected heartbeat successes > 0")
+	}
+
+	if m.NodesRemoved == 0 {
+		t.Errorf("expected nodes removed metric > 0")
+	}
+}
+tests/hypercache_distmemory_heartbeat_test.go:14:1: function-length: maximum number of lines per function exceeded; max 75 but got 156 (revive)
+func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
+	// Intervals chosen so the test tolerates the 3-5x slowdown imposed by
+	// the race detector. Previous values (interval=30ms, dead=120ms) were
+	// tight enough that a delayed heartbeat tick could push *alive* nodes
+	// past deadAfter under -race, removing them from membership.
+	interval := 80 * time.Millisecond
+	suspectAfter := 4 * interval // 320ms
+	deadAfter := 8 * interval    // 640ms
+
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// nodes
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	// backend for node1 with heartbeat enabled
+	b1i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistHeartbeat(interval, suspectAfter, deadAfter),
+	)
+	if err != nil {
+		t.Fatalf("b1: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+
+	// add peers (without heartbeat loops themselves)
+	b2i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("b2: %v", err)
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b2)
+
+	b3i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("b3: %v", err)
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	// Wait until heartbeat marks peers alive (initial success probes)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		aliveCount := 0
+		for _, n := range membership.List() {
+			if n.State == cluster.NodeAlive {
+				aliveCount++
+			}
+		}
+
+		if aliveCount == 3 {
+			break
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Simulate node2 becoming unresponsive by removing it from transport registry.
+	// (Simplest way: do not respond to health; drop entry.)
+	transport.Unregister(string(n2.ID))
+
+	// Wait until node2 transitions to suspect then removed.
+	var sawSuspect bool
+
+	deadline = time.Now().Add(2 * deadAfter)
+	for time.Now().Before(deadline) {
+		foundN2 := false
+		for _, n := range membership.List() {
+			if n.ID == n2.ID {
+				foundN2 = true
+
+				if n.State == cluster.NodeSuspect {
+					sawSuspect = true
+				}
+			}
+		}
+
+		if !foundN2 && sawSuspect {
+			break
+		} // removed after suspicion observed
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if !sawSuspect {
+		t.Fatalf("node2 never became suspect")
+	}
+
+	// ensure removed
+	for _, n := range membership.List() {
+		if n.ID == n2.ID {
+			t.Fatalf("node2 still present, state=%s", n.State)
+		}
+	}
+
+	// Node3 should remain alive; ensure not removed
+	n3Present := false
+	for _, n := range membership.List() {
+		if n.ID == n3.ID {
+			n3Present = true
+
+			if n.State != cluster.NodeAlive {
+				t.Fatalf("node3 not alive: %s", n.State)
+			}
+		}
+	}
+
+	if !n3Present {
+		t.Fatalf("node3 missing")
+	}
+
+	// Metrics sanity: at least one heartbeat failure and success recorded.
+	m := b1.Metrics()
+	if m.HeartbeatFailure == 0 {
+		t.Errorf("expected heartbeat failures > 0")
+	}
+
+	if m.HeartbeatSuccess == 0 {
+		t.Errorf("expected heartbeat successes > 0")
+	}
+
+	if m.NodesRemoved == 0 {
+		t.Errorf("expected nodes removed metric > 0")
+	}
+}
+tests/hypercache_distmemory_integration_test.go:15:1: cognitive-complexity: function TestDistMemoryForwardingReplication has cognitive complexity 19 (> max enabled 15) (revive)
+func TestDistMemoryForwardingReplication(t *testing.T) {
+	ring := cluster.NewRing(cluster.WithReplication(2))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// create two nodes/backends
+	n1 := cluster.NewNode("", "node1:0")
+	n2 := cluster.NewNode("", "node2:0")
+
+	b1i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("backend1: %v", err)
+	}
+
+	b2i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("backend2: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+
+	transport.Register(b1)
+	transport.Register(b2)
+
+	// pick keys to exercise distribution (simple deterministic list)
+	keys := []string{"alpha", "bravo", "charlie", "delta", "echo"}
+	// write via the node that is primary owner to guarantee placement + replication
+	for _, k := range keys {
+		owners := ring.Lookup(k)
+		if len(owners) == 0 {
+			t.Fatalf("no owners for key %s", k)
+		}
+
+		item := &cache.Item{Key: k, Value: k}
+
+		err := item.Valid()
+		if err != nil {
+			t.Fatalf("item valid %s: %v", k, err)
+		}
+
+		target := owners[0]
+
+		var err2 error
+
+		switch target {
+		case n1.ID:
+			err2 = b1.Set(context.Background(), item)
+		case n2.ID:
+			err2 = b2.Set(context.Background(), item)
+		default:
+			t.Fatalf("unexpected owner id %s", target)
+		}
+
+		if err2 != nil {
+			t.Fatalf("set %s via %s: %v", k, target, err2)
+		}
+	}
+
+	// Each key should be readable via either owner (b1 primary forward) or local if replica
+	for _, k := range keys {
+		if _, ok := b1.Get(context.Background(), k); !ok {
+			t.Fatalf("b1 cannot get key %s", k)
+		}
+
+		if _, ok := b2.Get(context.Background(), k); !ok { // should forward or local hit
+			t.Fatalf("b2 cannot get key %s", k)
+		}
+	}
+
+	// Check replication: at least one key should physically exist on b2 after writes from b1 when b2 is replica
+	foundReplica := slices.ContainsFunc(keys, b2.LocalContains)
+	if !foundReplica {
+		t.Fatalf("expected at least one replicated key on b2")
+	}
+}
+tests/hypercache_distmemory_integration_test.go:15:1: function-length: maximum number of lines per function exceeded; max 75 but got 92 (revive)
+func TestDistMemoryForwardingReplication(t *testing.T) {
+	ring := cluster.NewRing(cluster.WithReplication(2))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// create two nodes/backends
+	n1 := cluster.NewNode("", "node1:0")
+	n2 := cluster.NewNode("", "node2:0")
+
+	b1i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("backend1: %v", err)
+	}
+
+	b2i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("backend2: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+
+	transport.Register(b1)
+	transport.Register(b2)
+
+	// pick keys to exercise distribution (simple deterministic list)
+	keys := []string{"alpha", "bravo", "charlie", "delta", "echo"}
+	// write via the node that is primary owner to guarantee placement + replication
+	for _, k := range keys {
+		owners := ring.Lookup(k)
+		if len(owners) == 0 {
+			t.Fatalf("no owners for key %s", k)
+		}
+
+		item := &cache.Item{Key: k, Value: k}
+
+		err := item.Valid()
+		if err != nil {
+			t.Fatalf("item valid %s: %v", k, err)
+		}
+
+		target := owners[0]
+
+		var err2 error
+
+		switch target {
+		case n1.ID:
+			err2 = b1.Set(context.Background(), item)
+		case n2.ID:
+			err2 = b2.Set(context.Background(), item)
+		default:
+			t.Fatalf("unexpected owner id %s", target)
+		}
+
+		if err2 != nil {
+			t.Fatalf("set %s via %s: %v", k, target, err2)
+		}
+	}
+
+	// Each key should be readable via either owner (b1 primary forward) or local if replica
+	for _, k := range keys {
+		if _, ok := b1.Get(context.Background(), k); !ok {
+			t.Fatalf("b1 cannot get key %s", k)
+		}
+
+		if _, ok := b2.Get(context.Background(), k); !ok { // should forward or local hit
+			t.Fatalf("b2 cannot get key %s", k)
+		}
+	}
+
+	// Check replication: at least one key should physically exist on b2 after writes from b1 when b2 is replica
+	foundReplica := slices.ContainsFunc(keys, b2.LocalContains)
+	if !foundReplica {
+		t.Fatalf("expected at least one replicated key on b2")
+	}
+}
+tests/hypercache_distmemory_integration_test.go:15:1: cyclomatic: function TestDistMemoryForwardingReplication has cyclomatic complexity 16 (> max enabled 15) (revive)
+func TestDistMemoryForwardingReplication(t *testing.T) {
+	ring := cluster.NewRing(cluster.WithReplication(2))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// create two nodes/backends
+	n1 := cluster.NewNode("", "node1:0")
+	n2 := cluster.NewNode("", "node2:0")
+
+	b1i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("backend1: %v", err)
+	}
+
+	b2i, err := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("backend2: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+
+	transport.Register(b1)
+	transport.Register(b2)
+
+	// pick keys to exercise distribution (simple deterministic list)
+	keys := []string{"alpha", "bravo", "charlie", "delta", "echo"}
+	// write via the node that is primary owner to guarantee placement + replication
+	for _, k := range keys {
+		owners := ring.Lookup(k)
+		if len(owners) == 0 {
+			t.Fatalf("no owners for key %s", k)
+		}
+
+		item := &cache.Item{Key: k, Value: k}
+
+		err := item.Valid()
+		if err != nil {
+			t.Fatalf("item valid %s: %v", k, err)
+		}
+
+		target := owners[0]
+
+		var err2 error
+
+		switch target {
+		case n1.ID:
+			err2 = b1.Set(context.Background(), item)
+		case n2.ID:
+			err2 = b2.Set(context.Background(), item)
+		default:
+			t.Fatalf("unexpected owner id %s", target)
+		}
+
+		if err2 != nil {
+			t.Fatalf("set %s via %s: %v", k, target, err2)
+		}
+	}
+
+	// Each key should be readable via either owner (b1 primary forward) or local if replica
+	for _, k := range keys {
+		if _, ok := b1.Get(context.Background(), k); !ok {
+			t.Fatalf("b1 cannot get key %s", k)
+		}
+
+		if _, ok := b2.Get(context.Background(), k); !ok { // should forward or local hit
+			t.Fatalf("b2 cannot get key %s", k)
+		}
+	}
+
+	// Check replication: at least one key should physically exist on b2 after writes from b1 when b2 is replica
+	foundReplica := slices.ContainsFunc(keys, b2.LocalContains)
+	if !foundReplica {
+		t.Fatalf("expected at least one replicated key on b2")
+	}
+}
+tests/hypercache_distmemory_remove_readrepair_test.go:13:60: confusing-results: unnamed results of the same type may be confusing, consider using named results (revive)
+func newTwoNodeCluster(t *testing.T) (*backend.DistMemory, *backend.DistMemory, *cluster.Ring) {
+                                                           ^
+tests/hypercache_distmemory_remove_readrepair_test.go:113:1: cyclomatic: function TestDistMemoryReadRepair has cyclomatic complexity 27 (> max enabled 15) (revive)
+func TestDistMemoryReadRepair(t *testing.T) {
+	b1, b2, ring := newTwoNodeCluster(t)
+	key := "rr-key"
+
+	owners := ring.Lookup(key)
+	if len(owners) == 0 {
+		t.Fatalf("no owners")
+	}
+
+	item := &cache.Item{Key: key, Value: "val"}
+
+	err := item.Valid()
+	if err != nil {
+		t.Fatalf("valid: %v", err)
+	}
+
+	// write via primary
+	if owners[0] == b1.LocalNodeID() {
+		err := b1.Set(context.Background(), item)
+		if err != nil {
+			t.Fatalf("set: %v", err)
+		}
+	} else {
+		err := b2.Set(context.Background(), item)
+		if err != nil {
+			t.Fatalf("set: %v", err)
+		}
+	}
+
+	// determine replica node (owners[1]) and drop local copy there manually
+	if len(owners) < 2 {
+		t.Skip("replication factor <2")
+	}
+
+	replica := owners[1]
+	// optional: t.Logf("owners: %v primary=%s replica=%s", owners, owners[0], replica)
+	if replica == b1.LocalNodeID() {
+		b1.DebugDropLocal(key)
+	} else {
+		b2.DebugDropLocal(key)
+	}
+
+	// ensure dropped locally
+	if replica == b1.LocalNodeID() && b1.LocalContains(key) {
+		t.Fatalf("replica still has key after drop")
+	}
+
+	if replica == b2.LocalNodeID() && b2.LocalContains(key) {
+		t.Fatalf("replica still has key after drop")
+	}
+
+	// issue Get from a non-owner node to trigger forwarding, then verify owners repaired.
+	// choose a requester: use node that is neither primary nor replica if possible; with 2 nodes this means primary forwards to replica or
+	// vice versa.
+	requester := b1
+	if owners[0] == b1.LocalNodeID() && replica == b2.LocalNodeID() {
+		requester = b2 // request from replica to forward to primary
+	} else if owners[0] == b2.LocalNodeID() && replica == b1.LocalNodeID() {
+		requester = b1
+	}
+
+	if _, ok := requester.Get(context.Background(), key); !ok {
+		t.Fatalf("get for read-repair failed")
+	}
+
+	// after forwarding, both owners should have key locally again
+	if owners[0] == b1.LocalNodeID() && !b1.LocalContains(key) {
+		t.Fatalf("primary missing after read repair")
+	}
+
+	if owners[0] == b2.LocalNodeID() && !b2.LocalContains(key) {
+		t.Fatalf("primary missing after read repair")
+	}
+
+	if replica == b1.LocalNodeID() && !b1.LocalContains(key) {
+		t.Fatalf("replica missing after read repair")
+	}
+
+	if replica == b2.LocalNodeID() && !b2.LocalContains(key) {
+		t.Fatalf("replica missing after read repair")
+	}
+
+	// metrics should show at least one read repair
+	var repaired bool
+
+	if replica == b1.LocalNodeID() {
+		repaired = b1.Metrics().ReadRepair > 0
+	} else {
+		repaired = b2.Metrics().ReadRepair > 0
+	}
+
+	if !repaired {
+		t.Fatalf("expected read-repair metric increment")
+	}
+}
+tests/hypercache_distmemory_remove_readrepair_test.go:113:1: function-length: maximum number of lines per function exceeded; max 75 but got 93 (revive)
+func TestDistMemoryReadRepair(t *testing.T) {
+	b1, b2, ring := newTwoNodeCluster(t)
+	key := "rr-key"
+
+	owners := ring.Lookup(key)
+	if len(owners) == 0 {
+		t.Fatalf("no owners")
+	}
+
+	item := &cache.Item{Key: key, Value: "val"}
+
+	err := item.Valid()
+	if err != nil {
+		t.Fatalf("valid: %v", err)
+	}
+
+	// write via primary
+	if owners[0] == b1.LocalNodeID() {
+		err := b1.Set(context.Background(), item)
+		if err != nil {
+			t.Fatalf("set: %v", err)
+		}
+	} else {
+		err := b2.Set(context.Background(), item)
+		if err != nil {
+			t.Fatalf("set: %v", err)
+		}
+	}
+
+	// determine replica node (owners[1]) and drop local copy there manually
+	if len(owners) < 2 {
+		t.Skip("replication factor <2")
+	}
+
+	replica := owners[1]
+	// optional: t.Logf("owners: %v primary=%s replica=%s", owners, owners[0], replica)
+	if replica == b1.LocalNodeID() {
+		b1.DebugDropLocal(key)
+	} else {
+		b2.DebugDropLocal(key)
+	}
+
+	// ensure dropped locally
+	if replica == b1.LocalNodeID() && b1.LocalContains(key) {
+		t.Fatalf("replica still has key after drop")
+	}
+
+	if replica == b2.LocalNodeID() && b2.LocalContains(key) {
+		t.Fatalf("replica still has key after drop")
+	}
+
+	// issue Get from a non-owner node to trigger forwarding, then verify owners repaired.
+	// choose a requester: use node that is neither primary nor replica if possible; with 2 nodes this means primary forwards to replica or
+	// vice versa.
+	requester := b1
+	if owners[0] == b1.LocalNodeID() && replica == b2.LocalNodeID() {
+		requester = b2 // request from replica to forward to primary
+	} else if owners[0] == b2.LocalNodeID() && replica == b1.LocalNodeID() {
+		requester = b1
+	}
+
+	if _, ok := requester.Get(context.Background(), key); !ok {
+		t.Fatalf("get for read-repair failed")
+	}
+
+	// after forwarding, both owners should have key locally again
+	if owners[0] == b1.LocalNodeID() && !b1.LocalContains(key) {
+		t.Fatalf("primary missing after read repair")
+	}
+
+	if owners[0] == b2.LocalNodeID() && !b2.LocalContains(key) {
+		t.Fatalf("primary missing after read repair")
+	}
+
+	if replica == b1.LocalNodeID() && !b1.LocalContains(key) {
+		t.Fatalf("replica missing after read repair")
+	}
+
+	if replica == b2.LocalNodeID() && !b2.LocalContains(key) {
+		t.Fatalf("replica missing after read repair")
+	}
+
+	// metrics should show at least one read repair
+	var repaired bool
+
+	if replica == b1.LocalNodeID() {
+		repaired = b1.Metrics().ReadRepair > 0
+	} else {
+		repaired = b2.Metrics().ReadRepair > 0
+	}
+
+	if !repaired {
+		t.Fatalf("expected read-repair metric increment")
+	}
+}
+tests/hypercache_distmemory_stale_quorum_test.go:14:1: function-length: maximum number of lines per function exceeded; max 75 but got 118 (revive)
+func TestDistMemoryStaleQuorum(t *testing.T) {
+	ring := cluster.NewRing(cluster.WithReplication(3))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	b1i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b2i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b3i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	key := "sq-key"
+
+	owners := ring.Lookup(key)
+	if len(owners) != 3 {
+		t.Skip("replication factor !=3")
+	}
+
+	// Write initial version via primary
+	primary := owners[0]
+	item := &cache.Item{Key: key, Value: "v1"}
+
+	_ = item.Valid()
+	if primary == b1.LocalNodeID() {
+		_ = b1.Set(context.Background(), item)
+	} else if primary == b2.LocalNodeID() {
+		_ = b2.Set(context.Background(), item)
+	} else {
+		_ = b3.Set(context.Background(), item)
+	}
+
+	// Manually bump version on one replica to simulate a newer write that others missed
+	// Pick owners[1] as ahead replica
+	aheadID := owners[1]
+	ahead := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[aheadID]
+	ahead.DebugInject(&cache.Item{Key: key, Value: "v2", Version: 5, Origin: string(ahead.LocalNodeID()), LastUpdated: time.Now()})
+
+	// Drop local copy on owners[2] to simulate stale/missing
+	lagID := owners[2]
+	lag := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[lagID]
+	lag.DebugDropLocal(key)
+
+	// Issue quorum read from a non-ahead node (choose primary if not ahead, else third)
+	requester := b1
+	if requester.LocalNodeID() == aheadID {
+		requester = b2
+	}
+
+	if requester.LocalNodeID() == aheadID {
+		requester = b3
+	}
+
+	got, ok := requester.Get(context.Background(), key)
+	if !ok {
+		t.Fatalf("quorum get failed")
+	}
+
+	// Value stored as interface{} may be string (not []byte) in this test
+	if sval, okCast := got.Value.(string); !okCast || sval != "v2" {
+		t.Fatalf("expected quorum to return newer version v2, got=%v (type %T)", got.Value, got.Value)
+	}
+
+	// Allow brief repair propagation
+	time.Sleep(50 * time.Millisecond)
+
+	// All owners should now have v2 (version 5)
+	for _, oid := range owners {
+		inst := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[oid]
+
+		it, ok2 := inst.Get(context.Background(), key)
+		if !ok2 || it.Version != 5 {
+			t.Fatalf("owner %s not repaired to v2 (v5) -> (%v,%v)", oid, ok2, it)
+		}
+	}
+
+	// ReadRepair metric should have incremented somewhere
+	if b1.Metrics().ReadRepair+b2.Metrics().ReadRepair+b3.Metrics().ReadRepair == 0 {
+		t.Fatalf("expected read repair metric >0")
+	}
+}
+tests/hypercache_distmemory_stale_quorum_test.go:14:1: function-length: maximum number of statements per function exceeded; max 50 but got 57 (revive)
+func TestDistMemoryStaleQuorum(t *testing.T) {
+	ring := cluster.NewRing(cluster.WithReplication(3))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	b1i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b2i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b3i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	key := "sq-key"
+
+	owners := ring.Lookup(key)
+	if len(owners) != 3 {
+		t.Skip("replication factor !=3")
+	}
+
+	// Write initial version via primary
+	primary := owners[0]
+	item := &cache.Item{Key: key, Value: "v1"}
+
+	_ = item.Valid()
+	if primary == b1.LocalNodeID() {
+		_ = b1.Set(context.Background(), item)
+	} else if primary == b2.LocalNodeID() {
+		_ = b2.Set(context.Background(), item)
+	} else {
+		_ = b3.Set(context.Background(), item)
+	}
+
+	// Manually bump version on one replica to simulate a newer write that others missed
+	// Pick owners[1] as ahead replica
+	aheadID := owners[1]
+	ahead := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[aheadID]
+	ahead.DebugInject(&cache.Item{Key: key, Value: "v2", Version: 5, Origin: string(ahead.LocalNodeID()), LastUpdated: time.Now()})
+
+	// Drop local copy on owners[2] to simulate stale/missing
+	lagID := owners[2]
+	lag := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[lagID]
+	lag.DebugDropLocal(key)
+
+	// Issue quorum read from a non-ahead node (choose primary if not ahead, else third)
+	requester := b1
+	if requester.LocalNodeID() == aheadID {
+		requester = b2
+	}
+
+	if requester.LocalNodeID() == aheadID {
+		requester = b3
+	}
+
+	got, ok := requester.Get(context.Background(), key)
+	if !ok {
+		t.Fatalf("quorum get failed")
+	}
+
+	// Value stored as interface{} may be string (not []byte) in this test
+	if sval, okCast := got.Value.(string); !okCast || sval != "v2" {
+		t.Fatalf("expected quorum to return newer version v2, got=%v (type %T)", got.Value, got.Value)
+	}
+
+	// Allow brief repair propagation
+	time.Sleep(50 * time.Millisecond)
+
+	// All owners should now have v2 (version 5)
+	for _, oid := range owners {
+		inst := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[oid]
+
+		it, ok2 := inst.Get(context.Background(), key)
+		if !ok2 || it.Version != 5 {
+			t.Fatalf("owner %s not repaired to v2 (v5) -> (%v,%v)", oid, ok2, it)
+		}
+	}
+
+	// ReadRepair metric should have incremented somewhere
+	if b1.Metrics().ReadRepair+b2.Metrics().ReadRepair+b3.Metrics().ReadRepair == 0 {
+		t.Fatalf("expected read repair metric >0")
+	}
+}
+tests/hypercache_distmemory_stale_quorum_test.go:14:1: cyclomatic: function TestDistMemoryStaleQuorum has cyclomatic complexity 16 (> max enabled 15) (revive)
+func TestDistMemoryStaleQuorum(t *testing.T) {
+	ring := cluster.NewRing(cluster.WithReplication(3))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	b1i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b2i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b3i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	key := "sq-key"
+
+	owners := ring.Lookup(key)
+	if len(owners) != 3 {
+		t.Skip("replication factor !=3")
+	}
+
+	// Write initial version via primary
+	primary := owners[0]
+	item := &cache.Item{Key: key, Value: "v1"}
+
+	_ = item.Valid()
+	if primary == b1.LocalNodeID() {
+		_ = b1.Set(context.Background(), item)
+	} else if primary == b2.LocalNodeID() {
+		_ = b2.Set(context.Background(), item)
+	} else {
+		_ = b3.Set(context.Background(), item)
+	}
+
+	// Manually bump version on one replica to simulate a newer write that others missed
+	// Pick owners[1] as ahead replica
+	aheadID := owners[1]
+	ahead := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[aheadID]
+	ahead.DebugInject(&cache.Item{Key: key, Value: "v2", Version: 5, Origin: string(ahead.LocalNodeID()), LastUpdated: time.Now()})
+
+	// Drop local copy on owners[2] to simulate stale/missing
+	lagID := owners[2]
+	lag := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[lagID]
+	lag.DebugDropLocal(key)
+
+	// Issue quorum read from a non-ahead node (choose primary if not ahead, else third)
+	requester := b1
+	if requester.LocalNodeID() == aheadID {
+		requester = b2
+	}
+
+	if requester.LocalNodeID() == aheadID {
+		requester = b3
+	}
+
+	got, ok := requester.Get(context.Background(), key)
+	if !ok {
+		t.Fatalf("quorum get failed")
+	}
+
+	// Value stored as interface{} may be string (not []byte) in this test
+	if sval, okCast := got.Value.(string); !okCast || sval != "v2" {
+		t.Fatalf("expected quorum to return newer version v2, got=%v (type %T)", got.Value, got.Value)
+	}
+
+	// Allow brief repair propagation
+	time.Sleep(50 * time.Millisecond)
+
+	// All owners should now have v2 (version 5)
+	for _, oid := range owners {
+		inst := map[cluster.NodeID]*backend.DistMemory{b1.LocalNodeID(): b1, b2.LocalNodeID(): b2, b3.LocalNodeID(): b3}[oid]
+
+		it, ok2 := inst.Get(context.Background(), key)
+		if !ok2 || it.Version != 5 {
+			t.Fatalf("owner %s not repaired to v2 (v5) -> (%v,%v)", oid, ok2, it)
+		}
+	}
+
+	// ReadRepair metric should have incremented somewhere
+	if b1.Metrics().ReadRepair+b2.Metrics().ReadRepair+b3.Metrics().ReadRepair == 0 {
+		t.Fatalf("expected read repair metric >0")
+	}
+}
+tests/hypercache_distmemory_tiebreak_test.go:15:1: function-length: maximum number of lines per function exceeded; max 75 but got 86 (revive)
+func TestDistMemoryVersionTieBreak(t *testing.T) { //nolint:paralleltest
+	interval := 5 * time.Millisecond
+	ring := cluster.NewRing(cluster.WithReplication(3))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	b1i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistReplication(3),
+		backend.WithDistHeartbeat(interval, 0, 0),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+		backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
+	)
+	b2i, _ := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
+	b3i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	// choose key where b1,b2,b3 ordering fixed
+	key := "tie"
+	for i := range 3000 {
+		cand := fmt.Sprintf("tie%d", i)
+
+		owners := b1.DebugOwners(cand)
+		if len(owners) == 3 && owners[0] == b1.LocalNodeID() && owners[1] == b2.LocalNodeID() && owners[2] == b3.LocalNodeID() {
+			key = cand
+
+			break
+		}
+	}
+
+	// primary write to establish version=1 origin=b1
+	err := b1.Set(context.Background(), &cache.Item{Key: key, Value: "v1"})
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	// Inject a fake item on b2 with SAME version but lexicographically larger origin so it should lose.
+	b2.DebugDropLocal(key)
+	b2.DebugInject(&cache.Item{Key: key, Value: "alt", Version: 1, Origin: "zzzz"})
+
+	// Quorum read through b3 triggers selection + repair.
+	it, ok := b3.Get(context.Background(), key)
+	if !ok {
+		t.Fatalf("expected quorum read ok")
+	}
+
+	if it.Value != "v1" {
+		t.Fatalf("expected b1 value win, got %v", it.Value)
+	}
+
+	// Ensure b2 repaired to winning value.
+	if it2, ok2 := b2.Get(context.Background(), key); !ok2 || it2.Value != "v1" {
+		t.Fatalf("expected repaired tie-break value on b2")
+	}
+}
+tests/hypercache_distmemory_versioning_test.go:17:1: cyclomatic: function TestDistMemoryVersioningQuorum has cyclomatic complexity 16 (> max enabled 15) (revive)
+func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
+	interval := 10 * time.Millisecond
+	ring := cluster.NewRing(cluster.WithReplication(3))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// three nodes
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	// enable quorum read + write consistency on b1
+	b1i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistReplication(3),
+		backend.WithDistHeartbeat(interval, 0, 0),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+		backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
+	)
+	b2i, _ := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
+	b3i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b1, ok := b1i.(*backend.DistMemory)
+
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	// Find a deterministic key where ownership ordering is b1,b2,b3 to avoid forwarding complexities.
+	key := "k"
+	for i := range 2000 { // brute force
+		cand := fmt.Sprintf("k%d", i)
+
+		owners := b1.DebugOwners(cand)
+		if len(owners) == 3 && owners[0] == b1.LocalNodeID() && owners[1] == b2.LocalNodeID() && owners[2] == b3.LocalNodeID() {
+			key = cand
+
+			break
+		}
+	}
+
+	// Write key via primary.
+	item1 := &cache.Item{Key: key, Value: "v1"}
+
+	err := b1.Set(context.Background(), item1)
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	// Simulate a concurrent stale write from another node with lower version (manual injection on b2).
+	itemStale := &cache.Item{Key: key, Value: "v0", Version: 0, Origin: "zzz"}
+	b2.DebugDropLocal(key)
+	b2.DebugInject(itemStale)
+
+	// Read quorum from node3: should observe latest (v1) and repair b2.
+	it, ok := b3.Get(context.Background(), key)
+	if !ok {
+		t.Fatalf("expected read ok")
+	}
+
+	if it.Value != "v1" {
+		t.Fatalf("expected value v1, got %v", it.Value)
+	}
+
+	// Ensure b2 repaired.
+	if it2, ok2 := b2.Get(context.Background(), key); !ok2 || it2.Value != "v1" {
+		t.Fatalf("expected repaired value on b2")
+	}
+
+	// Simulate reduced acks: unregister one replica and perform write requiring quorum (2 of 3).
+	transport.Unregister(string(n3.ID))
+
+	item2 := &cache.Item{Key: key, Value: "v2"}
+
+	err = b1.Set(context.Background(), item2)
+	if err != nil && !errors.Is(err, sentinel.ErrQuorumFailed) {
+		t.Fatalf("unexpected error after replica loss: %v", err)
+	}
+}
+tests/hypercache_distmemory_versioning_test.go:17:1: function-length: maximum number of lines per function exceeded; max 75 but got 101 (revive)
+func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
+	interval := 10 * time.Millisecond
+	ring := cluster.NewRing(cluster.WithReplication(3))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// three nodes
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	// enable quorum read + write consistency on b1
+	b1i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistReplication(3),
+		backend.WithDistHeartbeat(interval, 0, 0),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+		backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
+	)
+	b2i, _ := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
+	b3i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b1, ok := b1i.(*backend.DistMemory)
+
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	// Find a deterministic key where ownership ordering is b1,b2,b3 to avoid forwarding complexities.
+	key := "k"
+	for i := range 2000 { // brute force
+		cand := fmt.Sprintf("k%d", i)
+
+		owners := b1.DebugOwners(cand)
+		if len(owners) == 3 && owners[0] == b1.LocalNodeID() && owners[1] == b2.LocalNodeID() && owners[2] == b3.LocalNodeID() {
+			key = cand
+
+			break
+		}
+	}
+
+	// Write key via primary.
+	item1 := &cache.Item{Key: key, Value: "v1"}
+
+	err := b1.Set(context.Background(), item1)
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	// Simulate a concurrent stale write from another node with lower version (manual injection on b2).
+	itemStale := &cache.Item{Key: key, Value: "v0", Version: 0, Origin: "zzz"}
+	b2.DebugDropLocal(key)
+	b2.DebugInject(itemStale)
+
+	// Read quorum from node3: should observe latest (v1) and repair b2.
+	it, ok := b3.Get(context.Background(), key)
+	if !ok {
+		t.Fatalf("expected read ok")
+	}
+
+	if it.Value != "v1" {
+		t.Fatalf("expected value v1, got %v", it.Value)
+	}
+
+	// Ensure b2 repaired.
+	if it2, ok2 := b2.Get(context.Background(), key); !ok2 || it2.Value != "v1" {
+		t.Fatalf("expected repaired value on b2")
+	}
+
+	// Simulate reduced acks: unregister one replica and perform write requiring quorum (2 of 3).
+	transport.Unregister(string(n3.ID))
+
+	item2 := &cache.Item{Key: key, Value: "v2"}
+
+	err = b1.Set(context.Background(), item2)
+	if err != nil && !errors.Is(err, sentinel.ErrQuorumFailed) {
+		t.Fatalf("unexpected error after replica loss: %v", err)
+	}
+}
+tests/hypercache_distmemory_versioning_test.go:17:1: function-length: maximum number of statements per function exceeded; max 50 but got 51 (revive)
+func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
+	interval := 10 * time.Millisecond
+	ring := cluster.NewRing(cluster.WithReplication(3))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	// three nodes
+	n1 := cluster.NewNode("", "n1:0")
+	n2 := cluster.NewNode("", "n2:0")
+	n3 := cluster.NewNode("", "n3:0")
+
+	// enable quorum read + write consistency on b1
+	b1i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistTransport(transport),
+		backend.WithDistReplication(3),
+		backend.WithDistHeartbeat(interval, 0, 0),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+		backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
+	)
+	b2i, _ := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
+	b3i, _ := backend.NewDistMemory(
+		context.TODO(),
+		backend.WithDistMembership(membership, n3),
+		backend.WithDistTransport(transport),
+		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+	)
+	b1, ok := b1i.(*backend.DistMemory)
+
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	b3, ok := b3i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b3i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+	StopOnCleanup(t, b3)
+
+	transport.Register(b1)
+	transport.Register(b2)
+	transport.Register(b3)
+
+	// Find a deterministic key where ownership ordering is b1,b2,b3 to avoid forwarding complexities.
+	key := "k"
+	for i := range 2000 { // brute force
+		cand := fmt.Sprintf("k%d", i)
+
+		owners := b1.DebugOwners(cand)
+		if len(owners) == 3 && owners[0] == b1.LocalNodeID() && owners[1] == b2.LocalNodeID() && owners[2] == b3.LocalNodeID() {
+			key = cand
+
+			break
+		}
+	}
+
+	// Write key via primary.
+	item1 := &cache.Item{Key: key, Value: "v1"}
+
+	err := b1.Set(context.Background(), item1)
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	// Simulate a concurrent stale write from another node with lower version (manual injection on b2).
+	itemStale := &cache.Item{Key: key, Value: "v0", Version: 0, Origin: "zzz"}
+	b2.DebugDropLocal(key)
+	b2.DebugInject(itemStale)
+
+	// Read quorum from node3: should observe latest (v1) and repair b2.
+	it, ok := b3.Get(context.Background(), key)
+	if !ok {
+		t.Fatalf("expected read ok")
+	}
+
+	if it.Value != "v1" {
+		t.Fatalf("expected value v1, got %v", it.Value)
+	}
+
+	// Ensure b2 repaired.
+	if it2, ok2 := b2.Get(context.Background(), key); !ok2 || it2.Value != "v1" {
+		t.Fatalf("expected repaired value on b2")
+	}
+
+	// Simulate reduced acks: unregister one replica and perform write requiring quorum (2 of 3).
+	transport.Unregister(string(n3.ID))
+
+	item2 := &cache.Item{Key: key, Value: "v2"}
+
+	err = b1.Set(context.Background(), item2)
+	if err != nil && !errors.Is(err, sentinel.ErrQuorumFailed) {
+		t.Fatalf("unexpected error after replica loss: %v", err)
+	}
+}
+tests/hypercache_distmemory_write_quorum_test.go:76:1: function-length: maximum number of lines per function exceeded; max 75 but got 89 (revive)
+func TestWriteQuorumFailure(t *testing.T) {
+	ctx := context.Background()
+	transport := backend.NewInProcessTransport()
+
+	// Shared ring/membership so ownership is identical across nodes.
+	ring := cluster.NewRing(cluster.WithReplication(3))
+	m := cluster.NewMembership(ring)
+	m.Upsert(cluster.NewNode("A", "A"))
+	m.Upsert(cluster.NewNode("B", "B"))
+	m.Upsert(cluster.NewNode("C", "C"))
+
+	opts := []backend.DistMemoryOption{
+		backend.WithDistReplication(3),
+		backend.WithDistWriteConsistency(backend.ConsistencyAll),
+		backend.WithDistHintTTL(time.Minute),
+		backend.WithDistHintReplayInterval(50 * time.Millisecond),
+	}
+
+	// Create three nodes but only register two with transport to force ALL failure.
+	na, _ := backend.NewDistMemory(
+		ctx,
+		append(opts, backend.WithDistNode("A", "A"), backend.WithDistMembership(m, cluster.NewNode("A", "A")))...)
+	nb, _ := backend.NewDistMemory(
+		ctx,
+		append(opts, backend.WithDistNode("B", "B"), backend.WithDistMembership(m, cluster.NewNode("B", "B")))...)
+
+	nc, _ := backend.NewDistMemory(
+		ctx,
+		append(opts, backend.WithDistNode("C", "C"), backend.WithDistMembership(m, cluster.NewNode("C", "C")))...)
+
+	da, ok := any(na).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", na)
+	}
+
+	db, ok := any(nb).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", nb)
+	}
+
+	dc, ok := any(nc).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", nc)
+	}
+
+	StopOnCleanup(t, da)
+	StopOnCleanup(t, db)
+	StopOnCleanup(t, dc)
+
+	da.SetTransport(transport)
+	db.SetTransport(transport)
+	transport.Register(da)
+	transport.Register(db) // C intentionally not registered (unreachable)
+
+	// Find a key whose owners include all three nodes (replication=3 ensures this) – just brute force until order stable.
+	key := "quorum-all-fail"
+	for i := range 50 { // try some keys to ensure A is primary sometimes; not strictly required
+		candidate := fmt.Sprintf("quorum-all-fail-%d", i)
+
+		owners := da.Ring().Lookup(candidate)
+		if len(owners) == 3 && string(owners[0]) == "A" { // prefer A primary for clarity
+			key = candidate
+
+			break
+		}
+	}
+
+	item := &cache.Item{Key: key, Value: "v-fail"}
+
+	err := na.Set(ctx, item)
+	if !errors.Is(err, sentinel.ErrQuorumFailed) {
+		// Provide ring owners for debugging.
+		owners := da.Ring().Lookup(key)
+
+		ids := make([]string, 0, len(owners))
+		for _, o := range owners {
+			ids = append(ids, string(o))
+		}
+
+		t.Fatalf("expected ErrQuorumFailed, got %v (owners=%v)", err, ids)
+	}
+
+	metrics := da.Metrics()
+	if metrics.WriteQuorumFailures < 1 {
+		t.Fatalf("expected WriteQuorumFailures >=1, got %d", metrics.WriteQuorumFailures)
+	}
+
+	if metrics.WriteAttempts < 1 { // should have attempted at least once
+		t.Fatalf("expected WriteAttempts >=1, got %d", metrics.WriteAttempts)
+	}
+}
+tests/hypercache_get_or_set_test.go:15:1: function-length: maximum number of lines per function exceeded; max 75 but got 98 (revive)
+func TestHyperCache_GetOrSet(t *testing.T) {
+	tests := []struct {
+		name          string
+		key           string
+		value         any
+		expiry        time.Duration
+		expectedValue any
+		expectedErr   error
+	}{
+		{
+			name:          "get or set with valid key and value",
+			key:           "key1",
+			value:         "value1",
+			expiry:        0,
+			expectedValue: "value1",
+			expectedErr:   nil,
+		},
+		{
+			name:          "get or set with valid key and value with expiry",
+			key:           "key2",
+			value:         "value2",
+			expiry:        time.Second,
+			expectedValue: "value2",
+			expectedErr:   nil,
+		},
+		// {
+		// 	name:          "get or set with empty key",
+		// 	key:           "",
+		// 	value:         "value3",
+		// 	expiry:        0,
+		// 	expectedValue: nil,
+		// 	expectedErr:   hypercache.ErrInvalidKey,
+		// },
+		{
+			name:          "get or set with nil value",
+			key:           "key4",
+			value:         nil,
+			expiry:        0,
+			expectedValue: nil,
+			expectedErr:   sentinel.ErrNilValue,
+		},
+		{
+			name:          "get or set with key that has expired",
+			key:           "key5",
+			value:         "value5",
+			expiry:        time.Millisecond,
+			expectedValue: nil,
+			expectedErr:   sentinel.ErrKeyExpired,
+		},
+		{
+			name:          "get or set with key that already exists",
+			key:           "key1",
+			value:         "value6",
+			expiry:        0,
+			expectedValue: "value1",
+			expectedErr:   nil,
+		},
+	}
+	cache, err := hypercache.NewInMemoryWithDefaults(context.TODO(), 10)
+	assert.Nil(t, err)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var (
+				val any
+				err error
+			)
+
+			shouldExpire := errors.Is(test.expectedErr, sentinel.ErrKeyExpired)
+
+			val, err = cache.GetOrSet(context.TODO(), test.key, test.value, test.expiry)
+			if !shouldExpire {
+				assert.Equal(t, test.expectedErr, err)
+			}
+
+			if err == nil && !shouldExpire {
+				assert.Equal(t, test.expectedValue, val)
+			}
+
+			if shouldExpire {
+				t.Log("sleeping for 2 Millisecond to allow the key to expire")
+				time.Sleep(2 * time.Millisecond)
+
+				_, err = cache.GetOrSet(context.TODO(), test.key, test.value, test.expiry)
+				assert.Equal(t, test.expectedErr, err)
+			}
+
+			// Check if the value has been set in the cache
+			if err == nil {
+				val, ok := cache.Get(context.TODO(), test.key)
+				assert.True(t, ok)
+				assert.Equal(t, test.expectedValue, val)
+			} else {
+				val, ok := cache.Get(context.TODO(), test.key)
+				assert.False(t, ok)
+				assert.Nil(t, val)
+			}
+		})
+	}
+}
+tests/hypercache_get_test.go:14:1: cognitive-complexity: function TestHyperCache_Get has cognitive complexity 17 (> max enabled 15) (revive)
+func TestHyperCache_Get(t *testing.T) {
+	tests := []struct {
+		name          string
+		key           string
+		value         any
+		expiry        time.Duration
+		expectedValue any
+		expectedErr   error
+		sleep         time.Duration
+		shouldSet     bool
+	}{
+		{
+			name:          "get with valid key",
+			key:           "key1",
+			value:         "value1",
+			expiry:        0,
+			expectedValue: "value1",
+			expectedErr:   nil,
+		},
+		{
+			name:          "get with valid key and value with expiry",
+			key:           "key2",
+			value:         "value2",
+			expiry:        5 * time.Second,
+			expectedValue: "value2",
+			expectedErr:   nil,
+		},
+		// {
+		// 	name:          "get with empty key",
+		// 	key:           "",
+		// 	value:         "value3",
+		// 	expiry:        0,
+		// 	expectedValue: "",
+		// 	expectedErr:   hypercache.ErrInvalidKey,
+		// },
+		{
+			name:          "get with expired key",
+			key:           "key4",
+			value:         "value4",
+			expiry:        1 * time.Second,
+			expectedValue: nil,
+			expectedErr:   nil,
+			sleep:         2 * time.Second,
+		},
+		{
+			name:          "get with non-existent key",
+			key:           "key5",
+			value:         "value5",
+			expiry:        0,
+			expectedValue: nil,
+			expectedErr:   sentinel.ErrKeyNotFound,
+			shouldSet:     false,
+		},
+	}
+	cache, err := hypercache.NewInMemoryWithDefaults(context.TODO(), 10)
+	assert.Nil(t, err)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.shouldSet {
+				err = cache.Set(context.TODO(), test.key, test.value, test.expiry)
+				if err != nil {
+					assert.Equal(t, test.expectedErr, err)
+				}
+
+				if test.sleep > 0 {
+					time.Sleep(test.sleep)
+				}
+			}
+
+			val, ok := cache.Get(context.TODO(), test.key)
+			if test.expectedErr != nil || !ok {
+				assert.False(t, ok)
+			} else {
+				assert.True(t, ok)
+				assert.Equal(t, test.expectedValue, val)
+			}
+		})
+	}
+}
+tests/hypercache_get_test.go:14:1: function-length: maximum number of lines per function exceeded; max 75 but got 78 (revive)
+func TestHyperCache_Get(t *testing.T) {
+	tests := []struct {
+		name          string
+		key           string
+		value         any
+		expiry        time.Duration
+		expectedValue any
+		expectedErr   error
+		sleep         time.Duration
+		shouldSet     bool
+	}{
+		{
+			name:          "get with valid key",
+			key:           "key1",
+			value:         "value1",
+			expiry:        0,
+			expectedValue: "value1",
+			expectedErr:   nil,
+		},
+		{
+			name:          "get with valid key and value with expiry",
+			key:           "key2",
+			value:         "value2",
+			expiry:        5 * time.Second,
+			expectedValue: "value2",
+			expectedErr:   nil,
+		},
+		// {
+		// 	name:          "get with empty key",
+		// 	key:           "",
+		// 	value:         "value3",
+		// 	expiry:        0,
+		// 	expectedValue: "",
+		// 	expectedErr:   hypercache.ErrInvalidKey,
+		// },
+		{
+			name:          "get with expired key",
+			key:           "key4",
+			value:         "value4",
+			expiry:        1 * time.Second,
+			expectedValue: nil,
+			expectedErr:   nil,
+			sleep:         2 * time.Second,
+		},
+		{
+			name:          "get with non-existent key",
+			key:           "key5",
+			value:         "value5",
+			expiry:        0,
+			expectedValue: nil,
+			expectedErr:   sentinel.ErrKeyNotFound,
+			shouldSet:     false,
+		},
+	}
+	cache, err := hypercache.NewInMemoryWithDefaults(context.TODO(), 10)
+	assert.Nil(t, err)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.shouldSet {
+				err = cache.Set(context.TODO(), test.key, test.value, test.expiry)
+				if err != nil {
+					assert.Equal(t, test.expectedErr, err)
+				}
+
+				if test.sleep > 0 {
+					time.Sleep(test.sleep)
+				}
+			}
+
+			val, ok := cache.Get(context.TODO(), test.key)
+			if test.expectedErr != nil || !ok {
+				assert.False(t, ok)
+			} else {
+				assert.True(t, ok)
+				assert.Equal(t, test.expectedValue, val)
+			}
+		})
+	}
+}
+tests/hypercache_http_merkle_test.go:15:1: cognitive-complexity: function TestHTTPFetchMerkle has cognitive complexity 22 (> max enabled 15) (revive)
+func TestHTTPFetchMerkle(t *testing.T) {
+	ctx := context.Background()
+
+	// shared ring/membership
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+
+	// create two nodes with HTTP server enabled (dynamically allocated addresses)
+	addr1 := AllocatePort(t)
+	addr2 := AllocatePort(t)
+
+	n1 := cluster.NewNode("", addr1)
+
+	b1i, err := backend.NewDistMemory(ctx,
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistNode("n1", addr1),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("b1: %v", err)
+	}
+
+	n2 := cluster.NewNode("", addr2)
+
+	b2i, err := backend.NewDistMemory(ctx,
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistNode("n2", addr2),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("b2: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+
+	// HTTP transport resolver maps node IDs to http base URLs.
+	resolver := func(id string) (string, bool) {
+		switch id { // node IDs same as provided
+		case "n1":
+			return "http://" + b1.LocalNodeAddr(), true
+		case "n2":
+			return "http://" + b2.LocalNodeAddr(), true
+		}
+
+		return "", false
+	}
+	// 5s transport timeout (was 2s) — under -race the fiber listener can take
+	// >2s to accept its first request, which made SyncWith time out spuriously.
+	transport := backend.NewDistHTTPTransport(5*time.Second, resolver)
+	b1.SetTransport(transport)
+	b2.SetTransport(transport)
+
+	// ensure membership has both before writes (already upserted in constructors)
+	// write some keys to b1 only
+	for i := range 5 { // direct inject to sidestep replication/forwarding complexity
+		item := &cache.Item{Key: httpKey(i), Value: []byte("v"), Version: uint64(i + 1), Origin: "n1", LastUpdated: time.Now()}
+		b1.DebugInject(item)
+	}
+
+	// Poll the HTTP merkle endpoint until it actually responds 200. Under
+	// -race the fiber listener can take seconds to start accepting requests
+	// even after Listen() returns; a single-shot Get is racy.
+	merkleReady := false
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://" + b1.LocalNodeAddr() + "/internal/merkle")
+		if err == nil {
+			_ = resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				merkleReady = true
+
+				break
+			}
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !merkleReady {
+		t.Fatal("merkle endpoint did not become ready within deadline")
+	}
+
+	// b2 sync from b1 via HTTP transport
+	if err := b2.SyncWith(ctx, "n1"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// Validate keys present on b2. Allow brief retry to absorb any async tail
+	// in sync's apply path (each missing key is retried once).
+	for i := range 5 {
+		if _, ok := b2.Get(ctx, httpKey(i)); ok {
+			continue
+		}
+
+		// One retry: re-sync and check again.
+		err := b2.SyncWith(ctx, "n1")
+		if err != nil {
+			t.Fatalf("re-sync: %v", err)
+		}
+
+		if _, ok := b2.Get(ctx, httpKey(i)); !ok {
+			t.Fatalf("missing key %d post-sync", i)
+		}
+	}
+}
+tests/hypercache_http_merkle_test.go:15:1: cyclomatic: function TestHTTPFetchMerkle has cyclomatic complexity 17 (> max enabled 15) (revive)
+func TestHTTPFetchMerkle(t *testing.T) {
+	ctx := context.Background()
+
+	// shared ring/membership
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+
+	// create two nodes with HTTP server enabled (dynamically allocated addresses)
+	addr1 := AllocatePort(t)
+	addr2 := AllocatePort(t)
+
+	n1 := cluster.NewNode("", addr1)
+
+	b1i, err := backend.NewDistMemory(ctx,
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistNode("n1", addr1),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("b1: %v", err)
+	}
+
+	n2 := cluster.NewNode("", addr2)
+
+	b2i, err := backend.NewDistMemory(ctx,
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistNode("n2", addr2),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("b2: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+
+	// HTTP transport resolver maps node IDs to http base URLs.
+	resolver := func(id string) (string, bool) {
+		switch id { // node IDs same as provided
+		case "n1":
+			return "http://" + b1.LocalNodeAddr(), true
+		case "n2":
+			return "http://" + b2.LocalNodeAddr(), true
+		}
+
+		return "", false
+	}
+	// 5s transport timeout (was 2s) — under -race the fiber listener can take
+	// >2s to accept its first request, which made SyncWith time out spuriously.
+	transport := backend.NewDistHTTPTransport(5*time.Second, resolver)
+	b1.SetTransport(transport)
+	b2.SetTransport(transport)
+
+	// ensure membership has both before writes (already upserted in constructors)
+	// write some keys to b1 only
+	for i := range 5 { // direct inject to sidestep replication/forwarding complexity
+		item := &cache.Item{Key: httpKey(i), Value: []byte("v"), Version: uint64(i + 1), Origin: "n1", LastUpdated: time.Now()}
+		b1.DebugInject(item)
+	}
+
+	// Poll the HTTP merkle endpoint until it actually responds 200. Under
+	// -race the fiber listener can take seconds to start accepting requests
+	// even after Listen() returns; a single-shot Get is racy.
+	merkleReady := false
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://" + b1.LocalNodeAddr() + "/internal/merkle")
+		if err == nil {
+			_ = resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				merkleReady = true
+
+				break
+			}
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !merkleReady {
+		t.Fatal("merkle endpoint did not become ready within deadline")
+	}
+
+	// b2 sync from b1 via HTTP transport
+	if err := b2.SyncWith(ctx, "n1"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// Validate keys present on b2. Allow brief retry to absorb any async tail
+	// in sync's apply path (each missing key is retried once).
+	for i := range 5 {
+		if _, ok := b2.Get(ctx, httpKey(i)); ok {
+			continue
+		}
+
+		// One retry: re-sync and check again.
+		err := b2.SyncWith(ctx, "n1")
+		if err != nil {
+			t.Fatalf("re-sync: %v", err)
+		}
+
+		if _, ok := b2.Get(ctx, httpKey(i)); !ok {
+			t.Fatalf("missing key %d post-sync", i)
+		}
+	}
+}
+tests/hypercache_http_merkle_test.go:15:1: function-length: maximum number of lines per function exceeded; max 75 but got 116 (revive)
+func TestHTTPFetchMerkle(t *testing.T) {
+	ctx := context.Background()
+
+	// shared ring/membership
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+
+	// create two nodes with HTTP server enabled (dynamically allocated addresses)
+	addr1 := AllocatePort(t)
+	addr2 := AllocatePort(t)
+
+	n1 := cluster.NewNode("", addr1)
+
+	b1i, err := backend.NewDistMemory(ctx,
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistNode("n1", addr1),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("b1: %v", err)
+	}
+
+	n2 := cluster.NewNode("", addr2)
+
+	b2i, err := backend.NewDistMemory(ctx,
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistNode("n2", addr2),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("b2: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+
+	// HTTP transport resolver maps node IDs to http base URLs.
+	resolver := func(id string) (string, bool) {
+		switch id { // node IDs same as provided
+		case "n1":
+			return "http://" + b1.LocalNodeAddr(), true
+		case "n2":
+			return "http://" + b2.LocalNodeAddr(), true
+		}
+
+		return "", false
+	}
+	// 5s transport timeout (was 2s) — under -race the fiber listener can take
+	// >2s to accept its first request, which made SyncWith time out spuriously.
+	transport := backend.NewDistHTTPTransport(5*time.Second, resolver)
+	b1.SetTransport(transport)
+	b2.SetTransport(transport)
+
+	// ensure membership has both before writes (already upserted in constructors)
+	// write some keys to b1 only
+	for i := range 5 { // direct inject to sidestep replication/forwarding complexity
+		item := &cache.Item{Key: httpKey(i), Value: []byte("v"), Version: uint64(i + 1), Origin: "n1", LastUpdated: time.Now()}
+		b1.DebugInject(item)
+	}
+
+	// Poll the HTTP merkle endpoint until it actually responds 200. Under
+	// -race the fiber listener can take seconds to start accepting requests
+	// even after Listen() returns; a single-shot Get is racy.
+	merkleReady := false
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://" + b1.LocalNodeAddr() + "/internal/merkle")
+		if err == nil {
+			_ = resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				merkleReady = true
+
+				break
+			}
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !merkleReady {
+		t.Fatal("merkle endpoint did not become ready within deadline")
+	}
+
+	// b2 sync from b1 via HTTP transport
+	if err := b2.SyncWith(ctx, "n1"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// Validate keys present on b2. Allow brief retry to absorb any async tail
+	// in sync's apply path (each missing key is retried once).
+	for i := range 5 {
+		if _, ok := b2.Get(ctx, httpKey(i)); ok {
+			continue
+		}
+
+		// One retry: re-sync and check again.
+		err := b2.SyncWith(ctx, "n1")
+		if err != nil {
+			t.Fatalf("re-sync: %v", err)
+		}
+
+		if _, ok := b2.Get(ctx, httpKey(i)); !ok {
+			t.Fatalf("missing key %d post-sync", i)
+		}
+	}
+}
+tests/hypercache_http_merkle_test.go:15:1: function-length: maximum number of statements per function exceeded; max 50 but got 54 (revive)
+func TestHTTPFetchMerkle(t *testing.T) {
+	ctx := context.Background()
+
+	// shared ring/membership
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+
+	// create two nodes with HTTP server enabled (dynamically allocated addresses)
+	addr1 := AllocatePort(t)
+	addr2 := AllocatePort(t)
+
+	n1 := cluster.NewNode("", addr1)
+
+	b1i, err := backend.NewDistMemory(ctx,
+		backend.WithDistMembership(membership, n1),
+		backend.WithDistNode("n1", addr1),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("b1: %v", err)
+	}
+
+	n2 := cluster.NewNode("", addr2)
+
+	b2i, err := backend.NewDistMemory(ctx,
+		backend.WithDistMembership(membership, n2),
+		backend.WithDistNode("n2", addr2),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("b2: %v", err)
+	}
+
+	b1, ok := b1i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b1i to *backend.DistMemory")
+	}
+
+	b2, ok := b2i.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("failed to cast b2i to *backend.DistMemory")
+	}
+
+	StopOnCleanup(t, b1)
+	StopOnCleanup(t, b2)
+
+	// HTTP transport resolver maps node IDs to http base URLs.
+	resolver := func(id string) (string, bool) {
+		switch id { // node IDs same as provided
+		case "n1":
+			return "http://" + b1.LocalNodeAddr(), true
+		case "n2":
+			return "http://" + b2.LocalNodeAddr(), true
+		}
+
+		return "", false
+	}
+	// 5s transport timeout (was 2s) — under -race the fiber listener can take
+	// >2s to accept its first request, which made SyncWith time out spuriously.
+	transport := backend.NewDistHTTPTransport(5*time.Second, resolver)
+	b1.SetTransport(transport)
+	b2.SetTransport(transport)
+
+	// ensure membership has both before writes (already upserted in constructors)
+	// write some keys to b1 only
+	for i := range 5 { // direct inject to sidestep replication/forwarding complexity
+		item := &cache.Item{Key: httpKey(i), Value: []byte("v"), Version: uint64(i + 1), Origin: "n1", LastUpdated: time.Now()}
+		b1.DebugInject(item)
+	}
+
+	// Poll the HTTP merkle endpoint until it actually responds 200. Under
+	// -race the fiber listener can take seconds to start accepting requests
+	// even after Listen() returns; a single-shot Get is racy.
+	merkleReady := false
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://" + b1.LocalNodeAddr() + "/internal/merkle")
+		if err == nil {
+			_ = resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				merkleReady = true
+
+				break
+			}
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !merkleReady {
+		t.Fatal("merkle endpoint did not become ready within deadline")
+	}
+
+	// b2 sync from b1 via HTTP transport
+	if err := b2.SyncWith(ctx, "n1"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// Validate keys present on b2. Allow brief retry to absorb any async tail
+	// in sync's apply path (each missing key is retried once).
+	for i := range 5 {
+		if _, ok := b2.Get(ctx, httpKey(i)); ok {
+			continue
+		}
+
+		// One retry: re-sync and check again.
+		err := b2.SyncWith(ctx, "n1")
+		if err != nil {
+			t.Fatalf("re-sync: %v", err)
+		}
+
+		if _, ok := b2.Get(ctx, httpKey(i)); !ok {
+			t.Fatalf("missing key %d post-sync", i)
+		}
+	}
+}
+tests/hypercache_mgmt_dist_test.go:18:1: cognitive-complexity: function TestManagementHTTPDistMemory has cognitive complexity 18 (> max enabled 15) (revive)
+func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
+	cfg, err := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+
+	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
+		hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:0"), // ephemeral port
+	)
+	cfg.DistMemoryOptions = []backend.DistMemoryOption{
+		backend.WithDistReplication(1),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistNode("test-node", "local"),
+	}
+
+	hc, err := hypercache.New(context.Background(), hypercache.GetDefaultManager(), cfg)
+	if err != nil {
+		t.Fatalf("new dist hypercache: %v", err)
+	}
+
+	defer func() { _ = hc.Stop(context.Background()) }()
+
+	baseURL := waitForMgmt(t, hc)
+
+	// Insert a key to exercise owners endpoint.
+	err = hc.Set(context.Background(), "alpha", "value", 0)
+	if err != nil {
+		// not fatal for owners shape but should succeed given replication=1
+		t.Fatalf("set alpha: %v", err)
+	}
+
+	// /config should include replication + virtualNodesPerNode
+	configBody := getJSON(t, baseURL+"/config")
+	if _, ok := configBody["replication"]; !ok {
+		t.Errorf("/config missing replication")
+	}
+
+	if vnp, ok := configBody["virtualNodesPerNode"]; !ok || vnp == nil {
+		t.Errorf("/config missing virtualNodesPerNode")
+	}
+
+	// /dist/metrics basic shape
+	metricsBody := getJSON(t, baseURL+"/dist/metrics")
+	if _, ok := metricsBody["ForwardGet"]; !ok { // one exported field
+		// could be 404 if backend unsupported (should not be here)
+		if e, hasErr := metricsBody[constants.ErrorLabel]; hasErr {
+			t.Fatalf("/dist/metrics returned error: %v", e)
+		}
+
+		// else fail
+		t.Errorf("/dist/metrics missing ForwardGet field")
+	}
+
+	// /dist/owners
+	ownersBody := getJSON(t, baseURL+"/dist/owners?key=alpha")
+	if _, ok := ownersBody["owners"]; !ok {
+		if e, hasErr := ownersBody[constants.ErrorLabel]; hasErr {
+			t.Fatalf("/dist/owners returned error: %v", e)
+		}
+
+		t.Errorf("/dist/owners missing owners field")
+	}
+
+	// /cluster/members
+	membersBody := getJSON(t, baseURL+"/cluster/members")
+	if _, ok := membersBody["members"]; !ok {
+		if e, hasErr := membersBody[constants.ErrorLabel]; hasErr {
+			t.Fatalf("/cluster/members returned error: %v", e)
+		}
+
+		t.Errorf("/cluster/members missing members field")
+	}
+
+	// /cluster/ring
+	ringBody := getJSON(t, baseURL+"/cluster/ring")
+	if _, ok := ringBody["vnodes"]; !ok {
+		if e, hasErr := ringBody[constants.ErrorLabel]; hasErr {
+			t.Fatalf("/cluster/ring returned error: %v", e)
+		}
+
+		t.Errorf("/cluster/ring missing vnodes field")
+	}
+}
+tests/hypercache_mgmt_dist_test.go:18:1: function-length: maximum number of lines per function exceeded; max 75 but got 81 (revive)
+func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest
+	cfg, err := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+
+	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
+		hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:0"), // ephemeral port
+	)
+	cfg.DistMemoryOptions = []backend.DistMemoryOption{
+		backend.WithDistReplication(1),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistNode("test-node", "local"),
+	}
+
+	hc, err := hypercache.New(context.Background(), hypercache.GetDefaultManager(), cfg)
+	if err != nil {
+		t.Fatalf("new dist hypercache: %v", err)
+	}
+
+	defer func() { _ = hc.Stop(context.Background()) }()
+
+	baseURL := waitForMgmt(t, hc)
+
+	// Insert a key to exercise owners endpoint.
+	err = hc.Set(context.Background(), "alpha", "value", 0)
+	if err != nil {
+		// not fatal for owners shape but should succeed given replication=1
+		t.Fatalf("set alpha: %v", err)
+	}
+
+	// /config should include replication + virtualNodesPerNode
+	configBody := getJSON(t, baseURL+"/config")
+	if _, ok := configBody["replication"]; !ok {
+		t.Errorf("/config missing replication")
+	}
+
+	if vnp, ok := configBody["virtualNodesPerNode"]; !ok || vnp == nil {
+		t.Errorf("/config missing virtualNodesPerNode")
+	}
+
+	// /dist/metrics basic shape
+	metricsBody := getJSON(t, baseURL+"/dist/metrics")
+	if _, ok := metricsBody["ForwardGet"]; !ok { // one exported field
+		// could be 404 if backend unsupported (should not be here)
+		if e, hasErr := metricsBody[constants.ErrorLabel]; hasErr {
+			t.Fatalf("/dist/metrics returned error: %v", e)
+		}
+
+		// else fail
+		t.Errorf("/dist/metrics missing ForwardGet field")
+	}
+
+	// /dist/owners
+	ownersBody := getJSON(t, baseURL+"/dist/owners?key=alpha")
+	if _, ok := ownersBody["owners"]; !ok {
+		if e, hasErr := ownersBody[constants.ErrorLabel]; hasErr {
+			t.Fatalf("/dist/owners returned error: %v", e)
+		}
+
+		t.Errorf("/dist/owners missing owners field")
+	}
+
+	// /cluster/members
+	membersBody := getJSON(t, baseURL+"/cluster/members")
+	if _, ok := membersBody["members"]; !ok {
+		if e, hasErr := membersBody[constants.ErrorLabel]; hasErr {
+			t.Fatalf("/cluster/members returned error: %v", e)
+		}
+
+		t.Errorf("/cluster/members missing members field")
+	}
+
+	// /cluster/ring
+	ringBody := getJSON(t, baseURL+"/cluster/ring")
+	if _, ok := ringBody["vnodes"]; !ok {
+		if e, hasErr := ringBody[constants.ErrorLabel]; hasErr {
+			t.Fatalf("/cluster/ring returned error: %v", e)
+		}
+
+		t.Errorf("/cluster/ring missing vnodes field")
+	}
+}
+tests/integration/dist_phase1_test.go:33:1: cognitive-complexity: function TestDistPhase1BasicQuorum has cognitive complexity 16 (> max enabled 15) (revive)
+func TestDistPhase1BasicQuorum(t *testing.T) {
+	ctx := context.Background()
+
+	addrA := allocatePort(t)
+	addrB := allocatePort(t)
+	addrC := allocatePort(t)
+
+	// create three nodes; we'll stop C's HTTP after start to simulate outage then restart
+	makeNode := func(id, addr string, seeds []string) *backend.DistMemory {
+		bm, err := backend.NewDistMemory(ctx,
+			backend.WithDistNode(id, addr),
+			backend.WithDistSeeds(seeds),
+			backend.WithDistReplication(3),
+			backend.WithDistVirtualNodes(32),
+			backend.WithDistHintReplayInterval(200*time.Millisecond),
+			backend.WithDistHintTTL(5*time.Second),
+			backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+			backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
+		)
+		if err != nil {
+			t.Fatalf("new dist memory: %v", err)
+		}
+
+		bk, ok := bm.(*backend.DistMemory)
+		if !ok {
+			t.Fatalf("expected *backend.DistMemory, got %T", bm)
+		}
+
+		return bk
+	}
+
+	nodeA := makeNode("A", addrA, []string{addrB, addrC})
+	nodeB := makeNode("B", addrB, []string{addrA, addrC})
+	nodeC := makeNode("C", addrC, []string{addrA, addrB})
+	// defer cleanup of A and B
+	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
+
+	// allow some time for ring initialization
+	time.Sleep(200 * time.Millisecond)
+
+	// Perform a write expecting replication across all three nodes
+	item := &cache.Item{Key: "k1", Value: []byte("v1"), Expiration: 0, Version: 1, Origin: "A", LastUpdated: time.Now()}
+
+	err := nodeA.Set(ctx, item)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	// Quorum read from B should succeed (value may be []byte, string, or json.RawMessage)
+	if got, ok := nodeB.Get(ctx, "k1"); !ok {
+		t.Fatalf("expected quorum read via B: not found")
+	} else {
+		assertValue(t, got.Value)
+	}
+
+	// Basic propagation check loop (give replication a moment)
+	defer func() { _ = nodeC.Stop(ctx) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if it, ok := nodeC.Get(ctx, "k1"); ok {
+			if valueOK(it.Value) {
+				goto Done
+			}
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if it, ok := nodeC.Get(ctx, "k1"); !ok {
+		// Not fatal yet; we only created scaffolding – mark skip for now.
+		t.Skipf("hint replay not yet observable; will be validated after full wiring (missing item)")
+	} else {
+		if !valueOK(it.Value) {
+			t.Skipf("value mismatch after wait")
+		}
+	}
+
+Done:
+}
+tests/integration/dist_phase1_test.go:33:1: function-length: maximum number of lines per function exceeded; max 75 but got 78 (revive)
+func TestDistPhase1BasicQuorum(t *testing.T) {
+	ctx := context.Background()
+
+	addrA := allocatePort(t)
+	addrB := allocatePort(t)
+	addrC := allocatePort(t)
+
+	// create three nodes; we'll stop C's HTTP after start to simulate outage then restart
+	makeNode := func(id, addr string, seeds []string) *backend.DistMemory {
+		bm, err := backend.NewDistMemory(ctx,
+			backend.WithDistNode(id, addr),
+			backend.WithDistSeeds(seeds),
+			backend.WithDistReplication(3),
+			backend.WithDistVirtualNodes(32),
+			backend.WithDistHintReplayInterval(200*time.Millisecond),
+			backend.WithDistHintTTL(5*time.Second),
+			backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+			backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
+		)
+		if err != nil {
+			t.Fatalf("new dist memory: %v", err)
+		}
+
+		bk, ok := bm.(*backend.DistMemory)
+		if !ok {
+			t.Fatalf("expected *backend.DistMemory, got %T", bm)
+		}
+
+		return bk
+	}
+
+	nodeA := makeNode("A", addrA, []string{addrB, addrC})
+	nodeB := makeNode("B", addrB, []string{addrA, addrC})
+	nodeC := makeNode("C", addrC, []string{addrA, addrB})
+	// defer cleanup of A and B
+	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
+
+	// allow some time for ring initialization
+	time.Sleep(200 * time.Millisecond)
+
+	// Perform a write expecting replication across all three nodes
+	item := &cache.Item{Key: "k1", Value: []byte("v1"), Expiration: 0, Version: 1, Origin: "A", LastUpdated: time.Now()}
+
+	err := nodeA.Set(ctx, item)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	// Quorum read from B should succeed (value may be []byte, string, or json.RawMessage)
+	if got, ok := nodeB.Get(ctx, "k1"); !ok {
+		t.Fatalf("expected quorum read via B: not found")
+	} else {
+		assertValue(t, got.Value)
+	}
+
+	// Basic propagation check loop (give replication a moment)
+	defer func() { _ = nodeC.Stop(ctx) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if it, ok := nodeC.Get(ctx, "k1"); ok {
+			if valueOK(it.Value) {
+				goto Done
+			}
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if it, ok := nodeC.Get(ctx, "k1"); !ok {
+		// Not fatal yet; we only created scaffolding – mark skip for now.
+		t.Skipf("hint replay not yet observable; will be validated after full wiring (missing item)")
+	} else {
+		if !valueOK(it.Value) {
+			t.Skipf("value mismatch after wait")
+		}
+	}
+
+Done:
+}
+tests/integration/dist_phase1_test.go:115:1: cognitive-complexity: function valueOK has cognitive complexity 42 (> max enabled 15) (revive)
+func valueOK(v any) bool { //nolint:ireturn
+	switch x := v.(type) {
+	case []byte:
+		if string(x) == "v1" {
+			return true
+		}
+
+		if s := string(x); s == "djE=" { // base64 of v1
+			if b, err := base64.StdEncoding.DecodeString(s); err == nil && string(b) == "v1" {
+				return true
+			}
+		}
+
+		return false
+
+	case string:
+		if x == "v1" {
+			return true
+		}
+
+		if x == "djE=" { // base64 form
+			if b, err := base64.StdEncoding.DecodeString(x); err == nil && string(b) == "v1" {
+				return true
+			}
+		}
+
+		return false
+
+	case json.RawMessage:
+		// could be "v1" or base64 inside quotes
+		if len(x) == 0 {
+			return false
+		}
+
+		// try as string literal
+		var s string
+
+		err := json.Unmarshal(x, &s)
+		if err == nil {
+			if s == "v1" {
+				return true
+			}
+
+			if s == "djE=" {
+				if b, err2 := base64.StdEncoding.DecodeString(s); err2 == nil && string(b) == "v1" {
+					return true
+				}
+			}
+		}
+
+		// fall back to raw compare
+		return string(x) == "v1" || string(x) == "\"v1\""
+
+	default:
+		s := fmt.Sprintf("%v", x)
+		if s == "v1" || s == "\"v1\"" {
+			return true
+		}
+
+		if s == "djE=" {
+			if b, err := base64.StdEncoding.DecodeString(s); err == nil && string(b) == "v1" {
+				return true
+			}
+		}
+
+		return false
+	}
+}
+tests/integration/dist_phase1_test.go:115:1: cyclomatic: function valueOK has cyclomatic complexity 25 (> max enabled 15) (revive)
+func valueOK(v any) bool { //nolint:ireturn
+	switch x := v.(type) {
+	case []byte:
+		if string(x) == "v1" {
+			return true
+		}
+
+		if s := string(x); s == "djE=" { // base64 of v1
+			if b, err := base64.StdEncoding.DecodeString(s); err == nil && string(b) == "v1" {
+				return true
+			}
+		}
+
+		return false
+
+	case string:
+		if x == "v1" {
+			return true
+		}
+
+		if x == "djE=" { // base64 form
+			if b, err := base64.StdEncoding.DecodeString(x); err == nil && string(b) == "v1" {
+				return true
+			}
+		}
+
+		return false
+
+	case json.RawMessage:
+		// could be "v1" or base64 inside quotes
+		if len(x) == 0 {
+			return false
+		}
+
+		// try as string literal
+		var s string
+
+		err := json.Unmarshal(x, &s)
+		if err == nil {
+			if s == "v1" {
+				return true
+			}
+
+			if s == "djE=" {
+				if b, err2 := base64.StdEncoding.DecodeString(s); err2 == nil && string(b) == "v1" {
+					return true
+				}
+			}
+		}
+
+		// fall back to raw compare
+		return string(x) == "v1" || string(x) == "\"v1\""
+
+	default:
+		s := fmt.Sprintf("%v", x)
+		if s == "v1" || s == "\"v1\"" {
+			return true
+		}
+
+		if s == "djE=" {
+			if b, err := base64.StdEncoding.DecodeString(s); err == nil && string(b) == "v1" {
+				return true
+			}
+		}
+
+		return false
+	}
+}
+tests/integration/dist_rebalance_test.go:17:1: function-length: maximum number of lines per function exceeded; max 75 but got 93 (revive)
+func TestDistRebalanceJoin(t *testing.T) {
+	ctx := context.Background()
+
+	// Initial cluster: 2 nodes.
+	addrA := allocatePort(t)
+	addrB := allocatePort(t)
+
+	nodeA := mustDistNode(
+		ctx,
+		t,
+		"A",
+		addrA,
+		[]string{addrB},
+		backend.WithDistReplication(2),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistRebalanceInterval(100*time.Millisecond),
+	)
+
+	nodeB := mustDistNode(
+		ctx,
+		t,
+		"B",
+		addrB,
+		[]string{addrA},
+		backend.WithDistReplication(2),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistRebalanceInterval(100*time.Millisecond),
+	)
+	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
+
+	// Write a spread of keys via A.
+	totalKeys := 300
+	for i := range totalKeys {
+		k := cacheKey(i)
+
+		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
+
+		err := nodeA.Set(ctx, it)
+		if err != nil {
+			t.Fatalf("set %s: %v", k, err)
+		}
+	}
+
+	time.Sleep(200 * time.Millisecond) // allow initial replication
+
+	// Capture ownership counts before join.
+	skeys := sampleKeys(totalKeys)
+
+	_ = ownedPrimaryCount(nodeA, skeys) // baseline (unused currently)
+	_ = ownedPrimaryCount(nodeB, skeys)
+
+	// Add third node C.
+	addrC := allocatePort(t)
+
+	nodeC := mustDistNode(
+		ctx,
+		t,
+		"C",
+		addrC,
+		[]string{addrA, addrB},
+		backend.WithDistReplication(2),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistRebalanceInterval(100*time.Millisecond),
+	)
+	defer func() { _ = nodeC.Stop(ctx) }()
+
+	// Manually inject C into A and B membership (simulating gossip propagation delay that doesn't exist yet).
+	nodeA.AddPeer(addrC)
+	nodeB.AddPeer(addrC)
+
+	// Allow membership to propagate + several rebalance ticks.
+	time.Sleep(1200 * time.Millisecond)
+
+	// Post-join ownership counts (sampled locally using isOwner logic via Get + Metrics ring lookup indirectly).
+	postOwnedA := ownedPrimaryCount(nodeA, skeys)
+	postOwnedB := ownedPrimaryCount(nodeB, skeys)
+	postOwnedC := ownedPrimaryCount(nodeC, skeys)
+
+	// Basic sanity: new node should now own > 0 keys.
+	if postOwnedC == 0 {
+		t.Fatalf("expected node C to own some keys after rebalancing")
+	}
+
+	// Distribution variance check: ensure no node has > 80% of sample (initial naive rebalance heuristic).
+	maxAllowed := int(float64(totalKeys) * 0.80)
+	if postOwnedA > maxAllowed || postOwnedB > maxAllowed || postOwnedC > maxAllowed {
+		t.Fatalf("ownership still highly skewed: A=%d B=%d C=%d", postOwnedA, postOwnedB, postOwnedC)
+	}
+
+	// Rebalance metrics should show migrations (keys forwarded off old primaries) across cluster.
+	migrated := nodeA.Metrics().RebalancedKeys + nodeB.Metrics().RebalancedKeys + nodeC.Metrics().RebalancedKeys
+	if migrated == 0 {
+		t.Fatalf("expected some rebalanced keys (total migrated=0)")
+	}
+}
+tests/management_http_test.go:19:1: function-length: maximum number of lines per function exceeded; max 75 but got 81 (revive)
+func TestManagementHTTP_BasicEndpoints(t *testing.T) {
+	cfg, err := hypercache.NewConfig[backend.InMemory](constants.InMemoryBackend)
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+
+	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
+		hypercache.WithEvictionInterval[backend.InMemory](0),
+		hypercache.WithManagementHTTP[backend.InMemory]("127.0.0.1:0"),
+	)
+
+	ctx := context.Background()
+	hc, err := hypercache.New(ctx, hypercache.GetDefaultManager(), cfg)
+	assert.Nil(t, err)
+
+	defer hc.Stop(ctx)
+
+	// Wait for the management HTTP listener to come up. The race detector
+	// can push listener startup well past the original 30 ms; poll with a
+	// generous deadline instead.
+	var addr string
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		addr = hc.ManagementHTTPAddress()
+		if addr != "" {
+			break
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if addr == "" {
+		t.Fatal("management HTTP listener did not bind within deadline")
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// /health
+	resp, err := client.Get("http://" + addr + "/health")
+	if err != nil {
+		t.Fatalf("GET /health: %v", err)
+	}
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	_ = resp.Body.Close()
+
+	// /stats
+	resp, err = client.Get("http://" + addr + "/stats")
+	if err != nil {
+		t.Fatalf("GET /stats: %v", err)
+	}
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var statsBody map[string]any
+
+	dec := json.NewDecoder(resp.Body)
+
+	err = dec.Decode(&statsBody)
+	assert.NoError(t, err)
+
+	_ = resp.Body.Close()
+
+	// /config
+	resp, err = client.Get("http://" + addr + "/config")
+	if err != nil {
+		t.Fatalf("GET /config: %v", err)
+	}
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var cfgBody map[string]any
+
+	dec = json.NewDecoder(resp.Body)
+	_ = dec.Decode(&cfgBody)
+	_ = resp.Body.Close()
+
+	assert.True(t, len(cfgBody) > 0)
+
+	assert.True(t, cfgBody["evictionAlgorithm"] != nil)
+}
+tests/merkle_sync_test.go:13:1: function-length: maximum number of lines per function exceeded; max 75 but got 76 (revive)
+func TestMerkleSyncConvergence(t *testing.T) {
+	ctx := context.Background()
+	transport := backend.NewInProcessTransport()
+
+	bA, err := backend.NewDistMemory(ctx,
+		backend.WithDistNode("A", AllocatePort(t)),
+		backend.WithDistReplication(1),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("new dist memory A: %v", err)
+	}
+
+	dmA, ok := any(bA).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bA)
+	}
+
+	StopOnCleanup(t, dmA)
+
+	bB, err := backend.NewDistMemory(ctx,
+		backend.WithDistNode("B", AllocatePort(t)),
+		backend.WithDistReplication(1),
+		backend.WithDistMerkleChunkSize(2),
+	)
+	if err != nil {
+		t.Fatalf("new dist memory B: %v", err)
+	}
+
+	dmB, ok := any(bB).(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bB)
+	}
+
+	StopOnCleanup(t, dmB)
+
+	dmA.SetTransport(transport)
+	dmB.SetTransport(transport)
+
+	// register for in-process lookups
+	transport.Register(dmA)
+	transport.Register(dmB)
+
+	// inject divergent data (A has extra/newer)
+	for i := range 5 {
+		it := &cache.Item{Key: keyf("k", i), Value: []byte("vA"), Version: uint64(i + 1), Origin: "A", LastUpdated: time.Now()}
+		dmA.DebugInject(it)
+	}
+
+	// B shares only first 2 keys older versions
+	for i := range 2 {
+		it := &cache.Item{Key: keyf("k", i), Value: []byte("old"), Version: uint64(i), Origin: "B", LastUpdated: time.Now()}
+		dmB.DebugInject(it)
+	}
+
+	// Run sync B->A to pull newer
+	if err := dmB.SyncWith(ctx, string(dmA.LocalNodeID())); err != nil {
+		// HTTP transport fetch merkle unsupported; we rely on in-process
+		if testing.Verbose() {
+			t.Logf("sync error: %v", err)
+		}
+	}
+
+	// Validate B now has all 5 keys with correct versions (>= A's)
+	for i := range 5 {
+		k := keyf("k", i)
+		itA, _ := dmA.Get(ctx, k)
+
+		itB, _ := dmB.Get(ctx, k)
+		if itA == nil || itB == nil {
+			t.Fatalf("missing key %s after sync", k)
+		}
+
+		if itB.Version < itA.Version {
+			t.Fatalf("expected B version >= A version for %s", k)
+		}
+	}
+}
+176 issues:
+* cyclop: 7
+* dupl: 2
+* err113: 1
+* errcheck: 10
+* forcetypeassert: 3
+* funlen: 9
+* gocognit: 2
+* goconst: 19
+* gocritic: 2
+* gosec: 8
+* noctx: 5
+* noinlineerr: 3
+* paralleltest: 50
+* prealloc: 3
+* predeclared: 2
+* revive: 50

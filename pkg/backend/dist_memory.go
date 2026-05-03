@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hyp3rd/ewrap"
+
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
@@ -34,7 +36,7 @@ const (
 	shiftPerByte           = 8 // bit shift per byte when encoding uint64
 )
 
-var errNoTransport = errors.New("no transport")
+var errNoTransport = ewrap.New("no transport")
 
 // DistMemory is a sharded in-process distributed-like backend. It simulates
 // distribution by consistent hashing across a fixed set of in-memory shards.
@@ -141,7 +143,7 @@ const (
 	defaultRebalanceMaxConcurrent = 2
 )
 
-var errUnexpectedBackendType = errors.New("backend: unexpected backend type") // stable error (no dynamic wrapping needed)
+var errUnexpectedBackendType = ewrap.New("backend: unexpected backend type") // stable error (no dynamic wrapping needed)
 
 // distTransportSlot wraps a DistTransport interface value so it can be stored
 // in atomic.Pointer (atomic.Pointer requires a concrete pointer type).

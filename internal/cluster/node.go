@@ -3,12 +3,12 @@ package cluster
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/hyp3rd/ewrap"
 )
 
 // NodeState represents membership state of a node.
@@ -52,7 +52,7 @@ type Node struct {
 }
 
 // ErrInvalidAddress is returned when the node address is invalid.
-var ErrInvalidAddress = errors.New("invalid node address")
+var ErrInvalidAddress = ewrap.New("invalid node address")
 
 // NewNode creates a node from address (host:port). If id empty, derive a short hex id using xxhash64.
 func NewNode(id, addr string) *Node {
