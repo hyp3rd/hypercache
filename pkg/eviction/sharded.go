@@ -4,6 +4,7 @@ import (
 	"sync/atomic"
 
 	"github.com/hyp3rd/ewrap"
+	"github.com/hyp3rd/sectools/pkg/converters"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	cachev2 "github.com/hyp3rd/hypercache/pkg/cache/v2"
@@ -52,9 +53,15 @@ func NewSharded(algorithmName string, totalCapacity, shardCount int) (*Sharded, 
 		shards[i] = shard
 	}
 
+	// shardCount validated power-of-two above
+	mask, err := converters.ToUint32(shardCount - 1)
+	if err != nil {
+		return nil, ewrap.Wrapf(err, "shardCount %d", shardCount)
+	}
+
 	return &Sharded{
 		shards: shards,
-		mask:   uint32(shardCount - 1), //nolint:gosec // shardCount validated power-of-two above
+		mask:   mask,
 	}, nil
 }
 
@@ -82,7 +89,11 @@ func (s *Sharded) Delete(key string) {
 // always hitting the first non-empty one — relevant when one shard sees
 // disproportionately fewer Set calls than others.
 func (s *Sharded) Evict() (string, bool) {
-	n := uint32(len(s.shards)) //nolint:gosec // len(s.shards) bounded by shardCount param
+	// len(s.shards) bounded by shardCount param
+	n, err := converters.ToUint32(len(s.shards))
+	if err != nil {
+		return "", false
+	}
 
 	start := s.evictCursor.Add(1) - 1
 

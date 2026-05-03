@@ -159,6 +159,7 @@ words:
   - traefik
   - ugorji
   - unmarshals
+  - unsharded
   - upserted
   - upserts
   - varnamelen
