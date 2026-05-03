@@ -16,36 +16,8 @@ func TestMerkleDeleteTombstone(t *testing.T) {
 	ctx := context.Background()
 	transport := backend.NewInProcessTransport()
 
-	a, _ := backend.NewDistMemory(
-		ctx,
-		backend.WithDistNode("A", AllocatePort(t)),
-		backend.WithDistReplication(1),
-		backend.WithDistMerkleChunkSize(2),
-	)
-	b, _ := backend.NewDistMemory(
-		ctx,
-		backend.WithDistNode("B", AllocatePort(t)),
-		backend.WithDistReplication(1),
-		backend.WithDistMerkleChunkSize(2),
-	)
-
-	da, ok := any(a).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast a to *backend.DistMemory")
-	}
-
-	db, ok := any(b).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, da)
-	StopOnCleanup(t, db)
-
-	da.SetTransport(transport)
-	db.SetTransport(transport)
-	transport.Register(da)
-	transport.Register(db)
+	da := newMerkleNode(t, transport, "A")
+	db := newMerkleNode(t, transport, "B")
 
 	it := &cache.Item{Key: "del", Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
 	da.DebugInject(it)
@@ -55,30 +27,26 @@ func TestMerkleDeleteTombstone(t *testing.T) {
 		t.Fatalf("initial sync: %v", err)
 	}
 
-	// Now delete on A
 	_ = da.Remove(ctx, "del")
 
-	// Ensure local A removed
 	if val, _ := da.Get(ctx, "del"); val != nil {
 		t.Fatalf("expected A delete")
 	}
 
-	// Remote (B) pulls from A to learn about deletion (pull-based anti-entropy)
+	// B pulls from A to learn the deletion (pull-based anti-entropy).
 	err = db.SyncWith(ctx, string(da.LocalNodeID()))
 	if err != nil {
 		t.Fatalf("tomb sync pull: %v", err)
 	}
 
-	// Ensure B removed or will not resurrect on next sync
 	if val, _ := db.Get(ctx, "del"); val != nil {
 		t.Fatalf("expected B delete after tombstone")
 	}
 
-	// Re-add older version on B (simulate stale write)
+	// Re-add older version on B (simulate stale write).
 	stale := &cache.Item{Key: "del", Value: []byte("stale"), Version: 1, Origin: "B", LastUpdated: time.Now()}
 	db.DebugInject(stale)
 
-	// Sync B with A again; B should keep deletion (not resurrect)
 	err = db.SyncWith(ctx, string(da.LocalNodeID()))
 	if err != nil {
 		t.Fatalf("resync: %v", err)

@@ -22,7 +22,7 @@ type Config struct {
 }
 
 // Defaults returns a Config with safe initial values.
-func Defaults() Config { //nolint:ireturn
+func Defaults() Config {
 	return Config{
 		Replication:      1,
 		VirtualNodes:     defaultVirtualNodes,

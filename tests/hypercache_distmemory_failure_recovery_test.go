@@ -12,30 +12,55 @@ import (
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
+// generateReplicaWrites issues a few primary writes to force replication
+// fan-out — used by failure-recovery tests to seed the hint queue once the
+// replica has been disconnected.
+func generateReplicaWrites(ctx context.Context, b *backend.DistMemory, key string, n int, gap time.Duration) {
+	for range n {
+		_ = b.Set(ctx, &cache.Item{Key: key, Value: "v1-update"})
+
+		time.Sleep(gap)
+	}
+}
+
+// waitForHintDelivery polls until the replica node returns a non-nil item
+// for key, indicating the hinted-handoff replay has completed.
+func waitForHintDelivery(ctx context.Context, replica *backend.DistMemory, key string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if it, ok := replica.Get(ctx, key); ok && it != nil {
+			return true
+		}
+
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	return false
+}
+
+// assertNodeFailureMetrics verifies the primary recorded suspect/dead
+// transitions and hinted-queue activity after the replica went offline.
+func assertNodeFailureMetrics(t *testing.T, m backend.DistMetrics) {
+	t.Helper()
+
+	if m.NodesSuspect == 0 {
+		t.Fatalf("expected suspect transition recorded")
+	}
+
+	if m.NodesDead == 0 {
+		t.Fatalf("expected dead transition recorded")
+	}
+
+	if m.HintedQueued == 0 {
+		t.Fatalf("expected queued hints while replica unreachable")
+	}
+}
+
 // TestDistFailureRecovery simulates node failure causing suspect->dead transition, hint queuing, and later recovery with hint replay.
-func TestDistFailureRecovery(t *testing.T) { //nolint:paralleltest
+func TestDistFailureRecovery(t *testing.T) { //nolint:paralleltest // mutates shared transport
 	ctx := context.Background()
 
-	ring := cluster.NewRing(cluster.WithReplication(2))
-	membership := cluster.NewMembership(ring)
-	transport := backend.NewInProcessTransport()
-
-	// two nodes (primary+replica) with fast heartbeat & hint config
-	n1 := cluster.NewNode("", "n1")
-	n2 := cluster.NewNode("", "n2")
-
-	b1i, _ := backend.NewDistMemory(ctx,
-		backend.WithDistMembership(membership, n1),
-		backend.WithDistTransport(transport),
-		backend.WithDistReplication(2),
-		backend.WithDistHeartbeat(15*time.Millisecond, 40*time.Millisecond, 90*time.Millisecond),
-		backend.WithDistHintTTL(2*time.Minute),
-		backend.WithDistHintReplayInterval(20*time.Millisecond),
-		backend.WithDistHintMaxPerNode(50),
-	)
-	b2i, _ := backend.NewDistMemory(ctx,
-		backend.WithDistMembership(membership, n2),
-		backend.WithDistTransport(transport),
+	dc := SetupInProcessClusterRF(t, 2, 2,
 		backend.WithDistReplication(2),
 		backend.WithDistHeartbeat(15*time.Millisecond, 40*time.Millisecond, 90*time.Millisecond),
 		backend.WithDistHintTTL(2*time.Minute),
@@ -43,23 +68,9 @@ func TestDistFailureRecovery(t *testing.T) { //nolint:paralleltest
 		backend.WithDistHintMaxPerNode(50),
 	)
 
-	b1, ok := b1i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b1i to *backend.DistMemory")
-	}
+	b1, b2 := dc.Nodes[0], dc.Nodes[1]
 
-	b2, ok := b2i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b2i to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, b1)
-	StopOnCleanup(t, b2)
-
-	transport.Register(b1)
-	transport.Register(b2)
-
-	// Find a key where b1 is primary and b2 replica to ensure replication target
+	// Find a key where b1 is primary and b2 replica to ensure replication target.
 	key, ok := FindOwnerKey(b1, "fail-key-", []cluster.NodeID{b1.LocalNodeID(), b2.LocalNodeID()}, 5000)
 	if !ok {
 		t.Fatalf("could not find deterministic key ordering")
@@ -67,67 +78,22 @@ func TestDistFailureRecovery(t *testing.T) { //nolint:paralleltest
 
 	_ = b1.Set(ctx, &cache.Item{Key: key, Value: "v1"})
 
-	// Simulate b2 failure (unregister from transport) so further replica writes queue hints.
-	transport.Unregister(string(n2.ID))
+	// Simulate b2 failure: unregister from transport so further replica writes queue hints.
+	dc.Transport.Unregister(string(b2.LocalNodeID()))
 
-	// Generate writes that should attempt to replicate and thus queue hints for n2.
-	for range 8 { // a few writes to ensure some dropped into hints
-		_ = b1.Set(ctx, &cache.Item{Key: key, Value: "v1-update"})
+	generateReplicaWrites(ctx, b1, key, 8, 5*time.Millisecond)
+	waitForDeadTransition(b1, 2*time.Second)
+	assertNodeFailureMetrics(t, b1.Metrics())
 
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	// Wait for suspect then dead transition of b2 from b1's perspective.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		m := b1.Metrics()
-		if m.NodesDead > 0 { // dead transition observed
-			break
-		}
-
-		time.Sleep(15 * time.Millisecond)
-	}
-
-	m1 := b1.Metrics()
-	if m1.NodesSuspect == 0 {
-		t.Fatalf("expected suspect transition recorded")
-	}
-
-	if m1.NodesDead == 0 {
-		t.Fatalf("expected dead transition recorded")
-	}
-
-	if m1.HintedQueued == 0 {
-		t.Fatalf("expected queued hints while replica unreachable")
-	}
-
-	// Bring b2 back (register again) and allow hint replay to run.
-	transport.Register(b2)
-
-	// Force a manual replay cycle then ensure loop running.
+	// Bring b2 back online and force a replay cycle.
+	dc.Transport.Register(b2)
 	b1.ReplayHintsForTest(ctx)
 
-	// Wait for replay to deliver hints.
-	deadline = time.Now().Add(2 * time.Second)
-
-	delivered := false
-	for time.Now().Before(deadline) {
-		if it, ok := b2.Get(ctx, key); ok && it != nil {
-			delivered = true
-
-			break
-		}
-
-		time.Sleep(25 * time.Millisecond)
-	}
-
-	if !delivered {
+	if !waitForHintDelivery(ctx, b2, key, 2*time.Second) {
 		t.Fatalf("expected hinted value delivered after recovery")
 	}
 
-	// Ensure replay metrics advanced (at least one replay)
-	m2 := b1.Metrics()
-	if m2.HintedReplayed == 0 {
+	if b1.Metrics().HintedReplayed == 0 {
 		t.Fatalf("expected hinted replay metric >0")
 	}
 }

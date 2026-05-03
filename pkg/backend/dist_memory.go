@@ -282,7 +282,7 @@ func WithDistRebalanceMaxConcurrent(n int) DistMemoryOption {
 }
 
 // WithDistReplicaDiffMaxPerTick limits number of replica-diff replication operations performed per rebalance tick (0 = unlimited).
-func WithDistReplicaDiffMaxPerTick(n int) DistMemoryOption { //nolint:ireturn
+func WithDistReplicaDiffMaxPerTick(n int) DistMemoryOption {
 	return func(dm *DistMemory) {
 		if n > 0 {
 			dm.replicaDiffMaxPerTick = n
@@ -291,7 +291,7 @@ func WithDistReplicaDiffMaxPerTick(n int) DistMemoryOption { //nolint:ireturn
 }
 
 // WithDistRemovalGrace sets grace period before shedding data for keys we no longer own (<=0 immediate remove disabled for now).
-func WithDistRemovalGrace(d time.Duration) DistMemoryOption { //nolint:ireturn
+func WithDistRemovalGrace(d time.Duration) DistMemoryOption {
 	return func(dm *DistMemory) {
 		if d > 0 {
 			dm.removalGracePeriod = d
@@ -309,7 +309,7 @@ type MerkleTree struct { // minimal representation
 }
 
 // BuildMerkleTree constructs a Merkle tree snapshot of local data (best-effort, locks each shard briefly).
-func (dm *DistMemory) BuildMerkleTree() *MerkleTree { //nolint:ireturn
+func (dm *DistMemory) BuildMerkleTree() *MerkleTree {
 	chunkSize := dm.merkleChunkSize
 	if chunkSize <= 0 {
 		chunkSize = defaultMerkleChunkSize
@@ -355,7 +355,7 @@ type merkleKV struct {
 }
 
 // DiffLeafRanges compares two trees and returns indexes of differing leaf chunks.
-func (mt *MerkleTree) DiffLeafRanges(other *MerkleTree) []int { //nolint:ireturn
+func (mt *MerkleTree) DiffLeafRanges(other *MerkleTree) []int {
 	if mt == nil || other == nil {
 		return nil
 	}
@@ -395,7 +395,7 @@ func equalBytes(a, b []byte) bool { // tiny helper
 }
 
 // SyncWith performs Merkle anti-entropy against a remote node (pull newer versions for differing chunks).
-func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error { //nolint:ireturn
+func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error {
 	transport := dm.loadTransport()
 	if transport == nil {
 		return errNoTransport
@@ -461,7 +461,7 @@ func WithDistTransport(t DistTransport) DistMemoryOption {
 }
 
 // WithDistHeartbeatSample sets how many random peers to probe per heartbeat tick (0=all).
-func WithDistHeartbeatSample(k int) DistMemoryOption { //nolint:ireturn
+func WithDistHeartbeatSample(k int) DistMemoryOption {
 	return func(dm *DistMemory) { dm.hbSampleSize = k }
 }
 
@@ -516,7 +516,7 @@ func WithDistHintMaxPerNode(n int) DistMemoryOption {
 }
 
 // WithDistHintMaxTotal sets a global cap on total queued hints across all nodes.
-func WithDistHintMaxTotal(n int) DistMemoryOption { //nolint:ireturn
+func WithDistHintMaxTotal(n int) DistMemoryOption {
 	return func(dm *DistMemory) {
 		if n > 0 {
 			dm.hintMaxTotal = n
@@ -525,7 +525,7 @@ func WithDistHintMaxTotal(n int) DistMemoryOption { //nolint:ireturn
 }
 
 // WithDistHintMaxBytes sets an approximate byte cap for all queued hints.
-func WithDistHintMaxBytes(b int64) DistMemoryOption { //nolint:ireturn
+func WithDistHintMaxBytes(b int64) DistMemoryOption {
 	return func(dm *DistMemory) {
 		if b > 0 {
 			dm.hintMaxBytes = b
@@ -594,7 +594,7 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 
 // NewDistMemoryWithConfig builds a DistMemory from an external dist.Config shape without introducing a direct import here.
 // Accepts a generic 'cfg' to avoid adding a dependency layer; expects exported fields matching internal/dist Config.
-func NewDistMemoryWithConfig(ctx context.Context, cfg any, opts ...DistMemoryOption) (IBackend[DistMemory], error) { //nolint:ireturn
+func NewDistMemoryWithConfig(ctx context.Context, cfg any, opts ...DistMemoryOption) (IBackend[DistMemory], error) {
 	type minimalConfig struct { // external mirror subset
 		NodeID           string
 		BindAddr         string
@@ -646,7 +646,7 @@ func distOptionsFromMinimal(mc struct {
 	HintTTL, HintReplay               time.Duration
 	HintMaxPerNode                    int
 },
-) []DistMemoryOption { //nolint:ireturn
+) []DistMemoryOption {
 	var opts []DistMemoryOption
 
 	add := func(cond bool, opt DistMemoryOption) { // helper reduces complexity in parent
@@ -711,7 +711,7 @@ func (dm *DistMemory) Count(_ context.Context) int {
 }
 
 // Get fetches item.
-func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) { //nolint:ireturn
+func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) {
 	start := time.Now()
 	defer func() {
 		if dm.latency != nil {
@@ -742,7 +742,7 @@ func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) {
 }
 
 // Set stores item.
-func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error { //nolint:ireturn
+func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error {
 	err := item.Valid()
 	if err != nil {
 		return err
@@ -809,7 +809,7 @@ func (dm *DistMemory) List(_ context.Context, _ ...IFilter) ([]*cache.Item, erro
 }
 
 // Remove deletes keys.
-func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //nolint:ireturn
+func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error {
 	start := time.Now()
 	defer func() {
 		if dm.latency != nil {
@@ -843,7 +843,7 @@ func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error { //noli
 }
 
 // Clear wipes all shards.
-func (dm *DistMemory) Clear(ctx context.Context) error { //nolint:ireturn
+func (dm *DistMemory) Clear(ctx context.Context) error {
 	done := make(chan struct{})
 
 	go func() {
@@ -870,7 +870,7 @@ func (dm *DistMemory) LocalContains(key string) bool {
 }
 
 // Touch updates the last access time and access count for a key.
-func (dm *DistMemory) Touch(_ context.Context, key string) bool { //nolint:ireturn
+func (dm *DistMemory) Touch(_ context.Context, key string) bool {
 	return dm.shardFor(key).items.Touch(key)
 }
 
@@ -878,7 +878,7 @@ func (dm *DistMemory) Touch(_ context.Context, key string) bool { //nolint:iretu
 func (dm *DistMemory) DebugDropLocal(key string) { dm.shardFor(key).items.Remove(key) }
 
 // DebugInject stores an item directly into the local shard (no replication / ownership checks) for tests.
-func (dm *DistMemory) DebugInject(it *cache.Item) { //nolint:ireturn
+func (dm *DistMemory) DebugInject(it *cache.Item) {
 	if it == nil {
 		return
 	}
@@ -893,12 +893,12 @@ func (dm *DistMemory) DebugInject(it *cache.Item) { //nolint:ireturn
 func (dm *DistMemory) LocalNodeID() cluster.NodeID { return dm.localNode.ID }
 
 // LocalNodeAddr returns the configured node address (host:port) used by HTTP server.
-func (dm *DistMemory) LocalNodeAddr() string { //nolint:ireturn
+func (dm *DistMemory) LocalNodeAddr() string {
 	return dm.nodeAddr
 }
 
 // SetLocalNode manually sets the local node (testing helper before starting HTTP).
-func (dm *DistMemory) SetLocalNode(node *cluster.Node) { //nolint:ireturn
+func (dm *DistMemory) SetLocalNode(node *cluster.Node) {
 	dm.localNode = node
 	if dm.nodeAddr == "" && node != nil {
 		dm.nodeAddr = node.Address
@@ -1090,7 +1090,7 @@ func (dm *DistMemory) Metrics() DistMetrics {
 }
 
 // DistMembershipSnapshot returns lightweight membership view (states & version).
-func (dm *DistMemory) DistMembershipSnapshot() map[string]any { //nolint:ireturn
+func (dm *DistMemory) DistMembershipSnapshot() map[string]any {
 	if dm.membership == nil {
 		return nil
 	}
@@ -1107,7 +1107,7 @@ func (dm *DistMemory) DistMembershipSnapshot() map[string]any { //nolint:ireturn
 }
 
 // LatencyHistograms returns a snapshot of latency bucket counts per operation (ns buckets; last bucket +Inf).
-func (dm *DistMemory) LatencyHistograms() map[string][]uint64 { //nolint:ireturn
+func (dm *DistMemory) LatencyHistograms() map[string][]uint64 {
 	if dm.latency == nil {
 		return nil
 	}
@@ -1119,7 +1119,7 @@ func (dm *DistMemory) LatencyHistograms() map[string][]uint64 { //nolint:ireturn
 // shuts down the optional HTTP server. Idempotent and safe to call concurrently
 // — repeat calls are no-ops. Tests SHOULD register Stop via t.Cleanup to avoid
 // goroutine leaks across `-count=N` iterations under -race.
-func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
+func (dm *DistMemory) Stop(ctx context.Context) error {
 	if !dm.stopped.CompareAndSwap(false, true) {
 		return nil
 	}
@@ -1177,13 +1177,13 @@ func (dm *DistMemory) Stop(ctx context.Context) error { //nolint:ireturn
 
 // IsOwner reports whether this node is an owner (primary or replica) for key.
 // Exported for tests / external observability (thin wrapper over internal logic).
-func (dm *DistMemory) IsOwner(key string) bool { //nolint:ireturn
+func (dm *DistMemory) IsOwner(key string) bool {
 	return dm.ownsKeyInternal(key)
 }
 
 // AddPeer adds a peer address into local membership (best-effort, no network validation).
 // If the peer already exists (by address) it's ignored. Used by tests to simulate join propagation.
-func (dm *DistMemory) AddPeer(address string) { //nolint:ireturn
+func (dm *DistMemory) AddPeer(address string) {
 	if dm == nil || dm.membership == nil || address == "" {
 		return
 	}
@@ -1202,7 +1202,7 @@ func (dm *DistMemory) AddPeer(address string) { //nolint:ireturn
 }
 
 // RemovePeer removes a peer by address (best-effort) to simulate node leave in tests.
-func (dm *DistMemory) RemovePeer(address string) { //nolint:ireturn
+func (dm *DistMemory) RemovePeer(address string) {
 	if dm == nil || dm.membership == nil || address == "" {
 		return
 	}
@@ -1217,7 +1217,7 @@ func (dm *DistMemory) RemovePeer(address string) { //nolint:ireturn
 }
 
 // sortedMerkleEntries returns merkle entries sorted by key.
-func (dm *DistMemory) sortedMerkleEntries() []merkleKV { //nolint:ireturn
+func (dm *DistMemory) sortedMerkleEntries() []merkleKV {
 	entries := dm.merkleEntries()
 
 	slices.SortFunc(entries, func(a, b merkleKV) int {
@@ -1228,7 +1228,7 @@ func (dm *DistMemory) sortedMerkleEntries() []merkleKV { //nolint:ireturn
 }
 
 // resolveMissingKeys enumerates remote-only keys using in-process or HTTP listing.
-func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, entries []merkleKV) map[string]struct{} { //nolint:ireturn
+func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, entries []merkleKV) map[string]struct{} {
 	missing := dm.enumerateRemoteOnlyKeys(nodeID, entries)
 	if len(missing) != 0 {
 		return missing
@@ -1272,7 +1272,7 @@ func (dm *DistMemory) applyMerkleDiffs(
 	entries []merkleKV,
 	diffs []int,
 	chunkSize int,
-) { //nolint:ireturn
+) {
 	for _, ci := range diffs {
 		start := ci * chunkSize
 		if start >= len(entries) {
@@ -1304,7 +1304,7 @@ func (dm *DistMemory) storeTransport(t DistTransport) {
 }
 
 // enumerateRemoteOnlyKeys returns keys present only on the remote side (best-effort, in-process only).
-func (dm *DistMemory) enumerateRemoteOnlyKeys(nodeID string, local []merkleKV) map[string]struct{} { //nolint:ireturn
+func (dm *DistMemory) enumerateRemoteOnlyKeys(nodeID string, local []merkleKV) map[string]struct{} {
 	missing := make(map[string]struct{})
 
 	ip, ok := dm.loadTransport().(*InProcessTransport)
@@ -1406,7 +1406,7 @@ func (dm *DistMemory) merkleEntries() []merkleKV {
 }
 
 // startTombstoneSweeper launches periodic compaction if configured.
-func (dm *DistMemory) startTombstoneSweeper() { //nolint:ireturn
+func (dm *DistMemory) startTombstoneSweeper() {
 	if dm.tombstoneTTL <= 0 || dm.tombstoneSweepInt <= 0 {
 		return
 	}
@@ -1436,7 +1436,7 @@ func (dm *DistMemory) startTombstoneSweeper() { //nolint:ireturn
 }
 
 // compactTombstones removes expired tombstones based on TTL, returns count purged.
-func (dm *DistMemory) compactTombstones() int64 { //nolint:ireturn
+func (dm *DistMemory) compactTombstones() int64 {
 	if dm.tombstoneTTL <= 0 {
 		return 0
 	}
@@ -1463,7 +1463,7 @@ func (dm *DistMemory) compactTombstones() int64 { //nolint:ireturn
 }
 
 // countTombstones returns approximate current count.
-func (dm *DistMemory) countTombstones() int64 { //nolint:ireturn
+func (dm *DistMemory) countTombstones() int64 {
 	var total int64
 
 	for _, sh := range dm.shards {
@@ -1478,7 +1478,7 @@ func (dm *DistMemory) countTombstones() int64 { //nolint:ireturn
 }
 
 // Rebalancing (Phase 3 initial implementation).
-func (dm *DistMemory) startRebalancerIfEnabled(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) startRebalancerIfEnabled(ctx context.Context) {
 	if dm.rebalanceInterval <= 0 || dm.membership == nil || dm.ring == nil {
 		return
 	}
@@ -1498,7 +1498,7 @@ func (dm *DistMemory) startRebalancerIfEnabled(ctx context.Context) { //nolint:i
 	go dm.rebalanceLoop(ctx, stopCh)
 }
 
-func (dm *DistMemory) rebalanceLoop(ctx context.Context, stopCh <-chan struct{}) { //nolint:ireturn
+func (dm *DistMemory) rebalanceLoop(ctx context.Context, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(dm.rebalanceInterval)
 	defer ticker.Stop()
 
@@ -1515,7 +1515,7 @@ func (dm *DistMemory) rebalanceLoop(ctx context.Context, stopCh <-chan struct{})
 }
 
 // runRebalanceTick performs a lightweight ownership diff and migrates keys best-effort.
-func (dm *DistMemory) runRebalanceTick(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) runRebalanceTick(ctx context.Context) {
 	mv := uint64(0)
 	if dm.membership != nil {
 		mv = dm.membership.Version()
@@ -1542,7 +1542,7 @@ func (dm *DistMemory) runRebalanceTick(ctx context.Context) { //nolint:ireturn
 
 // collectRebalanceCandidates scans shards for items whose primary ownership changed.
 // Note: we copy items (not pointers) to avoid pointer-to-loop-variable issues.
-func (dm *DistMemory) collectRebalanceCandidates() []cache.Item { //nolint:ireturn
+func (dm *DistMemory) collectRebalanceCandidates() []cache.Item {
 	if len(dm.shards) == 0 {
 		return nil
 	}
@@ -1568,7 +1568,7 @@ func (dm *DistMemory) collectRebalanceCandidates() []cache.Item { //nolint:iretu
 
 // shouldRebalance determines if the item should be migrated away.
 // Triggers when this node lost all ownership or was previously primary and is no longer.
-func (dm *DistMemory) shouldRebalance(sh *distShard, it *cache.Item) bool { //nolint:ireturn
+func (dm *DistMemory) shouldRebalance(sh *distShard, it *cache.Item) bool {
 	if !dm.ownsKeyInternal(it.Key) { // lost all ownership
 		if dm.removalGracePeriod > 0 && sh.removedAt != nil { // record timestamp if not already
 			sh.removedAtMu.Lock()
@@ -1608,7 +1608,7 @@ func (dm *DistMemory) shouldRebalance(sh *distShard, it *cache.Item) bool { //no
 
 // replicateNewReplicas scans for keys where this node is still primary but new replica owners were added since first observation.
 // It forwards the current item to newly added replicas (best-effort) and updates originalOwners snapshot.
-func (dm *DistMemory) replicateNewReplicas(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) replicateNewReplicas(ctx context.Context) {
 	if dm.ring == nil || dm.loadTransport() == nil {
 		return
 	}
@@ -1628,7 +1628,7 @@ func (dm *DistMemory) replicateNewReplicas(ctx context.Context) { //nolint:iretu
 	}
 }
 
-func (dm *DistMemory) replDiffShard(ctx context.Context, sh *distShard, processed, limit int) int { //nolint:ireturn
+func (dm *DistMemory) replDiffShard(ctx context.Context, sh *distShard, processed, limit int) int {
 	for kv := range sh.items.IterBuffered() {
 		if limit > 0 && processed >= limit {
 			return processed
@@ -1683,7 +1683,7 @@ func (*DistMemory) ensureOwnerBaseline(sh *distShard, key string, owners []clust
 	return false
 }
 
-func (*DistMemory) computeNewReplicas(sh *distShard, key string, owners []cluster.NodeID) []cluster.NodeID { //nolint:ireturn
+func (*DistMemory) computeNewReplicas(sh *distShard, key string, owners []cluster.NodeID) []cluster.NodeID {
 	sh.originalOwnersMu.RLock()
 
 	prev := sh.originalOwners[key]
@@ -1710,7 +1710,7 @@ func (dm *DistMemory) sendReplicaDiff(
 	it *cache.Item,
 	repls []cluster.NodeID,
 	processed, limit int,
-) int { //nolint:ireturn
+) int {
 	transport := dm.loadTransport()
 	if transport == nil {
 		return processed
@@ -1738,7 +1738,7 @@ func (dm *DistMemory) sendReplicaDiff(
 	return processed
 }
 
-func (*DistMemory) setOwnerBaseline(sh *distShard, key string, owners []cluster.NodeID) { //nolint:ireturn
+func (*DistMemory) setOwnerBaseline(sh *distShard, key string, owners []cluster.NodeID) {
 	sh.originalOwnersMu.Lock()
 
 	cp := make([]cluster.NodeID, len(owners))
@@ -1748,7 +1748,7 @@ func (*DistMemory) setOwnerBaseline(sh *distShard, key string, owners []cluster.
 	sh.originalOwnersMu.Unlock()
 }
 
-func (dm *DistMemory) maybeRecordRemoval(sh *distShard, key string) { //nolint:ireturn
+func (dm *DistMemory) maybeRecordRemoval(sh *distShard, key string) {
 	if dm.removalGracePeriod <= 0 || sh.removedAt == nil {
 		return
 	}
@@ -1767,8 +1767,6 @@ func (dm *DistMemory) maybeRecordRemoval(sh *distShard, key string) { //nolint:i
 }
 
 // migrateItems concurrently migrates items in batches respecting configured limits.
-//
-//nolint:ireturn
 func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) {
 	if len(items) == 0 {
 		return
@@ -1811,7 +1809,7 @@ func (dm *DistMemory) migrateItems(ctx context.Context, items []cache.Item) {
 }
 
 // migrateIfNeeded forwards item to new primary if this node no longer owns it.
-func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) { //nolint:ireturn
+func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) {
 	owners := dm.lookupOwners(item.Key)
 	if len(owners) == 0 || owners[0] == dm.localNode.ID {
 		return
@@ -1851,7 +1849,7 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) { /
 
 // shedRemovedKeys deletes keys for which this node is no longer an owner after grace period.
 // Best-effort: we iterate shards, check removal timestamps, and remove local copy if grace elapsed.
-func (dm *DistMemory) shedRemovedKeys() { //nolint:ireturn
+func (dm *DistMemory) shedRemovedKeys() {
 	if dm.removalGracePeriod <= 0 {
 		return
 	}
@@ -1864,7 +1862,7 @@ func (dm *DistMemory) shedRemovedKeys() { //nolint:ireturn
 	}
 }
 
-func (dm *DistMemory) shedShard(sh *distShard, now time.Time) { //nolint:ireturn
+func (dm *DistMemory) shedShard(sh *distShard, now time.Time) {
 	if sh.removedAt == nil {
 		return
 	}
@@ -1900,7 +1898,7 @@ func encodeUint64BigEndian(buf []byte, v uint64) {
 }
 
 // foldMerkle reduces leaf hashes into a single root using a binary tree.
-func foldMerkle(leaves [][]byte, hasher hash.Hash) []byte { //nolint:ireturn
+func foldMerkle(leaves [][]byte, hasher hash.Hash) []byte {
 	if len(leaves) == 0 {
 		return nil
 	}
@@ -1929,7 +1927,7 @@ func foldMerkle(leaves [][]byte, hasher hash.Hash) []byte { //nolint:ireturn
 }
 
 // ensureShardConfig initializes shards respecting configured shardCount.
-func (dm *DistMemory) ensureShardConfig() { //nolint:ireturn
+func (dm *DistMemory) ensureShardConfig() {
 	if dm.shardCount <= 0 {
 		dm.shardCount = defaultDistShardCount
 	}
@@ -1948,7 +1946,7 @@ func (dm *DistMemory) ensureShardConfig() { //nolint:ireturn
 }
 
 // initMembershipIfNeeded sets up membership/ring and local node defaults.
-func (dm *DistMemory) initMembershipIfNeeded() { //nolint:ireturn
+func (dm *DistMemory) initMembershipIfNeeded() {
 	if dm.membership == nil {
 		dm.initStandaloneMembership()
 
@@ -1968,7 +1966,7 @@ func (dm *DistMemory) initMembershipIfNeeded() { //nolint:ireturn
 }
 
 // tryStartHTTP starts internal HTTP transport if not provided.
-func (dm *DistMemory) tryStartHTTP(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 	if dm.loadTransport() != nil || dm.nodeAddr == "" {
 		return
 	}
@@ -2002,7 +2000,7 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) { //nolint:ireturn
 }
 
 // startHeartbeatIfEnabled launches heartbeat loop if configured.
-func (dm *DistMemory) startHeartbeatIfEnabled(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) startHeartbeatIfEnabled(ctx context.Context) {
 	if dm.hbInterval > 0 && dm.loadTransport() != nil {
 		stopCh := make(chan struct{})
 
@@ -2012,7 +2010,7 @@ func (dm *DistMemory) startHeartbeatIfEnabled(ctx context.Context) { //nolint:ir
 }
 
 // lookupOwners returns ring owners slice for a key (nil if no ring).
-func (dm *DistMemory) lookupOwners(key string) []cluster.NodeID { //nolint:ireturn
+func (dm *DistMemory) lookupOwners(key string) []cluster.NodeID {
 	if dm.ring == nil {
 		return nil
 	}
@@ -2021,7 +2019,7 @@ func (dm *DistMemory) lookupOwners(key string) []cluster.NodeID { //nolint:iretu
 }
 
 // requiredAcks computes required acknowledgements for given consistency level.
-func (*DistMemory) requiredAcks(total int, lvl ConsistencyLevel) int { //nolint:ireturn
+func (*DistMemory) requiredAcks(total int, lvl ConsistencyLevel) int {
 	//nolint:revive
 	switch lvl {
 	case ConsistencyAll:
@@ -2036,7 +2034,7 @@ func (*DistMemory) requiredAcks(total int, lvl ConsistencyLevel) int { //nolint:
 }
 
 // getOne fetches from a single owner path.
-func (dm *DistMemory) getOne(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+func (dm *DistMemory) getOne(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) {
 	for idx, oid := range owners { // iterate owners until hit
 		if it, ok := dm.tryLocalGet(key, idx, oid); ok {
 			return it, true
@@ -2051,7 +2049,7 @@ func (dm *DistMemory) getOne(ctx context.Context, key string, owners []cluster.N
 }
 
 // tryLocalGet attempts local shard lookup when oid is local; returns item if found.
-func (dm *DistMemory) tryLocalGet(key string, idx int, oid cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+func (dm *DistMemory) tryLocalGet(key string, idx int, oid cluster.NodeID) (*cache.Item, bool) {
 	if oid != dm.localNode.ID { // not local owner
 		return nil, false
 	}
@@ -2068,7 +2066,7 @@ func (dm *DistMemory) tryLocalGet(key string, idx int, oid cluster.NodeID) (*cac
 }
 
 // tryRemoteGet attempts remote fetch for given owner; includes promotion + repair.
-func (dm *DistMemory) tryRemoteGet(ctx context.Context, key string, idx int, oid cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+func (dm *DistMemory) tryRemoteGet(ctx context.Context, key string, idx int, oid cluster.NodeID) (*cache.Item, bool) {
 	transport := dm.loadTransport()
 	if oid == dm.localNode.ID || transport == nil { // skip local path or missing transport
 		return nil, false
@@ -2106,7 +2104,7 @@ func (dm *DistMemory) tryRemoteGet(ctx context.Context, key string, idx int, oid
 }
 
 // getWithConsistency performs quorum/all reads.
-func (dm *DistMemory) getWithConsistency(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+func (dm *DistMemory) getWithConsistency(ctx context.Context, key string, owners []cluster.NodeID) (*cache.Item, bool) {
 	needed := dm.requiredAcks(len(owners), dm.readConsistency)
 	acks := 0
 
@@ -2132,7 +2130,7 @@ func (dm *DistMemory) collectQuorum(
 	needed int,
 	chosen **cache.Item,
 	acks *int,
-) []cluster.NodeID { //nolint:ireturn
+) []cluster.NodeID {
 	stale := make([]cluster.NodeID, 0, len(owners))
 	for idx, oid := range owners {
 		it, ok := dm.fetchOwner(ctx, key, idx, oid)
@@ -2163,7 +2161,7 @@ func (dm *DistMemory) repairStaleOwners(
 	key string,
 	chosen *cache.Item,
 	staleOwners []cluster.NodeID,
-) { //nolint:ireturn
+) {
 	transport := dm.loadTransport()
 	if transport == nil || chosen == nil {
 		return
@@ -2188,7 +2186,7 @@ func (dm *DistMemory) repairStaleOwners(
 }
 
 // fetchOwner attempts to fetch item from given owner (local or remote) updating metrics.
-func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid cluster.NodeID) (*cache.Item, bool) { //nolint:ireturn
+func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid cluster.NodeID) (*cache.Item, bool) {
 	if oid == dm.localNode.ID { // local
 		if it, ok := dm.shardFor(key).items.GetCopy(key); ok {
 			return it, true
@@ -2223,7 +2221,7 @@ func (dm *DistMemory) fetchOwner(ctx context.Context, key string, idx int, oid c
 }
 
 // replicateTo sends writes to replicas (best-effort) returning ack count.
-func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replicas []cluster.NodeID) int { //nolint:ireturn
+func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replicas []cluster.NodeID) int {
 	transport := dm.loadTransport()
 	if transport == nil {
 		return 0
@@ -2255,7 +2253,7 @@ func (dm *DistMemory) getWithConsistencyParallel(
 	ctx context.Context,
 	key string,
 	owners []cluster.NodeID,
-) (*cache.Item, bool) { //nolint:ireturn
+) (*cache.Item, bool) {
 	needed := dm.requiredAcks(len(owners), dm.readConsistency)
 
 	type res struct {
@@ -2412,7 +2410,7 @@ func (dm *DistMemory) startHintReplayIfEnabled(ctx context.Context) {
 	go dm.hintReplayLoop(ctx, stopCh)
 }
 
-func (dm *DistMemory) hintReplayLoop(ctx context.Context, stopCh <-chan struct{}) { //nolint:ireturn
+func (dm *DistMemory) hintReplayLoop(ctx context.Context, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(dm.hintReplayInt)
 	defer ticker.Stop()
 
@@ -2495,7 +2493,7 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 }
 
 // --- Simple gossip (in-process only) ---.
-func (dm *DistMemory) startGossipIfEnabled() { //nolint:ireturn
+func (dm *DistMemory) startGossipIfEnabled() {
 	if dm.gossipInterval <= 0 {
 		return
 	}
@@ -2507,7 +2505,7 @@ func (dm *DistMemory) startGossipIfEnabled() { //nolint:ireturn
 }
 
 // startAutoSyncIfEnabled launches periodic merkle syncs to all other members.
-func (dm *DistMemory) startAutoSyncIfEnabled(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) startAutoSyncIfEnabled(ctx context.Context) {
 	if dm.autoSyncInterval <= 0 || dm.membership == nil {
 		return
 	}
@@ -2524,7 +2522,7 @@ func (dm *DistMemory) startAutoSyncIfEnabled(ctx context.Context) { //nolint:ire
 	go dm.autoSyncLoop(ctx, interval, stopCh)
 }
 
-func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration, stopCh <-chan struct{}) { //nolint:ireturn
+func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -2539,7 +2537,7 @@ func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration, 
 }
 
 // runAutoSyncTick performs one auto-sync cycle; separated for lower complexity.
-func (dm *DistMemory) runAutoSyncTick(ctx context.Context) { //nolint:ireturn
+func (dm *DistMemory) runAutoSyncTick(ctx context.Context) {
 	start := time.Now()
 
 	var lastErr error
@@ -2576,7 +2574,7 @@ func (dm *DistMemory) runAutoSyncTick(ctx context.Context) { //nolint:ireturn
 	dm.metrics.autoSyncLoops.Add(1)
 }
 
-func (dm *DistMemory) gossipLoop(stopCh <-chan struct{}) { //nolint:ireturn
+func (dm *DistMemory) gossipLoop(stopCh <-chan struct{}) {
 	ticker := time.NewTicker(dm.gossipInterval)
 	defer ticker.Stop()
 
@@ -2590,7 +2588,7 @@ func (dm *DistMemory) gossipLoop(stopCh <-chan struct{}) { //nolint:ireturn
 	}
 }
 
-func (dm *DistMemory) runGossipTick() { //nolint:ireturn
+func (dm *DistMemory) runGossipTick() {
 	if dm.membership == nil || dm.loadTransport() == nil {
 		return
 	}
@@ -2636,7 +2634,7 @@ func (dm *DistMemory) runGossipTick() { //nolint:ireturn
 	remote.acceptGossip(snapshot)
 }
 
-func (dm *DistMemory) acceptGossip(nodes []*cluster.Node) { //nolint:ireturn
+func (dm *DistMemory) acceptGossip(nodes []*cluster.Node) {
 	if dm.membership == nil {
 		return
 	}
@@ -2678,7 +2676,7 @@ func (dm *DistMemory) acceptGossip(nodes []*cluster.Node) { //nolint:ireturn
 }
 
 // chooseNewer picks the item with higher version; on version tie uses lexicographically smaller Origin as winner.
-func (dm *DistMemory) chooseNewer(itemA, itemB *cache.Item) *cache.Item { //nolint:ireturn
+func (dm *DistMemory) chooseNewer(itemA, itemB *cache.Item) *cache.Item {
 	if itemA == nil {
 		return itemB
 	}
@@ -2716,7 +2714,7 @@ func (dm *DistMemory) chooseNewer(itemA, itemB *cache.Item) *cache.Item { //noli
 }
 
 // repairReplicas ensures each owner has at least the chosen version; best-effort.
-func (dm *DistMemory) repairReplicas(ctx context.Context, key string, chosen *cache.Item, owners []cluster.NodeID) { //nolint:ireturn
+func (dm *DistMemory) repairReplicas(ctx context.Context, key string, chosen *cache.Item, owners []cluster.NodeID) {
 	if chosen == nil {
 		return
 	}
@@ -2748,7 +2746,7 @@ func (dm *DistMemory) repairRemoteReplica(
 	key string,
 	chosen *cache.Item,
 	oid cluster.NodeID,
-) { // separated to reduce cyclomatic complexity //nolint:ireturn
+) { // separated to reduce cyclomatic complexity
 	transport := dm.loadTransport()
 	if transport == nil { // cannot repair remote
 		return
@@ -2763,7 +2761,7 @@ func (dm *DistMemory) repairRemoteReplica(
 }
 
 // handleForwardPrimary tries to forward a Set to the primary; returns (proceedAsPrimary,false) if promotion required.
-func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster.NodeID, item *cache.Item) (bool, error) { //nolint:ireturn
+func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster.NodeID, item *cache.Item) (bool, error) {
 	transport := dm.loadTransport()
 	if transport == nil {
 		return false, sentinel.ErrNotOwner
@@ -2904,7 +2902,7 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 }
 
 // recordOriginalPrimary stores first-seen primary owner for key.
-func (dm *DistMemory) recordOriginalPrimary(sh *distShard, key string) { //nolint:ireturn
+func (dm *DistMemory) recordOriginalPrimary(sh *distShard, key string) {
 	if sh == nil || sh.originalPrimary == nil || dm.ring == nil {
 		return
 	}
@@ -2989,7 +2987,7 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 }
 
 // runHeartbeatTick runs one heartbeat iteration (best-effort).
-func (dm *DistMemory) runHeartbeatTick(ctx context.Context) { //nolint:ireturn,revive
+func (dm *DistMemory) runHeartbeatTick(ctx context.Context) { //nolint:revive
 	if dm.loadTransport() == nil || dm.membership == nil {
 		return
 	}
@@ -3028,7 +3026,7 @@ func (dm *DistMemory) runHeartbeatTick(ctx context.Context) { //nolint:ireturn,r
 }
 
 // evaluateLiveness applies timeout-based transitions then performs a probe.
-func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node *cluster.Node) { //nolint:ireturn
+func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node *cluster.Node) {
 	elapsed := now.Sub(node.LastSeen)
 
 	if dm.hbDeadAfter > 0 && elapsed > dm.hbDeadAfter { // prune dead

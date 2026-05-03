@@ -18,6 +18,34 @@ import (
 // endpoint reports a non-OK status during the readiness poll.
 var errUnexpectedStatus = errors.New("unexpected dist node health status")
 
+// rebalanceTestOpts is the shared option set used by TestDistRebalanceJoin
+// across all three nodes — extracted so each `mustDistNode` call site
+// stays a single line.
+func rebalanceTestOpts() []backend.DistMemoryOption {
+	return []backend.DistMemoryOption{
+		backend.WithDistReplication(2),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistRebalanceInterval(100 * time.Millisecond),
+	}
+}
+
+// populateKeys writes n test keys to node — used to seed the cluster before
+// triggering a rebalance.
+func populateKeys(ctx context.Context, t *testing.T, node *backend.DistMemory, n int) {
+	t.Helper()
+
+	for i := range n {
+		k := cacheKey(i)
+
+		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
+
+		err := node.Set(ctx, it)
+		if err != nil {
+			t.Fatalf("set %s: %v", k, err)
+		}
+	}
+}
+
 // TestDistRebalanceJoin verifies keys are migrated to a new node after join.
 func TestDistRebalanceJoin(t *testing.T) {
 	t.Parallel()
@@ -28,89 +56,44 @@ func TestDistRebalanceJoin(t *testing.T) {
 	addrA := allocatePort(t)
 	addrB := allocatePort(t)
 
-	nodeA := mustDistNode(
-		ctx,
-		t,
-		"A",
-		addrA,
-		[]string{addrB},
-		backend.WithDistReplication(2),
-		backend.WithDistVirtualNodes(32),
-		backend.WithDistRebalanceInterval(100*time.Millisecond),
-	)
+	nodeA := mustDistNode(ctx, t, "A", addrA, []string{addrB}, rebalanceTestOpts()...)
+	nodeB := mustDistNode(ctx, t, "B", addrB, []string{addrA}, rebalanceTestOpts()...)
 
-	nodeB := mustDistNode(
-		ctx,
-		t,
-		"B",
-		addrB,
-		[]string{addrA},
-		backend.WithDistReplication(2),
-		backend.WithDistVirtualNodes(32),
-		backend.WithDistRebalanceInterval(100*time.Millisecond),
-	)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
-	// Write a spread of keys via A.
-	totalKeys := 300
-	for i := range totalKeys {
-		k := cacheKey(i)
+	const totalKeys = 300
 
-		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
+	populateKeys(ctx, t, nodeA, totalKeys)
 
-		err := nodeA.Set(ctx, it)
-		if err != nil {
-			t.Fatalf("set %s: %v", k, err)
-		}
-	}
+	// Allow initial replication, then add third node C.
+	time.Sleep(200 * time.Millisecond)
 
-	time.Sleep(200 * time.Millisecond) // allow initial replication
-
-	// Capture ownership counts before join.
 	skeys := sampleKeys(totalKeys)
 
-	_ = ownedPrimaryCount(nodeA, skeys) // baseline (unused currently)
-	_ = ownedPrimaryCount(nodeB, skeys)
-
-	// Add third node C.
 	addrC := allocatePort(t)
+	nodeC := mustDistNode(ctx, t, "C", addrC, []string{addrA, addrB}, rebalanceTestOpts()...)
 
-	nodeC := mustDistNode(
-		ctx,
-		t,
-		"C",
-		addrC,
-		[]string{addrA, addrB},
-		backend.WithDistReplication(2),
-		backend.WithDistVirtualNodes(32),
-		backend.WithDistRebalanceInterval(100*time.Millisecond),
-	)
 	defer func() { _ = nodeC.Stop(ctx) }()
 
-	// Manually inject C into A and B membership (simulating gossip propagation delay that doesn't exist yet).
+	// Manually propagate C into A and B membership (gossip-propagation-delay simulation).
 	nodeA.AddPeer(addrC)
 	nodeB.AddPeer(addrC)
-
-	// Allow membership to propagate + several rebalance ticks.
 	time.Sleep(1200 * time.Millisecond)
 
-	// Post-join ownership counts (sampled locally using isOwner logic via Get + Metrics ring lookup indirectly).
 	postOwnedA := ownedPrimaryCount(nodeA, skeys)
 	postOwnedB := ownedPrimaryCount(nodeB, skeys)
 	postOwnedC := ownedPrimaryCount(nodeC, skeys)
 
-	// Basic sanity: new node should now own > 0 keys.
 	if postOwnedC == 0 {
 		t.Fatalf("expected node C to own some keys after rebalancing")
 	}
 
-	// Distribution variance check: ensure no node has > 80% of sample (initial naive rebalance heuristic).
+	// Distribution variance check: no node should hold > 80% of the sample.
 	maxAllowed := int(float64(totalKeys) * 0.80)
 	if postOwnedA > maxAllowed || postOwnedB > maxAllowed || postOwnedC > maxAllowed {
 		t.Fatalf("ownership still highly skewed: A=%d B=%d C=%d", postOwnedA, postOwnedB, postOwnedC)
 	}
 
-	// Rebalance metrics should show migrations (keys forwarded off old primaries) across cluster.
 	migrated := nodeA.Metrics().RebalancedKeys + nodeB.Metrics().RebalancedKeys + nodeC.Metrics().RebalancedKeys
 	if migrated == 0 {
 		t.Fatalf("expected some rebalanced keys (total migrated=0)")

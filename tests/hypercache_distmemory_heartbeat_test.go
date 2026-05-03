@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -9,154 +8,100 @@ import (
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
-// TestDistMemoryHeartbeatLiveness spins up three nodes with a fast heartbeat interval
-// and validates suspect -> removal transitions plus success/failure metrics.
-func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
-	// Intervals chosen so the test tolerates the 3-5x slowdown imposed by
-	// the race detector. Previous values (interval=30ms, dead=120ms) were
-	// tight enough that a delayed heartbeat tick could push *alive* nodes
-	// past deadAfter under -race, removing them from membership.
-	interval := 80 * time.Millisecond
-	suspectAfter := 4 * interval // 320ms
-	deadAfter := 8 * interval    // 640ms
-
-	ring := cluster.NewRing(cluster.WithReplication(1))
-	membership := cluster.NewMembership(ring)
-	transport := backend.NewInProcessTransport()
-
-	// nodes
-	n1 := cluster.NewNode("", "n1:0")
-	n2 := cluster.NewNode("", "n2:0")
-	n3 := cluster.NewNode("", "n3:0")
-
-	// backend for node1 with heartbeat enabled
-	b1i, err := backend.NewDistMemory(
-		context.TODO(),
-		backend.WithDistMembership(membership, n1),
-		backend.WithDistTransport(transport),
-		backend.WithDistHeartbeat(interval, suspectAfter, deadAfter),
-	)
-	if err != nil {
-		t.Fatalf("b1: %v", err)
-	}
-
-	b1, ok := b1i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b1i to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, b1)
-
-	// add peers (without heartbeat loops themselves)
-	b2i, err := backend.NewDistMemory(
-		context.TODO(),
-		backend.WithDistMembership(membership, n2),
-		backend.WithDistTransport(transport),
-	)
-	if err != nil {
-		t.Fatalf("b2: %v", err)
-	}
-
-	b2, ok := b2i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b2i to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, b2)
-
-	b3i, err := backend.NewDistMemory(
-		context.TODO(),
-		backend.WithDistMembership(membership, n3),
-		backend.WithDistTransport(transport),
-	)
-	if err != nil {
-		t.Fatalf("b3: %v", err)
-	}
-
-	b3, ok := b3i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b3i to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, b3)
-
-	transport.Register(b1)
-	transport.Register(b2)
-	transport.Register(b3)
-
-	// Wait until heartbeat marks peers alive (initial success probes)
-	deadline := time.Now().Add(2 * time.Second)
+// waitForAllAlive polls the membership view until every node reports alive
+// or the deadline expires. Used by heartbeat-liveness tests to ensure the
+// initial probe round has completed before the test starts perturbing the
+// cluster.
+func waitForAllAlive(membership *cluster.Membership, expected int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		aliveCount := 0
+		alive := 0
+
 		for _, n := range membership.List() {
 			if n.State == cluster.NodeAlive {
-				aliveCount++
+				alive++
 			}
 		}
 
-		if aliveCount == 3 {
-			break
+		if alive == expected {
+			return true
 		}
 
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	// Simulate node2 becoming unresponsive by removing it from transport registry.
-	// (Simplest way: do not respond to health; drop entry.)
-	transport.Unregister(string(n2.ID))
+	return false
+}
 
-	// Wait until node2 transitions to suspect then removed.
-	var sawSuspect bool
+// nodeRemovalResult captures the outcome of waitForNodeRemoval — using a
+// struct instead of two bool returns avoids the revive `confusing-results`
+// lint while keeping the call site readable at the expense of one more
+// type definition.
+type nodeRemovalResult struct {
+	SawSuspect bool
+	Removed    bool
+}
 
-	deadline = time.Now().Add(2 * deadAfter)
+// waitForNodeRemoval polls until the named node has been removed from
+// membership, having first transitioned through the Suspect state.
+func waitForNodeRemoval(membership *cluster.Membership, target cluster.NodeID, timeout time.Duration) nodeRemovalResult {
+	var result nodeRemovalResult
+
+	deadline := time.Now().Add(timeout)
+
 	for time.Now().Before(deadline) {
-		foundN2 := false
+		found := false
+
 		for _, n := range membership.List() {
-			if n.ID == n2.ID {
-				foundN2 = true
+			if n.ID == target {
+				found = true
 
 				if n.State == cluster.NodeSuspect {
-					sawSuspect = true
+					result.SawSuspect = true
 				}
 			}
 		}
 
-		if !foundN2 && sawSuspect {
-			break
-		} // removed after suspicion observed
+		if !found && result.SawSuspect {
+			result.Removed = true
+
+			return result
+		}
 
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	if !sawSuspect {
-		t.Fatalf("node2 never became suspect")
-	}
+	return result
+}
 
-	// ensure removed
+// assertHeartbeatLiveness verifies the post-condition of a heartbeat removal
+// scenario: removed node is gone from membership, alive node is still
+// present and alive, and the heartbeat metrics reflect the activity.
+func assertHeartbeatLiveness(t *testing.T, membership *cluster.Membership, removed, stillAlive cluster.NodeID, m backend.DistMetrics) {
+	t.Helper()
+
 	for _, n := range membership.List() {
-		if n.ID == n2.ID {
-			t.Fatalf("node2 still present, state=%s", n.State)
+		if n.ID == removed {
+			t.Fatalf("removed node %s still present, state=%s", removed, n.State)
 		}
 	}
 
-	// Node3 should remain alive; ensure not removed
-	n3Present := false
+	alivePresent := false
+
 	for _, n := range membership.List() {
-		if n.ID == n3.ID {
-			n3Present = true
+		if n.ID == stillAlive {
+			alivePresent = true
 
 			if n.State != cluster.NodeAlive {
-				t.Fatalf("node3 not alive: %s", n.State)
+				t.Fatalf("alive node %s not alive: %s", stillAlive, n.State)
 			}
 		}
 	}
 
-	if !n3Present {
-		t.Fatalf("node3 missing")
+	if !alivePresent {
+		t.Fatalf("alive node %s missing", stillAlive)
 	}
 
-	// Metrics sanity: at least one heartbeat failure and success recorded.
-	m := b1.Metrics()
 	if m.HeartbeatFailure == 0 {
 		t.Errorf("expected heartbeat failures > 0")
 	}
@@ -168,4 +113,54 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest
 	if m.NodesRemoved == 0 {
 		t.Errorf("expected nodes removed metric > 0")
 	}
+}
+
+// TestDistMemoryHeartbeatLiveness spins up three nodes with a fast heartbeat interval
+// and validates suspect -> removal transitions plus success/failure metrics.
+//
+// Only node 1 runs a heartbeat goroutine — the test asserts on its metrics.
+// Adding heartbeat to all three nodes makes the test flaky under -shuffle
+// because node 2's own heartbeat goroutine (running while it's unregistered
+// from the transport) interferes with timing of node 1's removal of node 2.
+func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest // mutates shared transport
+	// Intervals chosen so the test tolerates the 3-5x slowdown imposed by
+	// the race detector. Previous values (interval=30ms, dead=120ms) were
+	// tight enough that a delayed heartbeat tick could push *alive* nodes
+	// past deadAfter under -race, removing them from membership.
+	const interval = 80 * time.Millisecond
+
+	suspectAfter := 4 * interval // 320ms
+	deadAfter := 8 * interval    // 640ms
+
+	ring := cluster.NewRing(cluster.WithReplication(1))
+	membership := cluster.NewMembership(ring)
+	transport := backend.NewInProcessTransport()
+
+	b1 := newDistPeerNode(t, membership, transport, "n1",
+		backend.WithDistHeartbeat(interval, suspectAfter, deadAfter),
+	)
+	b2 := newDistPeerNode(t, membership, transport, "n2")
+	b3 := newDistPeerNode(t, membership, transport, "n3")
+
+	if !waitForAllAlive(membership, 3, 2*time.Second) {
+		t.Fatalf("nodes never reached alive state within 2s")
+	}
+
+	target := b2.LocalNodeID()
+	transport.Unregister(string(target))
+
+	// 4*deadAfter (= 2560ms) gives the heartbeat goroutine slack under
+	// -race -shuffle -count=10. Earlier 2*deadAfter (1280ms) was tight
+	// enough that goroutine scheduling latency could miss the deadline
+	// even when the probe logic was working correctly.
+	res := waitForNodeRemoval(membership, target, 4*deadAfter)
+	if !res.SawSuspect {
+		t.Fatalf("node2 never became suspect")
+	}
+
+	if !res.Removed {
+		t.Fatalf("node2 not removed within 2*deadAfter")
+	}
+
+	assertHeartbeatLiveness(t, membership, target, b3.LocalNodeID(), b1.Metrics())
 }

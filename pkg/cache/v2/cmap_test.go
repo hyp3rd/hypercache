@@ -9,6 +9,7 @@ import (
 const (
 	concurrentWrites = 100
 	concurrentReads  = 50
+	testValue        = "test_value"
 )
 
 func TestNew(t *testing.T) {
@@ -82,7 +83,7 @@ func TestSetAndGet(t *testing.T) {
 
 	cm := New()
 	item := &Item{
-		Value:      "test_value",
+		Value:      testValue,
 		Expiration: time.Hour,
 	}
 
@@ -111,7 +112,7 @@ func TestHas(t *testing.T) {
 
 	cm := New()
 	item := &Item{
-		Value:      "test_value",
+		Value:      testValue,
 		Expiration: time.Hour,
 	}
 
@@ -133,7 +134,7 @@ func TestPop(t *testing.T) {
 
 	cm := New()
 	item := &Item{
-		Value:      "test_value",
+		Value:      testValue,
 		Expiration: time.Hour,
 	}
 
@@ -162,7 +163,7 @@ func TestRemove(t *testing.T) {
 
 	cm := New()
 	item := &Item{
-		Value:      "test_value",
+		Value:      testValue,
 		Expiration: time.Hour,
 	}
 
@@ -187,7 +188,7 @@ func TestCount(t *testing.T) {
 	}
 
 	item := &Item{
-		Value:      "test_value",
+		Value:      testValue,
 		Expiration: time.Hour,
 	}
 

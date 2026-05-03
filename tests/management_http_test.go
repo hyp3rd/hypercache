@@ -14,6 +14,22 @@ import (
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
+// waitForManagementAddr polls hc.ManagementHTTPAddress until the listener
+// has bound. Under -race the listener startup can take seconds, so a
+// one-shot read would race.
+func waitForManagementAddr(hc *hypercache.HyperCache[backend.InMemory], timeout time.Duration) string {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if addr := hc.ManagementHTTPAddress(); addr != "" {
+			return addr
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return ""
+}
+
 // TestManagementHTTP_BasicEndpoints spins up the management HTTP server on an ephemeral port
 // and validates core endpoints.
 func TestManagementHTTP_BasicEndpoints(t *testing.T) {
@@ -35,21 +51,7 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 
 	t.Cleanup(func() { _ = hc.Stop(ctx) })
 
-	// Wait for the management HTTP listener to come up. The race detector
-	// can push listener startup well past the original 30 ms; poll with a
-	// generous deadline instead.
-	var addr string
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		addr = hc.ManagementHTTPAddress()
-		if addr != "" {
-			break
-		}
-
-		time.Sleep(10 * time.Millisecond)
-	}
-
+	addr := waitForManagementAddr(hc, 5*time.Second)
 	if addr == "" {
 		t.Fatal("management HTTP listener did not bind within deadline")
 	}
@@ -68,33 +70,26 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 		return resp
 	}
 
-	// /health
 	resp := get("/health")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	_ = resp.Body.Close()
 
-	// /stats
 	resp = get("/stats")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var statsBody map[string]any
 
-	dec := json.NewDecoder(resp.Body)
-
-	err = dec.Decode(&statsBody)
-	require.NoError(t, err)
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&statsBody))
 
 	_ = resp.Body.Close()
 
-	// /config
 	resp = get("/config")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var cfgBody map[string]any
 
-	dec = json.NewDecoder(resp.Body)
-	_ = dec.Decode(&cfgBody)
+	_ = json.NewDecoder(resp.Body).Decode(&cfgBody)
 	_ = resp.Body.Close()
 
 	require.NotEmpty(t, cfgBody)

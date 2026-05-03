@@ -61,7 +61,7 @@ func (m *Membership) List() []*Node {
 func (m *Membership) Ring() *Ring { return m.ring }
 
 // Remove deletes a node from membership and rebuilds the ring. Returns true if removed.
-func (m *Membership) Remove(id NodeID) bool { //nolint:ireturn
+func (m *Membership) Remove(id NodeID) bool {
 	m.mu.Lock()
 
 	_, ok := m.nodes[id]
@@ -89,7 +89,7 @@ func (m *Membership) Remove(id NodeID) bool { //nolint:ireturn
 }
 
 // Mark updates node state + incarnation and refreshes LastSeen. Returns true if node exists.
-func (m *Membership) Mark(id NodeID, state NodeState) bool { //nolint:ireturn
+func (m *Membership) Mark(id NodeID, state NodeState) bool {
 	m.mu.Lock()
 
 	n, ok := m.nodes[id]

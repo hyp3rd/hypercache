@@ -13,71 +13,57 @@ import (
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
+// findOrderedThreeOwnerKey brute-forces a key whose ring ownership ordering
+// is exactly [n1, n2, n3]. This makes the versioning-quorum test deterministic
+// — without it, forwarding paths vary by hash and obscure the assertion.
+func findOrderedThreeOwnerKey(node *backend.DistMemory, want []cluster.NodeID) string {
+	return findOrderedThreeOwnerKeyPrefix(node, want, "k")
+}
+
+// findOrderedThreeOwnerKeyPrefix is the prefix-parameterized variant of
+// findOrderedThreeOwnerKey — used by tests that want their fixture keys to
+// share a common prefix for log readability.
+func findOrderedThreeOwnerKeyPrefix(node *backend.DistMemory, want []cluster.NodeID, prefix string) string {
+	for i := range 3000 {
+		cand := fmt.Sprintf("%s%d", prefix, i)
+
+		owners := node.DebugOwners(cand)
+		if len(owners) != len(want) {
+			continue
+		}
+
+		matches := true
+
+		for j, id := range want {
+			if owners[j] != id {
+				matches = false
+
+				break
+			}
+		}
+
+		if matches {
+			return cand
+		}
+	}
+
+	return prefix
+}
+
 // TestDistMemoryVersioningQuorum ensures higher version wins and quorum enforcement works.
-func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
-	interval := 10 * time.Millisecond
-	ring := cluster.NewRing(cluster.WithReplication(3))
-	membership := cluster.NewMembership(ring)
-	transport := backend.NewInProcessTransport()
+func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest // mutates shared transport
+	const interval = 10 * time.Millisecond
 
-	// three nodes
-	n1 := cluster.NewNode("", "n1:0")
-	n2 := cluster.NewNode("", "n2:0")
-	n3 := cluster.NewNode("", "n3:0")
-
-	// enable quorum read + write consistency on b1
-	b1i, _ := backend.NewDistMemory(
-		context.TODO(),
-		backend.WithDistMembership(membership, n1),
-		backend.WithDistTransport(transport),
+	dc := SetupInProcessCluster(t, 3,
 		backend.WithDistReplication(3),
 		backend.WithDistHeartbeat(interval, 0, 0),
 		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
 		backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
 	)
-	b2i, _ := backend.NewDistMemory(context.TODO(), backend.WithDistMembership(membership, n2), backend.WithDistTransport(transport))
-	b3i, _ := backend.NewDistMemory(
-		context.TODO(),
-		backend.WithDistMembership(membership, n3),
-		backend.WithDistTransport(transport),
-		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
-	)
-	b1, ok := b1i.(*backend.DistMemory)
 
-	if !ok {
-		t.Fatalf("failed to cast b1i to *backend.DistMemory")
-	}
+	b1, b2, b3 := dc.Nodes[0], dc.Nodes[1], dc.Nodes[2]
 
-	b2, ok := b2i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b2i to *backend.DistMemory")
-	}
-
-	b3, ok := b3i.(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("failed to cast b3i to *backend.DistMemory")
-	}
-
-	StopOnCleanup(t, b1)
-	StopOnCleanup(t, b2)
-	StopOnCleanup(t, b3)
-
-	transport.Register(b1)
-	transport.Register(b2)
-	transport.Register(b3)
-
-	// Find a deterministic key where ownership ordering is b1,b2,b3 to avoid forwarding complexities.
-	key := "k"
-	for i := range 2000 { // brute force
-		cand := fmt.Sprintf("k%d", i)
-
-		owners := b1.DebugOwners(cand)
-		if len(owners) == 3 && owners[0] == b1.LocalNodeID() && owners[1] == b2.LocalNodeID() && owners[2] == b3.LocalNodeID() {
-			key = cand
-
-			break
-		}
-	}
+	key := findOrderedThreeOwnerKey(b1, []cluster.NodeID{b1.LocalNodeID(), b2.LocalNodeID(), b3.LocalNodeID()})
 
 	// Write key via primary.
 	item1 := &cache.Item{Key: key, Value: "v1"}
@@ -87,7 +73,7 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 		t.Fatalf("initial set: %v", err)
 	}
 
-	// Simulate a concurrent stale write from another node with lower version (manual injection on b2).
+	// Simulate a concurrent stale write on b2 (lower version, different origin).
 	itemStale := &cache.Item{Key: key, Value: "v0", Version: 0, Origin: "zzz"}
 	b2.DebugDropLocal(key)
 	b2.DebugInject(itemStale)
@@ -102,13 +88,12 @@ func TestDistMemoryVersioningQuorum(t *testing.T) { //nolint:paralleltest
 		t.Fatalf("expected value v1, got %v", it.Value)
 	}
 
-	// Ensure b2 repaired.
 	if it2, ok2 := b2.Get(context.Background(), key); !ok2 || it2.Value != "v1" {
 		t.Fatalf("expected repaired value on b2")
 	}
 
 	// Simulate reduced acks: unregister one replica and perform write requiring quorum (2 of 3).
-	transport.Unregister(string(n3.ID))
+	dc.Transport.Unregister(string(b3.LocalNodeID()))
 
 	item2 := &cache.Item{Key: key, Value: "v2"}
 

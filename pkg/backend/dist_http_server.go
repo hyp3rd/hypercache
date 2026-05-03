@@ -34,7 +34,7 @@ func newDistHTTPServer(addr string) *distHTTPServer {
 	return &distHTTPServer{app: app, addr: addr}
 }
 
-func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error { //nolint:ireturn
+func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error {
 	s.registerSet(ctx, dm)
 	s.registerGet(ctx, dm)
 	s.registerRemove(ctx, dm)
@@ -44,7 +44,7 @@ func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error { //no
 	return s.listen(ctx)
 }
 
-func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) { //nolint:ireturn
+func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) {
 	// legacy path
 	s.app.Post("/internal/cache/set", func(fctx fiber.Ctx) error { // small handler
 		var req httpSetRequest
@@ -96,7 +96,7 @@ func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) { //no
 	})
 }
 
-func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) { //nolint:ireturn
+func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) {
 	// legacy path
 	s.app.Get("/internal/cache/get", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
@@ -136,7 +136,7 @@ func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) { //noli
 	})
 }
 
-func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { //nolint:ireturn
+func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) {
 	// legacy path
 	s.app.Delete("/internal/cache/remove", func(fctx fiber.Ctx) error {
 		key := fctx.Query("key")
@@ -172,11 +172,11 @@ func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) { /
 	})
 }
 
-func (s *distHTTPServer) registerHealth() { //nolint:ireturn
+func (s *distHTTPServer) registerHealth() {
 	s.app.Get("/health", func(fctx fiber.Ctx) error { return fctx.SendString("ok") })
 }
 
-func (s *distHTTPServer) registerMerkle(_ context.Context, dm *DistMemory) { //nolint:ireturn
+func (s *distHTTPServer) registerMerkle(_ context.Context, dm *DistMemory) {
 	s.app.Get("/internal/merkle", func(fctx fiber.Ctx) error {
 		tree := dm.BuildMerkleTree()
 
@@ -206,7 +206,7 @@ func (s *distHTTPServer) registerMerkle(_ context.Context, dm *DistMemory) { //n
 	})
 }
 
-func (s *distHTTPServer) listen(ctx context.Context) error { //nolint:ireturn
+func (s *distHTTPServer) listen(ctx context.Context) error {
 	lc := net.ListenConfig{}
 
 	ln, err := lc.Listen(ctx, "tcp", s.addr)
@@ -229,7 +229,7 @@ func (s *distHTTPServer) listen(ctx context.Context) error { //nolint:ireturn
 	return nil
 }
 
-func (s *distHTTPServer) stop(ctx context.Context) error { //nolint:ireturn
+func (s *distHTTPServer) stop(ctx context.Context) error {
 	if s == nil || s.ln == nil {
 		return nil
 	}

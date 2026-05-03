@@ -1075,7 +1075,7 @@ func (hyperCache *HyperCache[T]) DistMembershipSnapshot() (members []struct {
 	State       string
 	Incarnation uint64
 }, replication, vnodes int,
-) { //nolint:ireturn
+) {
 	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
 		membership := dm.Membership()
 		ring := dm.Ring()
@@ -1113,7 +1113,7 @@ func (hyperCache *HyperCache[T]) DistMembershipSnapshot() (members []struct {
 }
 
 // DistRingHashSpots returns vnode hashes as hex strings if available (debug).
-func (hyperCache *HyperCache[T]) DistRingHashSpots() []string { //nolint:ireturn
+func (hyperCache *HyperCache[T]) DistRingHashSpots() []string {
 	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
 		if ring := dm.Ring(); ring != nil {
 			return ring.VNodeHashes()
@@ -1124,7 +1124,7 @@ func (hyperCache *HyperCache[T]) DistRingHashSpots() []string { //nolint:ireturn
 }
 
 // DistHeartbeatMetrics returns distributed heartbeat metrics if supported.
-func (hyperCache *HyperCache[T]) DistHeartbeatMetrics() any { //nolint:ireturn
+func (hyperCache *HyperCache[T]) DistHeartbeatMetrics() any {
 	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
 		m := dm.Metrics()
 

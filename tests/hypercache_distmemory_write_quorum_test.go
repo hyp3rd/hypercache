@@ -17,54 +17,19 @@ import (
 func TestWriteQuorumSuccess(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
-	transport := backend.NewInProcessTransport()
-
-	// replication=3, write consistency QUORUM
-	opts := []backend.DistMemoryOption{
+	dc := SetupInProcessClusterRF(t, 3, 2,
 		backend.WithDistReplication(2),
 		backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
-	}
-
-	a, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("A", "A"))...)
-	b, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("B", "B"))...)
-	c, _ := backend.NewDistMemory(ctx, append(opts, backend.WithDistNode("C", "C"))...)
-
-	da, ok := any(a).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("expected *backend.DistMemory, got %T", a)
-	}
-
-	db, ok := any(b).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("expected *backend.DistMemory, got %T", b)
-	}
-
-	dc, ok := any(c).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("expected *backend.DistMemory, got %T", c)
-	}
-
-	StopOnCleanup(t, da)
-	StopOnCleanup(t, db)
-	StopOnCleanup(t, dc)
-
-	da.SetTransport(transport)
-	db.SetTransport(transport)
-	dc.SetTransport(transport)
-	transport.Register(da)
-	transport.Register(db)
-	transport.Register(dc)
+	)
 
 	item := &cache.Item{Key: "k1", Value: "v1"}
 
-	err := a.Set(ctx, item)
-	if err != nil { // should succeed with quorum (all up)
+	err := dc.Nodes[0].Set(context.Background(), item)
+	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 
-	// metrics assertions (writeAttempts >=1, writeQuorumFailures stays 0)
-	metrics := da.Metrics()
+	metrics := dc.Nodes[0].Metrics()
 	if metrics.WriteAttempts < 1 {
 		t.Fatalf("expected WriteAttempts >=1, got %d", metrics.WriteAttempts)
 	}
@@ -78,78 +43,28 @@ func TestWriteQuorumSuccess(t *testing.T) {
 func TestWriteQuorumFailure(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
-	transport := backend.NewInProcessTransport()
-
-	// Shared ring/membership so ownership is identical across nodes.
-	ring := cluster.NewRing(cluster.WithReplication(3))
-	m := cluster.NewMembership(ring)
-	m.Upsert(cluster.NewNode("A", "A"))
-	m.Upsert(cluster.NewNode("B", "B"))
-	m.Upsert(cluster.NewNode("C", "C"))
-
-	opts := []backend.DistMemoryOption{
+	dc := SetupInProcessCluster(t, 3,
 		backend.WithDistReplication(3),
 		backend.WithDistWriteConsistency(backend.ConsistencyAll),
 		backend.WithDistHintTTL(time.Minute),
-		backend.WithDistHintReplayInterval(50 * time.Millisecond),
-	}
+		backend.WithDistHintReplayInterval(50*time.Millisecond),
+	)
 
-	// Create three nodes but only register two with transport to force ALL failure.
-	na, _ := backend.NewDistMemory(
-		ctx,
-		append(opts, backend.WithDistNode("A", "A"), backend.WithDistMembership(m, cluster.NewNode("A", "A")))...)
-	nb, _ := backend.NewDistMemory(
-		ctx,
-		append(opts, backend.WithDistNode("B", "B"), backend.WithDistMembership(m, cluster.NewNode("B", "B")))...)
+	// Force ALL-consistency failure by dropping the third node from the
+	// transport — its acks will never arrive, so the write must fail.
+	thirdNode := dc.Nodes[2]
+	dc.Transport.Unregister(string(thirdNode.LocalNodeID()))
 
-	nc, _ := backend.NewDistMemory(
-		ctx,
-		append(opts, backend.WithDistNode("C", "C"), backend.WithDistMembership(m, cluster.NewNode("C", "C")))...)
-
-	da, ok := any(na).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("expected *backend.DistMemory, got %T", na)
-	}
-
-	db, ok := any(nb).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("expected *backend.DistMemory, got %T", nb)
-	}
-
-	dc, ok := any(nc).(*backend.DistMemory)
-	if !ok {
-		t.Fatalf("expected *backend.DistMemory, got %T", nc)
-	}
-
-	StopOnCleanup(t, da)
-	StopOnCleanup(t, db)
-	StopOnCleanup(t, dc)
-
-	da.SetTransport(transport)
-	db.SetTransport(transport)
-	transport.Register(da)
-	transport.Register(db) // C intentionally left unregistered to simulate it being offline
-
-	// Find a key whose owners include all three nodes (replication=3 ensures this) – just brute force until order stable.
-	key := "quorum-all-fail"
-	for i := range 50 { // try some keys to ensure A is primary sometimes; not strictly required
-		candidate := fmt.Sprintf("quorum-all-fail-%d", i)
-
-		owners := da.Ring().Lookup(candidate)
-		if len(owners) == 3 && string(owners[0]) == "A" { // prefer A primary for clarity
-			key = candidate
-
-			break
-		}
-	}
+	// Pick a key with all three nodes as owners (replication=3 guarantees
+	// it but ordering varies — pick one with the first node as primary for
+	// log clarity).
+	key := pickAllOwnerKey(dc.Nodes[0], dc.Nodes[0].LocalNodeID(), 50)
 
 	item := &cache.Item{Key: key, Value: "v-fail"}
 
-	err := na.Set(ctx, item)
+	err := dc.Nodes[0].Set(context.Background(), item)
 	if !errors.Is(err, sentinel.ErrQuorumFailed) {
-		// Provide ring owners for debugging.
-		owners := da.Ring().Lookup(key)
+		owners := dc.Ring.Lookup(key)
 
 		ids := make([]string, 0, len(owners))
 		for _, o := range owners {
@@ -159,12 +74,29 @@ func TestWriteQuorumFailure(t *testing.T) {
 		t.Fatalf("expected ErrQuorumFailed, got %v (owners=%v)", err, ids)
 	}
 
-	metrics := da.Metrics()
+	metrics := dc.Nodes[0].Metrics()
 	if metrics.WriteQuorumFailures < 1 {
 		t.Fatalf("expected WriteQuorumFailures >=1, got %d", metrics.WriteQuorumFailures)
 	}
 
-	if metrics.WriteAttempts < 1 { // should have attempted at least once
+	if metrics.WriteAttempts < 1 {
 		t.Fatalf("expected WriteAttempts >=1, got %d", metrics.WriteAttempts)
 	}
+}
+
+// pickAllOwnerKey scans candidate keys until it finds one with the desired
+// primary owner — used by quorum tests to keep the assertion clear.
+func pickAllOwnerKey(node *backend.DistMemory, wantPrimary cluster.NodeID, attempts int) string {
+	const fallback = "quorum-all-fail"
+
+	for i := range attempts {
+		candidate := fmt.Sprintf("quorum-all-fail-%d", i)
+
+		owners := node.Ring().Lookup(candidate)
+		if len(owners) == 3 && owners[0] == wantPrimary {
+			return candidate
+		}
+	}
+
+	return fallback
 }

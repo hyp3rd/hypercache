@@ -9,85 +9,82 @@ import (
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
+	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
+type hyperCacheGetCase struct {
+	name          string
+	key           string
+	value         any
+	expiry        time.Duration
+	expectedValue any
+	expectedErr   error
+	sleep         time.Duration
+	shouldSet     bool
+}
+
+func runHyperCacheGetCase(t *testing.T, cache *hypercache.HyperCache[backend.InMemory], tc hyperCacheGetCase) {
+	t.Helper()
+
+	if tc.shouldSet {
+		err := cache.Set(context.TODO(), tc.key, tc.value, tc.expiry)
+		if err != nil {
+			require.Equal(t, tc.expectedErr, err)
+		}
+
+		if tc.sleep > 0 {
+			time.Sleep(tc.sleep)
+		}
+	}
+
+	val, ok := cache.Get(context.TODO(), tc.key)
+	if tc.expectedErr != nil || !ok {
+		require.False(t, ok)
+
+		return
+	}
+
+	require.True(t, ok)
+	require.Equal(t, tc.expectedValue, val)
+}
+
 func TestHyperCache_Get(t *testing.T) { //nolint:paralleltest // subtests share cache instance
-	tests := []struct {
-		name          string
-		key           string
-		value         any
-		expiry        time.Duration
-		expectedValue any
-		expectedErr   error
-		sleep         time.Duration
-		shouldSet     bool
-	}{
+	tests := []hyperCacheGetCase{
 		{
 			name:          "get with valid key",
-			key:           "key1",
-			value:         "value1",
+			key:           testKey1,
+			value:         testValue1,
 			expiry:        0,
-			expectedValue: "value1",
-			expectedErr:   nil,
+			expectedValue: testValue1,
 		},
 		{
 			name:          "get with valid key and value with expiry",
-			key:           "key2",
-			value:         "value2",
+			key:           testKey2,
+			value:         testValue2,
 			expiry:        5 * time.Second,
-			expectedValue: "value2",
-			expectedErr:   nil,
-		},
-		// {
-		// 	name:          "get with empty key",
-		// 	key:           "",
-		// 	value:         "value3",
-		// 	expiry:        0,
-		// 	expectedValue: "",
-		// 	expectedErr:   hypercache.ErrInvalidKey,
-		// },
-		{
-			name:          "get with expired key",
-			key:           "key4",
-			value:         "value4",
-			expiry:        1 * time.Second,
-			expectedValue: nil,
-			expectedErr:   nil,
-			sleep:         2 * time.Second,
+			expectedValue: testValue2,
 		},
 		{
-			name:          "get with non-existent key",
-			key:           "key5",
-			value:         "value5",
-			expiry:        0,
-			expectedValue: nil,
-			expectedErr:   sentinel.ErrKeyNotFound,
-			shouldSet:     false,
+			name:   "get with expired key",
+			key:    "key4",
+			value:  "value4",
+			expiry: 1 * time.Second,
+			sleep:  2 * time.Second,
+		},
+		{
+			name:        "get with non-existent key",
+			key:         "key5",
+			value:       "value5",
+			expectedErr: sentinel.ErrKeyNotFound,
 		},
 	}
+
 	cache, err := hypercache.NewInMemoryWithDefaults(context.TODO(), 10)
 	require.NoError(t, err)
 
-	for _, test := range tests { //nolint:paralleltest // subtests share cache instance
-		t.Run(test.name, func(t *testing.T) {
-			if test.shouldSet {
-				err = cache.Set(context.TODO(), test.key, test.value, test.expiry)
-				if err != nil {
-					require.Equal(t, test.expectedErr, err)
-				}
-
-				if test.sleep > 0 {
-					time.Sleep(test.sleep)
-				}
-			}
-
-			val, ok := cache.Get(context.TODO(), test.key)
-			if test.expectedErr != nil || !ok {
-				require.False(t, ok)
-			} else {
-				require.True(t, ok)
-				require.Equal(t, test.expectedValue, val)
-			}
+	for _, tc := range tests { //nolint:paralleltest // subtests share cache instance
+		t.Run(tc.name, func(t *testing.T) {
+			runHyperCacheGetCase(t, cache, tc)
 		})
 	}
 }

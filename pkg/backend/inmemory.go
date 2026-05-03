@@ -65,7 +65,7 @@ func (cacheBackend *InMemory) Get(_ context.Context, key string) (*cache.Item, b
 }
 
 // Touch updates the last access time and access count for a key.
-func (cacheBackend *InMemory) Touch(_ context.Context, key string) bool { //nolint:ireturn
+func (cacheBackend *InMemory) Touch(_ context.Context, key string) bool {
 	return cacheBackend.items.Touch(key)
 }
 

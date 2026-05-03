@@ -175,7 +175,7 @@ func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCac
 }
 
 // wrapAuth returns an auth-wrapped handler if authFunc provided.
-func (s *ManagementHTTPServer) wrapAuth(handler fiber.Handler) fiber.Handler { //nolint:ireturn
+func (s *ManagementHTTPServer) wrapAuth(handler fiber.Handler) fiber.Handler {
 	if s.authFunc == nil {
 		return handler
 	}
@@ -190,7 +190,7 @@ func (s *ManagementHTTPServer) wrapAuth(handler fiber.Handler) fiber.Handler { /
 	}
 }
 
-func (s *ManagementHTTPServer) registerBasic(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) { //nolint:ireturn
+func (s *ManagementHTTPServer) registerBasic(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) {
 	s.app.Get("/health", useAuth(func(fiberCtx fiber.Ctx) error { return fiberCtx.SendString("ok") }))
 	s.app.Get("/stats", useAuth(func(fiberCtx fiber.Ctx) error { return fiberCtx.JSON(hc.GetStats()) }))
 	s.app.Get("/config", useAuth(func(fiberCtx fiber.Ctx) error {
@@ -214,7 +214,7 @@ func (s *ManagementHTTPServer) registerBasic(useAuth func(fiber.Handler) fiber.H
 	}))
 }
 
-func (s *ManagementHTTPServer) registerDistributed(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) { //nolint:ireturn
+func (s *ManagementHTTPServer) registerDistributed(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) {
 	s.app.Get("/dist/metrics", useAuth(func(fiberCtx fiber.Ctx) error {
 		if dist, ok := hc.(managementCacheDistOpt); ok {
 			m := dist.DistMetrics()
@@ -243,7 +243,7 @@ func (s *ManagementHTTPServer) registerDistributed(useAuth func(fiber.Handler) f
 	}))
 }
 
-func (s *ManagementHTTPServer) registerCluster(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) { //nolint:ireturn
+func (s *ManagementHTTPServer) registerCluster(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) {
 	s.app.Get("/cluster/members", useAuth(func(fiberCtx fiber.Ctx) error {
 		if mi, ok := hc.(membershipIntrospect); ok {
 			members, replication, vnodes := mi.DistMembershipSnapshot()
@@ -275,7 +275,7 @@ func (s *ManagementHTTPServer) registerControl(
 	ctx context.Context,
 	useAuth func(fiber.Handler) fiber.Handler,
 	hc managementCache,
-) { //nolint:ireturn
+) {
 	s.app.Post("/evict", useAuth(func(fiberCtx fiber.Ctx) error {
 		hc.TriggerEviction(ctx)
 

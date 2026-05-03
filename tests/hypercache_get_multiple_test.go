@@ -25,36 +25,36 @@ func TestGetMultiple(t *testing.T) {
 	}{
 		{
 			name:       "get multiple keys with values",
-			keys:       []string{"key1", "key2", "key3"},
-			wantValues: map[string]any{"key1": 1, "key2": 2, "key3": 3},
+			keys:       []string{testKey1, testKey2, testKey3},
+			wantValues: map[string]any{testKey1: 1, testKey2: 2, testKey3: 3},
 			wantErrs:   map[string]error{},
 			setup: func(cache *hypercache.HyperCache[backend.InMemory]) {
-				_ = cache.Set(context.TODO(), "key1", 1, 0)
-				_ = cache.Set(context.TODO(), "key2", 2, 0)
-				_ = cache.Set(context.TODO(), "key3", 3, 0)
+				_ = cache.Set(context.TODO(), testKey1, 1, 0)
+				_ = cache.Set(context.TODO(), testKey2, 2, 0)
+				_ = cache.Set(context.TODO(), testKey3, 3, 0)
 			},
 		},
 		{
 			name:       "get multiple keys with missing values",
-			keys:       []string{"key1", "key2", "key3"},
-			wantValues: map[string]any{"key1": 1, "key3": 3},
-			wantErrs:   map[string]error{"key2": sentinel.ErrKeyNotFound},
+			keys:       []string{testKey1, testKey2, testKey3},
+			wantValues: map[string]any{testKey1: 1, testKey3: 3},
+			wantErrs:   map[string]error{testKey2: sentinel.ErrKeyNotFound},
 			setup: func(cache *hypercache.HyperCache[backend.InMemory]) {
-				_ = cache.Set(context.TODO(), "key1", 1, 0)
-				_ = cache.Set(context.TODO(), "key3", 3, 0)
+				_ = cache.Set(context.TODO(), testKey1, 1, 0)
+				_ = cache.Set(context.TODO(), testKey3, 3, 0)
 			},
 		},
 		{
 			name:       "get multiple keys with expired values",
-			keys:       []string{"key1", "key2", "key3"},
-			wantValues: map[string]any{"key2": 2, "key3": 3},
-			wantErrs:   map[string]error{"key1": sentinel.ErrKeyNotFound},
+			keys:       []string{testKey1, testKey2, testKey3},
+			wantValues: map[string]any{testKey2: 2, testKey3: 3},
+			wantErrs:   map[string]error{testKey1: sentinel.ErrKeyNotFound},
 			setup: func(cache *hypercache.HyperCache[backend.InMemory]) {
-				_ = cache.Set(context.TODO(), "key1", 1, time.Millisecond)
+				_ = cache.Set(context.TODO(), testKey1, 1, time.Millisecond)
 				time.Sleep(2 * time.Millisecond)
 
-				_ = cache.Set(context.TODO(), "key2", 2, 0)
-				_ = cache.Set(context.TODO(), "key3", 3, 0)
+				_ = cache.Set(context.TODO(), testKey2, 2, 0)
+				_ = cache.Set(context.TODO(), testKey3, 3, 0)
 			},
 		},
 	}

@@ -127,7 +127,7 @@ func (c *ClockAlgorithm) Delete(key string) {
 
 // -- helpers (unexported) --
 
-func (c *ClockAlgorithm) updateIfExists(key string, value any) bool { //nolint:ireturn
+func (c *ClockAlgorithm) updateIfExists(key string, value any) bool {
 	if idx, ok := c.keys[key]; ok {
 		item := c.items[idx]
 
@@ -140,7 +140,7 @@ func (c *ClockAlgorithm) updateIfExists(key string, value any) bool { //nolint:i
 	return false
 }
 
-func (c *ClockAlgorithm) tryInsertInFreeSlot(key string, value any) bool { //nolint:ireturn
+func (c *ClockAlgorithm) tryInsertInFreeSlot(key string, value any) bool {
 	start := c.hand
 	for {
 		if c.items[c.hand] == nil { // free slot
@@ -163,7 +163,7 @@ func (c *ClockAlgorithm) tryInsertInFreeSlot(key string, value any) bool { //nol
 	}
 }
 
-func (c *ClockAlgorithm) evictAndInsert(key string, value any) { //nolint:ireturn
+func (c *ClockAlgorithm) evictAndInsert(key string, value any) {
 	for range c.capacity {
 		item := c.items[c.hand]
 		if item == nil { // skip empty

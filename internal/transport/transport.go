@@ -15,7 +15,7 @@ type RPCError struct {
 	Err  error
 }
 
-func (e *RPCError) Error() string { //nolint:ireturn
+func (e *RPCError) Error() string {
 	if e == nil {
 		return ""
 	}

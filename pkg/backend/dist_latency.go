@@ -43,7 +43,7 @@ type distLatencyCollector struct {
 	buckets [distOpCount][len(latencyBuckets) + 1]atomic.Uint64 // last bucket is +Inf
 }
 
-func newDistLatencyCollector() *distLatencyCollector { //nolint:ireturn
+func newDistLatencyCollector() *distLatencyCollector {
 	return &distLatencyCollector{}
 }
 
@@ -63,7 +63,7 @@ func (c *distLatencyCollector) observe(op distOp, d time.Duration) {
 }
 
 // snapshot returns a copy of bucket counts for exposure (op -> buckets slice).
-func (c *distLatencyCollector) snapshot() map[string][]uint64 { //nolint:ireturn
+func (c *distLatencyCollector) snapshot() map[string][]uint64 {
 	out := map[string][]uint64{
 		"set":    make([]uint64, len(latencyBuckets)+1),
 		"get":    make([]uint64, len(latencyBuckets)+1),

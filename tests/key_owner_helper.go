@@ -10,7 +10,7 @@ import (
 )
 
 // FindOwnerKey brute forces keys until it finds one whose owner ordering matches exactly ids.
-func FindOwnerKey(b *backend.DistMemory, prefix string, desired []cluster.NodeID, limit int) (string, bool) { //nolint:ireturn
+func FindOwnerKey(b *backend.DistMemory, prefix string, desired []cluster.NodeID, limit int) (string, bool) {
 	for i := range limit {
 		cand := fmt.Sprintf("%s%d", prefix, i)
 

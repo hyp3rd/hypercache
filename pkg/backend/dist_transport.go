@@ -24,7 +24,7 @@ type InProcessTransport struct {
 }
 
 // NewInProcessTransport creates a new empty transport.
-func NewInProcessTransport() *InProcessTransport { //nolint:ireturn
+func NewInProcessTransport() *InProcessTransport {
 	return &InProcessTransport{backends: map[string]*DistMemory{}}
 }
 
@@ -46,7 +46,7 @@ func (t *InProcessTransport) Unregister(id string) {
 }
 
 // ForwardSet forwards a set operation to the specified backend node.
-func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error { //nolint:ireturn
+func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item *cache.Item, replicate bool) error {
 	b, ok := t.lookup(nodeID)
 	if !ok {
 		return sentinel.ErrBackendNotFound
@@ -59,7 +59,7 @@ func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item
 }
 
 // ForwardGet forwards a get operation to the specified backend node.
-func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID, key string) (*cache.Item, bool, error) { //nolint:ireturn
+func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID, key string) (*cache.Item, bool, error) {
 	b, ok := t.lookup(nodeID)
 	if !ok {
 		return nil, false, sentinel.ErrBackendNotFound
@@ -74,7 +74,7 @@ func (t *InProcessTransport) ForwardGet(_ context.Context, nodeID, key string) (
 }
 
 // ForwardRemove forwards a remove operation.
-func (t *InProcessTransport) ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error { //nolint:ireturn
+func (t *InProcessTransport) ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error {
 	b, ok := t.lookup(nodeID)
 	if !ok {
 		return sentinel.ErrBackendNotFound
@@ -86,7 +86,7 @@ func (t *InProcessTransport) ForwardRemove(ctx context.Context, nodeID, key stri
 }
 
 // Health probes a backend.
-func (t *InProcessTransport) Health(_ context.Context, nodeID string) error { //nolint:ireturn
+func (t *InProcessTransport) Health(_ context.Context, nodeID string) error {
 	if _, ok := t.lookup(nodeID); !ok {
 		return sentinel.ErrBackendNotFound
 	}
@@ -95,7 +95,7 @@ func (t *InProcessTransport) Health(_ context.Context, nodeID string) error { //
 }
 
 // FetchMerkle fetches a remote merkle tree.
-func (t *InProcessTransport) FetchMerkle(_ context.Context, nodeID string) (*MerkleTree, error) { //nolint:ireturn
+func (t *InProcessTransport) FetchMerkle(_ context.Context, nodeID string) (*MerkleTree, error) {
 	b, ok := t.lookup(nodeID)
 	if !ok {
 		return nil, sentinel.ErrBackendNotFound
