@@ -18,6 +18,16 @@ type distHTTPServer struct {
 	app  *fiber.App
 	ln   net.Listener
 	addr string
+	// ctx is the server-lifecycle context captured at start. Handlers
+	// pass it to backend operations so cancellation propagates when the
+	// caller cancels the constructor ctx (e.g. via DistMemory Stop).
+	//
+	// We do NOT use the per-request fiber.Ctx for this: fiber.Ctx is
+	// pooled and reset after the handler returns, which races with
+	// happy-eyeballs goroutines spawned by net.(*Dialer).DialContext
+	// when applySet's replica fan-out goes through http.Client.Do.
+	// See the race trace captured during phase-5b investigation.
+	ctx context.Context //nolint:containedctx // captured server lifecycle, not request scope
 }
 
 // minimal request/response types reused by transport
@@ -123,148 +133,106 @@ func newDistHTTPServer(addr string, limits DistHTTPLimits) *distHTTPServer {
 }
 
 func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error {
-	s.registerSet(ctx, dm)
-	s.registerGet(ctx, dm)
-	s.registerRemove(ctx, dm)
+	s.ctx = ctx
+	s.registerSet(dm)
+	s.registerGet(dm)
+	s.registerRemove(dm)
 	s.registerHealth()
-	s.registerMerkle(ctx, dm)
+	s.registerMerkle(dm)
 
 	return s.listen(ctx)
 }
 
-func (s *distHTTPServer) registerSet(ctx context.Context, dm *DistMemory) {
-	// legacy path
-	s.app.Post("/internal/cache/set", func(fctx fiber.Ctx) error { // small handler
-		var req httpSetRequest
+// handleSet decodes a httpSetRequest and applies it locally + optionally
+// fan-outs to replicas. Uses s.ctx (server-lifecycle) as the backend
+// operation context — see the comment on distHTTPServer.ctx for why we
+// can't use the per-request fiber.Ctx here.
+func (s *distHTTPServer) handleSet(fctx fiber.Ctx, dm *DistMemory) error {
+	var req httpSetRequest
 
-		body := fctx.Body()
+	unmarshalErr := json.Unmarshal(fctx.Body(), &req)
+	if unmarshalErr != nil { // separated to satisfy noinlineerr
+		return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: unmarshalErr.Error()})
+	}
 
-		unmarshalErr := json.Unmarshal(body, &req)
-		if unmarshalErr != nil { // separated to satisfy noinlineerr
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: unmarshalErr.Error()})
-		}
+	it := &cache.Item{ // LastUpdated set to now for replicated writes
+		Key:         req.Key,
+		Value:       req.Value,
+		Expiration:  time.Duration(req.Expiration) * time.Millisecond,
+		Version:     req.Version,
+		Origin:      req.Origin,
+		LastUpdated: time.Now(),
+	}
 
-		it := &cache.Item{ // LastUpdated set to now for replicated writes
-			Key:         req.Key,
-			Value:       req.Value,
-			Expiration:  time.Duration(req.Expiration) * time.Millisecond,
-			Version:     req.Version,
-			Origin:      req.Origin,
-			LastUpdated: time.Now(),
-		}
+	dm.applySet(s.ctx, it, req.Replicate)
 
-		dm.applySet(ctx, it, req.Replicate)
-
-		return fctx.JSON(httpSetResponse{})
-	})
-
-	// canonical path per roadmap
-	s.app.Post("/internal/set", func(fctx fiber.Ctx) error { // small handler
-		var req httpSetRequest
-
-		body := fctx.Body()
-
-		unmarshalErr := json.Unmarshal(body, &req)
-		if unmarshalErr != nil { // separated to satisfy noinlineerr
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: unmarshalErr.Error()})
-		}
-
-		it := &cache.Item{ // LastUpdated set to now for replicated writes
-			Key:         req.Key,
-			Value:       req.Value,
-			Expiration:  time.Duration(req.Expiration) * time.Millisecond,
-			Version:     req.Version,
-			Origin:      req.Origin,
-			LastUpdated: time.Now(),
-		}
-
-		dm.applySet(ctx, it, req.Replicate)
-
-		return fctx.JSON(httpSetResponse{})
-	})
+	return fctx.JSON(httpSetResponse{})
 }
 
-func (s *distHTTPServer) registerGet(_ context.Context, dm *DistMemory) {
-	// legacy path
-	s.app.Get("/internal/cache/get", func(fctx fiber.Ctx) error {
-		key := fctx.Query("key")
-		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
-		}
-
-		owners := dm.lookupOwners(key)
-		if len(owners) == 0 {
-			return fctx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: "not owner"})
-		}
-
-		if it, ok := dm.shardFor(key).items.Get(key); ok {
-			return fctx.JSON(httpGetResponse{Found: true, Item: it})
-		}
-
-		return fctx.JSON(httpGetResponse{Found: false})
-	})
-
-	// canonical path per roadmap
-	s.app.Get("/internal/get", func(fctx fiber.Ctx) error {
-		key := fctx.Query("key")
-		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
-		}
-
-		owners := dm.lookupOwners(key)
-		if len(owners) == 0 {
-			return fctx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: "not owner"})
-		}
-
-		if it, ok := dm.shardFor(key).items.Get(key); ok {
-			return fctx.JSON(httpGetResponse{Found: true, Item: it})
-		}
-
-		return fctx.JSON(httpGetResponse{Found: false})
-	})
+func (s *distHTTPServer) registerSet(dm *DistMemory) {
+	handler := func(fctx fiber.Ctx) error { return s.handleSet(fctx, dm) }
+	// legacy + canonical paths share the same handler.
+	s.app.Post("/internal/cache/set", handler)
+	s.app.Post("/internal/set", handler)
 }
 
-func (s *distHTTPServer) registerRemove(ctx context.Context, dm *DistMemory) {
-	// legacy path
-	s.app.Delete("/internal/cache/remove", func(fctx fiber.Ctx) error {
-		key := fctx.Query("key")
-		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
-		}
+// handleGet looks up a key locally for a remote owner that ring-routed
+// to this node. Get itself is synchronous and doesn't take a ctx, so this
+// handler doesn't need one.
+func (*distHTTPServer) handleGet(fctx fiber.Ctx, dm *DistMemory) error {
+	key := fctx.Query("key")
+	if key == "" {
+		return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
+	}
 
-		replicate, parseErr := strconv.ParseBool(fctx.Query("replicate", "false"))
-		if parseErr != nil {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "invalid replicate"})
-		}
+	owners := dm.lookupOwners(key)
+	if len(owners) == 0 {
+		return fctx.Status(fiber.StatusNotFound).JSON(fiber.Map{constants.ErrorLabel: "not owner"})
+	}
 
-		dm.applyRemove(ctx, key, replicate)
+	if it, ok := dm.shardFor(key).items.Get(key); ok {
+		return fctx.JSON(httpGetResponse{Found: true, Item: it})
+	}
 
-		return fctx.SendStatus(fiber.StatusOK)
-	})
+	return fctx.JSON(httpGetResponse{Found: false})
+}
 
-	// canonical path per roadmap
-	s.app.Delete("/internal/del", func(fctx fiber.Ctx) error {
-		key := fctx.Query("key")
-		if key == "" {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
-		}
+func (s *distHTTPServer) registerGet(dm *DistMemory) {
+	handler := func(fctx fiber.Ctx) error { return s.handleGet(fctx, dm) }
+	s.app.Get("/internal/cache/get", handler)
+	s.app.Get("/internal/get", handler)
+}
 
-		replicate, parseErr := strconv.ParseBool(fctx.Query("replicate", "false"))
-		if parseErr != nil {
-			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "invalid replicate"})
-		}
+// handleRemove deletes a key locally and optionally fan-outs the delete
+// to replicas. Uses s.ctx for backend operations — see the comment on
+// distHTTPServer.ctx for why per-request fiber.Ctx is unsafe here.
+func (s *distHTTPServer) handleRemove(fctx fiber.Ctx, dm *DistMemory) error {
+	key := fctx.Query("key")
+	if key == "" {
+		return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: constants.ErrMsgMissingCacheKey})
+	}
 
-		dm.applyRemove(ctx, key, replicate)
+	replicate, parseErr := strconv.ParseBool(fctx.Query("replicate", "false"))
+	if parseErr != nil {
+		return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "invalid replicate"})
+	}
 
-		return fctx.SendStatus(fiber.StatusOK)
-	})
+	dm.applyRemove(s.ctx, key, replicate)
+
+	return fctx.SendStatus(fiber.StatusOK)
+}
+
+func (s *distHTTPServer) registerRemove(dm *DistMemory) {
+	handler := func(fctx fiber.Ctx) error { return s.handleRemove(fctx, dm) }
+	s.app.Delete("/internal/cache/remove", handler)
+	s.app.Delete("/internal/del", handler)
 }
 
 func (s *distHTTPServer) registerHealth() {
 	s.app.Get("/health", func(fctx fiber.Ctx) error { return fctx.SendString("ok") })
 }
 
-func (s *distHTTPServer) registerMerkle(_ context.Context, dm *DistMemory) {
+func (s *distHTTPServer) registerMerkle(dm *DistMemory) {
 	s.app.Get("/internal/merkle", func(fctx fiber.Ctx) error {
 		tree := dm.BuildMerkleTree()
 
@@ -321,14 +289,10 @@ func (s *distHTTPServer) stop(ctx context.Context) error {
 		return nil
 	}
 
-	ch := make(chan error, 1)
-
-	go func() { ch <- s.app.Shutdown() }()
-
-	select {
-	case <-ctx.Done():
-		return ewrap.Newf("http server shutdown timeout")
-	case err := <-ch:
-		return err
-	}
+	// ShutdownWithContext closes listeners gracefully, waits for in-flight
+	// requests, and force-closes once ctx's deadline elapses — replacing
+	// the previous `go func() { ch <- s.app.Shutdown() }()` pattern which
+	// leaked the shutdown goroutine when our ctx fired before fiber
+	// finished draining.
+	return s.app.ShutdownWithContext(ctx)
 }

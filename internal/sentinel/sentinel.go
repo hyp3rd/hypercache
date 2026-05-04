@@ -69,9 +69,6 @@ var (
 	// ErrTimeoutOrCanceled is returned when a timeout or cancellation occurs.
 	ErrTimeoutOrCanceled = ewrap.New("the operation timed out or was canceled")
 
-	// ErrMgmtHTTPShutdownTimeout is returned when the management HTTP server fails to shutdown before context deadline.
-	ErrMgmtHTTPShutdownTimeout = ewrap.New("management http shutdown timeout")
-
 	// ErrNotOwner is returned when a distributed backend instance is not the ring owner for a key.
 	ErrNotOwner = ewrap.New("not ring owner")
 

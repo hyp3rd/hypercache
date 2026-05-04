@@ -148,6 +148,54 @@ func TestDistHTTPLimits_DefaultsApply(t *testing.T) {
 	}
 }
 
+// TestDistHTTPServer_StopRespectsCanceledContext verifies the dist HTTP
+// server's Stop() returns promptly when the supplied context is already
+// canceled, without leaking the shutdown goroutine. Replaces the old
+// `go func() { ch <- s.app.Shutdown() }()` wrapper that returned to the
+// caller via the ctx-done branch but left the inner goroutine running
+// until fiber's Shutdown finished organically.
+func TestDistHTTPServer_StopRespectsCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	addr := AllocatePort(t)
+
+	bi, err := backend.NewDistMemory(ctx,
+		backend.WithDistNode("stop-test", addr),
+		backend.WithDistReplication(1),
+	)
+	if err != nil {
+		t.Fatalf("new dist memory: %v", err)
+	}
+
+	dm, ok := bi.(*backend.DistMemory)
+	if !ok {
+		t.Fatalf("expected *backend.DistMemory, got %T", bi)
+	}
+
+	if !waitForHealth(ctx, "http://"+dm.LocalNodeAddr(), 5*time.Second) {
+		t.Fatal("dist HTTP server never came up")
+	}
+
+	// Already-canceled ctx — ShutdownWithContext should return the ctx
+	// error immediately without blocking on a graceful drain.
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+
+	_ = dm.Stop(canceledCtx)
+
+	elapsed := time.Since(start)
+
+	// Allow generous slack for race-detector overhead. The bug case was
+	// "Stop blocks waiting for fiber's organic shutdown" — anything under
+	// a second indicates ShutdownWithContext honored the ctx.
+	if elapsed > time.Second {
+		t.Errorf("Stop took %v with already-canceled ctx; expected sub-second exit", elapsed)
+	}
+}
+
 // waitForHealth polls a node's /health endpoint until it returns 200 or
 // the deadline elapses. Mirrors the merkle-test waitForMerkleEndpoint
 // helper but is local to limits tests so they don't pull in unrelated

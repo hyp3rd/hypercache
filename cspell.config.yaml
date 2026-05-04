@@ -52,6 +52,7 @@ words:
   - cmap
   - Cmder
   - codacy
+  - containedctx
   - cpuprofile
   - cyclop
   - daixiang
@@ -86,7 +87,6 @@ words:
   - goccy
   - gochecknoglobals
   - goconst
-  - histogramcollector
   - gofiber
   - GOFILES
   - gofumpt
@@ -98,6 +98,7 @@ words:
   - gosec
   - GOTOOLCHAIN
   - govulncheck
+  - histogramcollector
   - HMAC
   - honnef
   - hreq

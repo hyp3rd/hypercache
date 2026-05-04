@@ -9,7 +9,6 @@ import (
 	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
-	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/stats"
 )
 
@@ -29,6 +28,14 @@ type ManagementHTTPServer struct {
 	ln               net.Listener
 	started          bool
 	listenerDeadline time.Duration
+	// ctx is the server-lifecycle context captured at Start. Handlers
+	// pass it to backend operations (Clear in particular) so cancellation
+	// propagates from HyperCache.Stop. We do NOT use the per-request
+	// fiber.Ctx for this: fiber.Ctx is pooled and reset after the handler
+	// returns, racing with happy-eyeballs goroutines spawned by
+	// net.(*Dialer).DialContext when DistMemory's transport fan-out goes
+	// through http.Client.Do.
+	ctx context.Context //nolint:containedctx // captured server lifecycle, not request scope
 }
 
 // WithMgmtAuth sets an auth function (return error to block).
@@ -161,7 +168,8 @@ func (s *ManagementHTTPServer) Start(ctx context.Context, hc managementCache) er
 		return nil
 	}
 
-	s.mountRoutes(ctx, hc)
+	s.ctx = ctx
+	s.mountRoutes(hc)
 
 	lc := net.ListenConfig{}
 
@@ -201,27 +209,20 @@ func (s *ManagementHTTPServer) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	ch := make(chan error, 1)
-
-	go func() {
-		ch <- s.app.Shutdown()
-	}()
-
-	select {
-	case <-ctx.Done():
-		return sentinel.ErrMgmtHTTPShutdownTimeout
-	case err := <-ch:
-		return err
-	}
+	// ShutdownWithContext closes listeners gracefully, waits for in-flight
+	// requests, and force-closes once ctx's deadline elapses. Replaces
+	// the previous go-routine + select pattern that leaked the shutdown
+	// goroutine when our ctx fired first.
+	return s.app.ShutdownWithContext(ctx)
 }
 
 // mountRoutes.
-func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCache) { // split into helpers to satisfy funlen
+func (s *ManagementHTTPServer) mountRoutes(hc managementCache) { // split into helpers to satisfy funlen
 	useAuth := s.wrapAuth
 	s.registerBasic(useAuth, hc)
 	s.registerDistributed(useAuth, hc)
 	s.registerCluster(useAuth, hc)
-	s.registerControl(ctx, useAuth, hc)
+	s.registerControl(useAuth, hc)
 }
 
 // wrapAuth returns an auth-wrapped handler if authFunc provided.
@@ -322,12 +323,15 @@ func (s *ManagementHTTPServer) registerCluster(useAuth func(fiber.Handler) fiber
 }
 
 func (s *ManagementHTTPServer) registerControl(
-	ctx context.Context,
 	useAuth func(fiber.Handler) fiber.Handler,
 	hc managementCache,
 ) {
+	// Handlers use s.ctx (server-lifecycle) for backend ops. Per-request
+	// fiber.Ctx would race when Clear's transport fan-out spawns
+	// happy-eyeballs dial goroutines that outlive the handler — see the
+	// comment on ManagementHTTPServer.ctx for the trace.
 	s.app.Post("/evict", useAuth(func(fiberCtx fiber.Ctx) error {
-		hc.TriggerEviction(ctx)
+		hc.TriggerEviction(s.ctx)
 
 		return fiberCtx.SendStatus(fiber.StatusAccepted)
 	}))
@@ -337,7 +341,7 @@ func (s *ManagementHTTPServer) registerControl(
 		return fiberCtx.SendStatus(fiber.StatusAccepted)
 	}))
 	s.app.Post("/clear", useAuth(func(fiberCtx fiber.Ctx) error {
-		clearErr := hc.Clear(ctx)
+		clearErr := hc.Clear(s.ctx)
 		if clearErr != nil {
 			return clearErr
 		}
