@@ -137,6 +137,12 @@ Available algorithm names you can pass to `WithEvictionAlgorithm`:
 
 Note: ARC is experimental and isn’t included in the default registry. If you choose to use it, register it manually or enable it explicitly in your build.
 
+#### Sharded eviction (default since v2.0.0)
+
+The configured algorithm is wrapped by a 32-shard router (`pkg/eviction/sharded.go`) that uses the same key hash as `ConcurrentMap` — so a key's data shard and eviction shard line up. This eliminates the global mutex contention single-instance algorithms (LRU/LFU/Clock/CAWOLFU) suffer from. Total capacity is honored within ±32 (one slot of slack per shard), and items evict per-shard rather than in strict global LRU/LFU order.
+
+Use `WithEvictionShardCount(1)` to disable sharding when you need strict-global ordering at the cost of single-mutex contention. Pass any other positive power of two to tune (e.g. `WithEvictionShardCount(64)`).
+
 ## API
 
 `NewInMemoryWithDefaults(ctx, capacity)` is the quickest way to start:
@@ -177,6 +183,7 @@ if err != nil {
 | `WithExpirationTriggerBuffer` | Buffer size for coalesced expiration trigger channel. |
 | `WithExpirationTriggerDebounce` | Drop rapid-fire triggers within a window. |
 | `WithEvictionAlgorithm` | Select eviction algorithm (lru, lfu, clock, cawolfu, arc*). |
+| `WithEvictionShardCount` | Number of eviction-algorithm shards (default 32; 1 disables sharding). |
 | `WithMaxEvictionCount` | Cap number of items evicted per cycle. |
 | `WithMaxCacheSize` | Max cumulative serialized item size (bytes). |
 | `WithStatsCollector` | Choose stats collector implementation. |
@@ -191,8 +198,32 @@ if err != nil {
 | `WithDistSeeds` | (DistMemory) Static seed addresses to pre-populate membership. |
 | `WithDistTombstoneTTL` | (DistMemory) Retain delete tombstones for this duration before compaction (<=0 = infinite). |
 | `WithDistTombstoneSweep` | (DistMemory) Interval to run tombstone compaction (<=0 disables). |
+| `WithDistHTTPLimits` | (DistMemory) Body / response / timeout / concurrency caps for the dist HTTP server + auto-client. |
+| `WithDistHTTPAuth` | (DistMemory) Bearer-token auth (`Token`) plus optional `ServerVerify` / `ClientSign` hooks. |
 
 *ARC is experimental (not registered by default).
+
+### Type-safe access (`Typed[V]`)
+
+The untyped `HyperCache.Get` returns `(any, bool)`, so callers must
+type-assert at every call site. `hypercache.NewTyped[T, V]` wraps an
+existing `*HyperCache[T]` to provide a compile-time-typed surface
+without changing the underlying storage:
+
+```go
+hc, _ := hypercache.NewInMemoryWithDefaults(ctx, 10_000)
+sessions := hypercache.NewTyped[backend.InMemory, *Session](hc)
+
+_ = sessions.Set(ctx, "u:42", &Session{UserID: "u-42"}, time.Hour)
+s, ok := sessions.Get(ctx, "u:42") // s is *Session — no type assert
+```
+
+Multiple `Typed[V1]`, `Typed[V2]` views can share one underlying
+cache over disjoint keyspaces. Wrong-type reads return `(zero, false)`
+by default (fail-soft); use `GetTyped` for an explicit
+`sentinel.ErrTypeMismatch`. See
+[docs/rfcs/0002-generic-item-typing.md](docs/rfcs/0002-generic-item-typing.md)
+for the design and the v3 deep-generics roadmap.
 
 ### Redis / Redis Cluster notes
 
@@ -222,15 +253,48 @@ Current capabilities (implemented):
 - Lightweight gossip snapshot exchange (in-process only).
 - Rebalancing (primary change & lost ownership migrations) with batching and concurrency throttling metrics.
 - Latency histograms for Get/Set/Remove.
+- HTTP transport hardening: bounded request/response bodies, idle-connection timeout, concurrency cap, bearer-token auth, TLS / mTLS via `*tls.Config`, lifecycle-context cancellation on `Stop`, and surfaced listener errors. See "Transport hardening" below.
 
 Limitations / not yet implemented:
 
-- Replica-only ownership diff migrations.
 - Full gossip-based dynamic membership & indirect probing.
 - Advanced versioning (HLC / vector clocks).
 - Tracing spans for distributed operations.
-- Security (TLS/mTLS, auth) & compression.
+- Compression on the wire.
 - Persistence / durability (out of scope presently).
+
+#### Transport hardening (since v2.0.0)
+
+The dist HTTP server and the auto-created HTTP client share a single configuration surface — apply the same option to every node in the cluster.
+
+```go
+// 1) Limits: body caps, timeouts, concurrency, optional TLS.
+limits := backend.DistHTTPLimits{
+    BodyLimit:     16 * 1024 * 1024, // server inbound cap
+    ResponseLimit: 16 * 1024 * 1024, // client inbound cap
+    IdleTimeout:   60 * time.Second,
+    TLSConfig:     tlsConfig,        // non-nil enables HTTPS on both sides
+}
+
+// 2) Auth: a shared bearer token covers most clusters; ServerVerify /
+//    ClientSign hooks are escape hatches for JWT, mTLS-derived
+//    identity, HMAC, etc.
+auth := backend.DistHTTPAuth{Token: "shared-cluster-secret"}
+
+bi, _ := backend.NewDistMemory(ctx,
+    backend.WithDistNode("nodeA", "127.0.0.1:7001"),
+    backend.WithDistReplication(3),
+    backend.WithDistHTTPLimits(limits),
+    backend.WithDistHTTPAuth(auth),
+)
+```
+
+Operational helpers:
+
+- `DistMemory.LifecycleContext()` — context derived from the constructor's; canceled on `Stop()`. In-flight handlers and replica forwards observe `Done()`.
+- `LastServeError()` on both `distHTTPServer` and `ManagementHTTPServer` — replaces the prior silent-swallow of listener-loop crashes.
+
+Defaults if `WithDistHTTPLimits` is not supplied: 16 MiB body cap, 5 s read/write/client timeouts, 60 s idle, fiber's 256 KiB concurrency cap. Auth is disabled by default.
 
 #### Rebalancing & Ownership Migration (Experimental Phase 3)
 
@@ -283,7 +347,7 @@ Test helpers `AddPeer` and `RemovePeer` simulate join / leave events that trigge
 | Advanced versioning (HLC/vector) | Planned |
 | Client SDK (direct routing) | Planned |
 | Tracing spans | Planned |
-| Security (TLS/auth) | Planned |
+| Security (TLS/auth) | Done (since v2.0.0; see "Transport hardening") |
 | Compression | Planned |
 | Persistence | Out of scope (current phase) |
 | Chaos / fault injection | Planned |
