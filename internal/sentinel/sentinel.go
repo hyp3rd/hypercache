@@ -72,6 +72,9 @@ var (
 	// ErrUnauthorized is returned when an HTTP request to the dist transport is missing or carries an invalid auth token.
 	ErrUnauthorized = ewrap.New("unauthorized")
 
+	// ErrTypeMismatch is returned by the typed cache wrapper when a stored value is not assertable to the wrapper's V parameter.
+	ErrTypeMismatch = ewrap.New("cached value type mismatch")
+
 	// ErrNotOwner is returned when a distributed backend instance is not the ring owner for a key.
 	ErrNotOwner = ewrap.New("not ring owner")
 
