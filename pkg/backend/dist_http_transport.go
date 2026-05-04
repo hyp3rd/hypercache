@@ -3,6 +3,7 @@ package backend
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,18 +22,123 @@ import (
 type DistHTTPTransport struct {
 	client    *http.Client
 	baseURLFn func(nodeID string) (string, bool)
+	// respBodyLimit caps response bodies so a malicious or compromised
+	// peer cannot OOM the requester via a giant response. <=0 disables.
+	respBodyLimit int64
+	// auth (zero-value = disabled) decorates outgoing requests with a
+	// bearer token or custom signing function. Server-side validation
+	// lives on distHTTPServer; the two share the same DistHTTPAuth
+	// struct when constructed via NewDistHTTPTransportWithAuth.
+	auth DistHTTPAuth
 }
 
 const statusThreshold = 300
 
 // NewDistHTTPTransport constructs a DistHTTPTransport with the given timeout and
-// nodeID->baseURL resolver. Timeout <=0 defaults to 2s.
+// nodeID->baseURL resolver. Timeout <=0 defaults to defaultDistHTTPClientTimeout.
+// Response bodies are bounded by defaultDistHTTPResponseLimit; use
+// NewDistHTTPTransportWithLimits to override.
 func NewDistHTTPTransport(timeout time.Duration, resolver func(string) (string, bool)) *DistHTTPTransport {
 	if timeout <= 0 {
-		timeout = 2 * time.Second
+		timeout = defaultDistHTTPClientTimeout
 	}
 
-	return &DistHTTPTransport{client: &http.Client{Timeout: timeout}, baseURLFn: resolver}
+	return &DistHTTPTransport{
+		client:        &http.Client{Timeout: timeout},
+		baseURLFn:     resolver,
+		respBodyLimit: defaultDistHTTPResponseLimit,
+	}
+}
+
+// NewDistHTTPTransportWithLimits is the explicit-limits variant. Use it when
+// the caller needs to raise/lower the response-body cap or align the client
+// timeout with custom DistHTTPLimits applied to the server.
+func NewDistHTTPTransportWithLimits(limits DistHTTPLimits, resolver func(string) (string, bool)) *DistHTTPTransport {
+	return NewDistHTTPTransportWithAuth(limits, DistHTTPAuth{}, resolver)
+}
+
+// NewDistHTTPTransportWithAuth combines explicit limits and auth policy in
+// a single constructor. DistMemory uses this when WithDistHTTPAuth is set
+// so the auto-created HTTP client signs requests with the same token the
+// server validates against.
+//
+// If limits.TLSConfig is non-nil, the underlying http.Transport is
+// configured with the same *tls.Config used by the server, so client
+// connections to peer https:// endpoints handshake against the same
+// roots and certificates.
+func NewDistHTTPTransportWithAuth(limits DistHTTPLimits, auth DistHTTPAuth, resolver func(string) (string, bool)) *DistHTTPTransport {
+	limits = limits.withDefaults()
+
+	client := &http.Client{Timeout: limits.ClientTimeout}
+	if limits.TLSConfig != nil {
+		// Clone http.DefaultTransport's settings (timeouts, idle pools)
+		// then attach the TLS config. Cloning vs constructing from
+		// scratch avoids reinventing default timeouts that future Go
+		// versions may tighten.
+		tr, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			// Defensive: stdlib has always returned *http.Transport
+			// here, but if a third party rewrote DefaultTransport at
+			// init we still want a usable client.
+			tr = &http.Transport{}
+		} else {
+			tr = tr.Clone()
+		}
+
+		// Clone the TLS config and force HTTP/1.1 via ALPN. The dist
+		// HTTP server is fiber+fasthttp which speaks HTTP/1.1 only —
+		// without this constraint Go's stdlib transport advertises h2
+		// via ALPN, succeeds the handshake, then immediately fails
+		// reading the response with "http2: frame too large, note that
+		// the frame header looked like an HTTP/1.1 header". The
+		// http/1.1 NextProto override is the canonical fix from
+		// net/http docs.
+		tlsConf := limits.TLSConfig.Clone()
+		if len(tlsConf.NextProtos) == 0 {
+			tlsConf.NextProtos = []string{"http/1.1"}
+		}
+
+		tr.TLSClientConfig = tlsConf
+		tr.ForceAttemptHTTP2 = false
+		tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+		client.Transport = tr
+	}
+
+	return &DistHTTPTransport{
+		client:        client,
+		baseURLFn:     resolver,
+		respBodyLimit: limits.ResponseLimit,
+		auth:          auth,
+	}
+}
+
+// drainBody consumes any remaining bytes (so the connection can be reused
+// from the keep-alive pool) and closes the body. Centralizes the drain+close
+// pattern so each call site stays a one-line defer. Errors are intentionally
+// dropped — the connection is being recycled either way.
+func drainBody(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, body)
+	_ = body.Close()
+}
+
+// readAndUnmarshal reads the entire bounded body into memory, then
+// json.Unmarshals it into dst. We pre-read so that an *http.MaxBytesError
+// from the limited body surfaces cleanly to the caller — the goccy/go-json
+// streaming decoder swallows it as io.EOF / "unexpected end of JSON input",
+// which would mask the real "peer sent too much" failure mode behind a
+// generic parse error. Read cost is bounded by respBodyLimit.
+func readAndUnmarshal(body io.Reader, dst any) error {
+	buf, err := io.ReadAll(body)
+	if err != nil {
+		return ewrap.Wrap(err, "read response body")
+	}
+
+	err = json.Unmarshal(buf, dst)
+	if err != nil {
+		return ewrap.Wrap(err, "unmarshal response body")
+	}
+
+	return nil
 }
 
 const (
@@ -69,31 +175,20 @@ func (t *DistHTTPTransport) ForwardSet(ctx context.Context, nodeID string, item 
 		return err
 	}
 
-	defer func() {
-		_, copyErr := io.Copy(io.Discard, resp.Body)
-		if copyErr != nil {
-			// Best-effort drain to keep connections reusable.
-			_ = copyErr
-		}
-
-		closeErr := resp.Body.Close()
-		if closeErr != nil {
-			// Best-effort close on deferred cleanup.
-			_ = closeErr
-		}
-	}()
+	body := t.limitedBody(resp)
+	defer drainBody(body)
 
 	if resp.StatusCode == http.StatusNotFound {
 		return sentinel.ErrBackendNotFound
 	}
 
 	if resp.StatusCode >= statusThreshold {
-		body, rerr := io.ReadAll(resp.Body)
+		errBody, rerr := io.ReadAll(body)
 		if rerr != nil {
 			return ewrap.Wrap(rerr, "read error body")
 		}
 
-		return ewrap.Newf("forward set status %d body %s", resp.StatusCode, string(body))
+		return ewrap.Newf("forward set status %d body %s", resp.StatusCode, string(errBody))
 	}
 
 	return nil
@@ -114,19 +209,8 @@ func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID, key string) 
 		return nil, false, err
 	}
 
-	defer func() {
-		_, copyErr := io.Copy(io.Discard, resp.Body)
-		if copyErr != nil {
-			// Best-effort drain to keep connections reusable.
-			_ = copyErr
-		}
-
-		closeErr := resp.Body.Close()
-		if closeErr != nil {
-			// Best-effort close on deferred cleanup.
-			_ = closeErr
-		}
-	}()
+	body := t.limitedBody(resp)
+	defer drainBody(body)
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, false, sentinel.ErrBackendNotFound
@@ -136,7 +220,7 @@ func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID, key string) 
 		return nil, false, ewrap.Newf("forward get status %d", resp.StatusCode)
 	}
 
-	item, found, derr := decodeGetBody(resp.Body)
+	item, found, derr := decodeGetBody(body)
 	if derr != nil {
 		return nil, false, derr
 	}
@@ -151,11 +235,9 @@ func (t *DistHTTPTransport) ForwardGet(ctx context.Context, nodeID, key string) 
 func decodeGetBody(r io.Reader) (*cache.Item, bool, error) {
 	var raw map[string]json.RawMessage
 
-	dec := json.NewDecoder(r)
-
-	err := dec.Decode(&raw)
+	err := readAndUnmarshal(r, &raw)
 	if err != nil {
-		return nil, false, ewrap.Wrap(err, "decode body")
+		return nil, false, err
 	}
 
 	var found bool
@@ -214,19 +296,7 @@ func (t *DistHTTPTransport) ForwardRemove(ctx context.Context, nodeID, key strin
 		return err
 	}
 
-	defer func() {
-		_, copyErr := io.Copy(io.Discard, resp.Body)
-		if copyErr != nil {
-			// Best-effort drain to keep connections reusable.
-			_ = copyErr
-		}
-
-		closeErr := resp.Body.Close()
-		if closeErr != nil {
-			// Best-effort close on deferred cleanup.
-			_ = closeErr
-		}
-	}()
+	defer drainBody(t.limitedBody(resp))
 
 	if resp.StatusCode == http.StatusNotFound {
 		return sentinel.ErrBackendNotFound
@@ -251,19 +321,7 @@ func (t *DistHTTPTransport) Health(ctx context.Context, nodeID string) error {
 		return err
 	}
 
-	defer func() {
-		_, copyErr := io.Copy(io.Discard, resp.Body)
-		if copyErr != nil {
-			// Best-effort drain to keep connections reusable.
-			_ = copyErr
-		}
-
-		closeErr := resp.Body.Close()
-		if closeErr != nil {
-			// Best-effort close on deferred cleanup.
-			_ = closeErr
-		}
-	}()
+	defer drainBody(t.limitedBody(resp))
 
 	if resp.StatusCode == http.StatusNotFound {
 		return sentinel.ErrBackendNotFound
@@ -292,19 +350,8 @@ func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*Me
 		return nil, err
 	}
 
-	defer func() {
-		_, copyErr := io.Copy(io.Discard, resp.Body)
-		if copyErr != nil {
-			// Best-effort drain to keep connections reusable.
-			_ = copyErr
-		}
-
-		closeErr := resp.Body.Close()
-		if closeErr != nil {
-			// Best-effort close on deferred cleanup.
-			_ = closeErr
-		}
-	}()
+	respBody := t.limitedBody(resp)
+	defer drainBody(respBody)
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, sentinel.ErrBackendNotFound
@@ -320,11 +367,9 @@ func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*Me
 		ChunkSize  int      `json:"chunk_size"`
 	}
 
-	dec := json.NewDecoder(resp.Body)
-
-	err = dec.Decode(&body)
+	err = readAndUnmarshal(respBody, &body)
 	if err != nil {
-		return nil, ewrap.Wrap(err, "decode merkle")
+		return nil, err
 	}
 
 	return &MerkleTree{Root: body.Root, LeafHashes: body.LeafHashes, ChunkSize: body.ChunkSize}, nil
@@ -342,19 +387,8 @@ func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]stri
 		return nil, err
 	}
 
-	defer func() {
-		_, copyErr := io.Copy(io.Discard, resp.Body)
-		if copyErr != nil {
-			// Best-effort drain to keep connections reusable.
-			_ = copyErr
-		}
-
-		closeErr := resp.Body.Close()
-		if closeErr != nil {
-			// Best-effort close on deferred cleanup.
-			_ = closeErr
-		}
-	}()
+	respBody := t.limitedBody(resp)
+	defer drainBody(respBody)
 
 	if resp.StatusCode >= statusThreshold {
 		return nil, ewrap.Newf("list keys status %d", resp.StatusCode)
@@ -364,14 +398,22 @@ func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]stri
 		Keys []string `json:"keys"`
 	}
 
-	dec := json.NewDecoder(resp.Body)
-
-	err = dec.Decode(&body)
+	err = readAndUnmarshal(respBody, &body)
 	if err != nil {
-		return nil, ewrap.Wrap(err, "decode keys")
+		return nil, err
 	}
 
 	return body.Keys, nil
+}
+
+// limitedBody wraps resp.Body so reads beyond respBodyLimit return
+// *http.MaxBytesError. Returns the original body when the limit is <=0.
+func (t *DistHTTPTransport) limitedBody(resp *http.Response) io.ReadCloser {
+	if t.respBodyLimit <= 0 {
+		return resp.Body
+	}
+
+	return http.MaxBytesReader(nil, resp.Body, t.respBodyLimit)
 }
 
 func (t *DistHTTPTransport) resolveBaseURL(nodeID string) (*url.URL, error) {
@@ -430,6 +472,11 @@ func (t *DistHTTPTransport) newNodeRequest(
 	req, err := http.NewRequestWithContext(ctx, method, targetURL.String(), body)
 	if err != nil {
 		return nil, ewrap.Wrap(err, "create new request")
+	}
+
+	err = t.auth.sign(req)
+	if err != nil {
+		return nil, ewrap.Wrap(err, "sign request")
 	}
 
 	return req, nil

@@ -4,7 +4,6 @@ package backend
 
 import (
 	"context"
-	"time"
 )
 
 // DisableHTTPForTest stops the internal HTTP server and clears transport (testing helper).
@@ -27,7 +26,11 @@ func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) {
 		return
 	}
 
-	server := newDistHTTPServer(dm.nodeAddr)
+	limits := dm.httpLimits.withDefaults()
+
+	server := newDistHTTPServer(dm.nodeAddr, limits, dm.httpAuth)
+
+	server.ctx = dm.lifeCtx // handler-side cancellation tied to Stop
 
 	err := server.start(ctx, dm)
 	if err != nil {
@@ -36,23 +39,9 @@ func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) {
 
 	dm.httpServer = server
 
-	resolver := func(nodeID string) (string, bool) {
-		if dm.membership != nil {
-			for _, n := range dm.membership.List() {
-				if string(n.ID) == nodeID {
-					return "http://" + n.Address, true
-				}
-			}
-		}
+	resolver := dm.makePeerURLResolver(limits)
 
-		if dm.localNode != nil && string(dm.localNode.ID) == nodeID {
-			return "http://" + dm.localNode.Address, true
-		}
-
-		return "", false
-	}
-
-	dm.storeTransport(NewDistHTTPTransport(2*time.Second, resolver))
+	dm.storeTransport(NewDistHTTPTransportWithAuth(limits, dm.httpAuth, resolver))
 }
 
 // HintedQueueSize returns number of queued hints for a node (testing helper).

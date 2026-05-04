@@ -74,6 +74,25 @@ func waitForNodeRemoval(membership *cluster.Membership, target cluster.NodeID, t
 	return result
 }
 
+// waitForNodesRemovedMetric polls until b's NodesRemoved metric is non-zero
+// or timeout elapses. The heartbeat goroutine increments this metric in
+// evaluateLiveness *after* membership.Remove has succeeded — there is a
+// tiny preemption window (worse under -race) where membership shows the
+// node gone but the atomic.Add has not yet executed. Tests that observe
+// the membership change first must wait for the metric to settle.
+func waitForNodesRemovedMetric(b *backend.DistMemory, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if b.Metrics().NodesRemoved > 0 {
+			return true
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return false
+}
+
 // assertHeartbeatLiveness verifies the post-condition of a heartbeat removal
 // scenario: removed node is gone from membership, alive node is still
 // present and alive, and the heartbeat metrics reflect the activity.
@@ -160,6 +179,13 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest // mu
 
 	if !res.Removed {
 		t.Fatalf("node2 not removed within 2*deadAfter")
+	}
+
+	// Bridge the preemption window between membership.Remove() returning
+	// and the heartbeat goroutine executing nodesRemoved.Add(1). Without
+	// this poll the metric assertion below races and reports 0.
+	if !waitForNodesRemovedMetric(b1, 500*time.Millisecond) {
+		t.Fatalf("nodes-removed metric never reached >0 after membership transition")
 	}
 
 	assertHeartbeatLiveness(t, membership, target, b3.LocalNodeID(), b1.Metrics())

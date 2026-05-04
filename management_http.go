@@ -3,13 +3,13 @@ package hypercache
 import (
 	"context"
 	"net"
+	"sync/atomic"
 	"time"
 
 	fiber "github.com/gofiber/fiber/v3"
 	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
-	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/stats"
 )
 
@@ -22,10 +22,31 @@ type ManagementHTTPServer struct {
 	app              *fiber.App
 	readTimeout      time.Duration
 	writeTimeout     time.Duration
+	idleTimeout      time.Duration
+	bodyLimit        int
+	concurrency      int
 	authFunc         func(fiber.Ctx) error
 	ln               net.Listener
 	started          bool
 	listenerDeadline time.Duration
+	// ctx is the server-lifecycle context derived from the ctx supplied
+	// to Start, with its own cancel func wired into Shutdown. Handlers
+	// pass it to backend operations (Clear in particular) so cancellation
+	// propagates when the operator calls hyperCache.Stop.
+	//
+	// We do NOT use the per-request fiber.Ctx for this: fiber.Ctx is
+	// pooled and reset after the handler returns, racing with
+	// happy-eyeballs goroutines spawned by net.(*Dialer).DialContext
+	// when DistMemory's transport fan-out goes through http.Client.Do.
+	ctx context.Context //nolint:containedctx // captured server lifecycle, not request scope
+	// lifeCancel cancels s.ctx; called from Shutdown so in-flight
+	// handlers see Done() before fiber drains the listeners.
+	lifeCancel context.CancelFunc
+	// serveErr captures the last error returned by app.Listener when the
+	// background serve goroutine exits. Operators can read it via
+	// LastServeError() to surface listener failures (e.g. port already
+	// bound) instead of having them silently swallowed.
+	serveErr atomic.Pointer[error]
 }
 
 // WithMgmtAuth sets an auth function (return error to block).
@@ -43,31 +64,92 @@ func WithMgmtWriteTimeout(d time.Duration) ManagementHTTPOption {
 	return func(s *ManagementHTTPServer) { s.writeTimeout = d }
 }
 
+// WithMgmtIdleTimeout sets the keep-alive idle timeout. Without this idle
+// connections accumulate; fiber's default is unbounded. <=0 keeps the
+// package default.
+func WithMgmtIdleTimeout(d time.Duration) ManagementHTTPOption {
+	return func(s *ManagementHTTPServer) {
+		if d > 0 {
+			s.idleTimeout = d
+		}
+	}
+}
+
+// WithMgmtBodyLimit caps inbound request body bytes. Defaults to fiber's
+// 4 MiB. <=0 keeps the package default.
+func WithMgmtBodyLimit(bytes int) ManagementHTTPOption {
+	return func(s *ManagementHTTPServer) {
+		if bytes > 0 {
+			s.bodyLimit = bytes
+		}
+	}
+}
+
+// WithMgmtConcurrency caps simultaneous in-flight handlers. <=0 keeps the
+// package default (256 KiB, matching fiber).
+func WithMgmtConcurrency(n int) ManagementHTTPOption {
+	return func(s *ManagementHTTPServer) {
+		if n > 0 {
+			s.concurrency = n
+		}
+	}
+}
+
 const (
 	defaultReadTimeout      = 5 * time.Second
 	defaultWriteTimeout     = 5 * time.Second
 	defaultListenerDeadline = 2 * time.Second
+	// defaultMgmtIdleTimeout caps keep-alive idle connections.
+	defaultMgmtIdleTimeout = 60 * time.Second
+	// defaultMgmtBodyLimit matches fiber's own default but is stated
+	// explicitly so the value is visible in /config and tunable via
+	// WithMgmtBodyLimit.
+	defaultMgmtBodyLimit = 4 * 1024 * 1024
+	// defaultMgmtConcurrency matches fiber's own default.
+	defaultMgmtConcurrency = 256 * 1024
 )
 
 // NewManagementHTTPServer builds an HTTP server holder (lazy start).
 func NewManagementHTTPServer(addr string, opts ...ManagementHTTPOption) *ManagementHTTPServer {
-	app := fiber.New(fiber.Config{
-		ReadTimeout:  defaultReadTimeout,
-		WriteTimeout: defaultWriteTimeout,
-	})
-
 	srv := &ManagementHTTPServer{
 		addr:             addr,
-		app:              app,
 		readTimeout:      defaultReadTimeout,
 		writeTimeout:     defaultWriteTimeout,
+		idleTimeout:      defaultMgmtIdleTimeout,
+		bodyLimit:        defaultMgmtBodyLimit,
+		concurrency:      defaultMgmtConcurrency,
 		listenerDeadline: defaultListenerDeadline,
 	}
 	for _, opt := range opts { // apply options
 		opt(srv)
 	}
 
+	// Construct the fiber app *after* options apply so user-supplied
+	// timeouts/limits actually take effect (the previous order built the
+	// app with default config, then mutated unrelated struct fields).
+	srv.app = fiber.New(fiber.Config{
+		ReadTimeout:  srv.readTimeout,
+		WriteTimeout: srv.writeTimeout,
+		IdleTimeout:  srv.idleTimeout,
+		BodyLimit:    srv.bodyLimit,
+		Concurrency:  srv.concurrency,
+	})
+
 	return srv
+}
+
+// LastServeError returns the last error captured from the background
+// serve goroutine. Returns nil when the server shut down cleanly.
+func (s *ManagementHTTPServer) LastServeError() error {
+	if s == nil {
+		return nil
+	}
+
+	if errp := s.serveErr.Load(); errp != nil {
+		return *errp
+	}
+
+	return nil
 }
 
 // mountRoutes registers endpoints onto the Fiber app.
@@ -111,7 +193,11 @@ func (s *ManagementHTTPServer) Start(ctx context.Context, hc managementCache) er
 		return nil
 	}
 
-	s.mountRoutes(ctx, hc)
+	// Derive a lifecycle ctx so Shutdown can cancel in-flight handlers
+	// independently of the caller's ctx (which usually never cancels —
+	// production code passes context.Background()).
+	s.ctx, s.lifeCancel = context.WithCancel(ctx)
+	s.mountRoutes(hc)
 
 	lc := net.ListenConfig{}
 
@@ -122,12 +208,15 @@ func (s *ManagementHTTPServer) Start(ctx context.Context, hc managementCache) er
 
 	s.ln = ln
 
-	go func() { // serve in background (optional server errors are ignored intentionally)
+	go func() {
 		// Suppress fiber's startup banner so tests at -count=N do not drown
 		// real failures under hundreds of "INFO Server started on..." lines.
-		err = s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true})
-		if err != nil { // optional server; log hook could be added in future
-			_ = err
+		serveErr := s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true})
+		if serveErr != nil {
+			// Stash so operators can read it via LastServeError(); a
+			// listener that crashed silently is the worst kind of
+			// production bug.
+			s.serveErr.Store(&serveErr)
 		}
 	}()
 
@@ -151,27 +240,24 @@ func (s *ManagementHTTPServer) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	ch := make(chan error, 1)
-
-	go func() {
-		ch <- s.app.Shutdown()
-	}()
-
-	select {
-	case <-ctx.Done():
-		return sentinel.ErrMgmtHTTPShutdownTimeout
-	case err := <-ch:
-		return err
+	// Cancel s.ctx first so in-flight handlers see Done() before fiber
+	// starts draining listeners. ShutdownWithContext then closes
+	// listeners gracefully, waits for in-flight requests, and
+	// force-closes once ctx's deadline elapses.
+	if s.lifeCancel != nil {
+		s.lifeCancel()
 	}
+
+	return s.app.ShutdownWithContext(ctx)
 }
 
 // mountRoutes.
-func (s *ManagementHTTPServer) mountRoutes(ctx context.Context, hc managementCache) { // split into helpers to satisfy funlen
+func (s *ManagementHTTPServer) mountRoutes(hc managementCache) { // split into helpers to satisfy funlen
 	useAuth := s.wrapAuth
 	s.registerBasic(useAuth, hc)
 	s.registerDistributed(useAuth, hc)
 	s.registerCluster(useAuth, hc)
-	s.registerControl(ctx, useAuth, hc)
+	s.registerControl(useAuth, hc)
 }
 
 // wrapAuth returns an auth-wrapped handler if authFunc provided.
@@ -272,12 +358,15 @@ func (s *ManagementHTTPServer) registerCluster(useAuth func(fiber.Handler) fiber
 }
 
 func (s *ManagementHTTPServer) registerControl(
-	ctx context.Context,
 	useAuth func(fiber.Handler) fiber.Handler,
 	hc managementCache,
 ) {
+	// Handlers use s.ctx (server-lifecycle) for backend ops. Per-request
+	// fiber.Ctx would race when Clear's transport fan-out spawns
+	// happy-eyeballs dial goroutines that outlive the handler — see the
+	// comment on ManagementHTTPServer.ctx for the trace.
 	s.app.Post("/evict", useAuth(func(fiberCtx fiber.Ctx) error {
-		hc.TriggerEviction(ctx)
+		hc.TriggerEviction(s.ctx)
 
 		return fiberCtx.SendStatus(fiber.StatusAccepted)
 	}))
@@ -287,7 +376,7 @@ func (s *ManagementHTTPServer) registerControl(
 		return fiberCtx.SendStatus(fiber.StatusAccepted)
 	}))
 	s.app.Post("/clear", useAuth(func(fiberCtx fiber.Ctx) error {
-		clearErr := hc.Clear(ctx)
+		clearErr := hc.Clear(s.ctx)
 		if clearErr != nil {
 			return clearErr
 		}

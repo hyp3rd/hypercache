@@ -33,7 +33,7 @@ ci: lint typecheck test-race sec build
 
 # bench runs the benchmark tests in the benchmark subpackage of the tests package.
 bench:
-	cd tests/benchmark && go test -bench=. -benchmem -benchtime=4s . -timeout 30m
+	cd tests/benchmark && go test -bench=. -benchmem -benchtime=4s ./... -timeout 30m
 
 # bench-baseline captures the current benchmark output to bench-baseline.txt for benchstat comparison.
 bench-baseline:

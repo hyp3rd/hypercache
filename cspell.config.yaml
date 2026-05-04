@@ -34,12 +34,14 @@ dictionaryDefinitions: []
 dictionaries: []
 words:
   - acks
+  - ALPN
   - autosync
   - backpressure
   - benchmarkdist
   - benchmem
   - benchtime
   - bitnami
+  - bodyclose
   - bufbuild
   - cacheerrors
   - cachev
@@ -52,7 +54,10 @@ words:
   - cmap
   - Cmder
   - codacy
+  - containedctx
+  - contextcheck
   - cpuprofile
+  - cret
   - cyclop
   - daixiang
   - Decr
@@ -63,11 +68,13 @@ words:
   - EDITMSG
   - elif
   - errcheck
+  - errp
   - ewrap
   - excalidraw
   - excludeonly
   - exhaustruct
   - Fanout
+  - fasthttp
   - fatals
   - fctx
   - ferr
@@ -86,7 +93,6 @@ words:
   - goccy
   - gochecknoglobals
   - goconst
-  - histogramcollector
   - gofiber
   - GOFILES
   - gofumpt
@@ -98,9 +104,11 @@ words:
   - gosec
   - GOTOOLCHAIN
   - govulncheck
+  - histogramcollector
   - HMAC
   - honnef
   - hreq
+  - HTTPTLS
   - hypercache
   - idxs
   - Iface
