@@ -64,9 +64,12 @@ func TestDistMemoryReadRepair(t *testing.T) {
 
 	const key = "rr-key"
 
+	// Setup uses RF=2 with 2 nodes registered — Lookup must return both.
+	// A <2 result indicates a test-environment regression rather than a
+	// benign condition.
 	owners := dc.Ring.Lookup(key)
 	if len(owners) < 2 {
-		t.Skip("replication factor <2")
+		t.Fatalf("expected >=2 owners with RF=2 setup, got %d", len(owners))
 	}
 
 	item := &cache.Item{Key: key, Value: "val"}

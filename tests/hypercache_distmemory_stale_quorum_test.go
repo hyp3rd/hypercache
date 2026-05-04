@@ -32,9 +32,13 @@ func TestDistMemoryStaleQuorum(t *testing.T) {
 
 	const key = "sq-key"
 
+	// Setup uses RF=3 with 3 nodes registered — Lookup must return all
+	// three. A non-3 result indicates a test-environment regression
+	// (e.g., a node failed to join membership), not a benign condition
+	// to skip past.
 	owners := dc.Ring.Lookup(key)
 	if len(owners) != 3 {
-		t.Skip("replication factor !=3")
+		t.Fatalf("expected 3 owners with RF=3 setup, got %d", len(owners))
 	}
 
 	item := &cache.Item{Key: key, Value: "v1"}
