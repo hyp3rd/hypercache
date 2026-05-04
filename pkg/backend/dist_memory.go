@@ -128,6 +128,12 @@ type DistMemory struct {
 	rebalanceStopCh        chan struct{}
 	lastRebalanceVersion   atomic.Uint64
 
+	// httpLimits caps inbound request bodies (server) and inbound response
+	// bodies (auto-created client) plus tunes timeouts and concurrency.
+	// Zero-valued fields fall back to defaultDistHTTP* in
+	// dist_http_server.go via DistHTTPLimits.withDefaults().
+	httpLimits DistHTTPLimits
+
 	// replica-only diff scan limits
 	replicaDiffMaxPerTick int // 0 = unlimited
 
@@ -564,6 +570,19 @@ func WithDistSeeds(addresses []string) DistMemoryOption {
 	}
 
 	return func(dm *DistMemory) { dm.seeds = cp }
+}
+
+// WithDistHTTPLimits configures the HTTP transport limits for the dist
+// HTTP server (inbound request bodies, timeouts, concurrency) and the
+// auto-created HTTP client (response body cap, request timeout). Partial
+// overrides are honored: zero-valued fields inherit the package defaults
+// from DistHTTPLimits.withDefaults.
+//
+// This option only affects the *internal* HTTP server/client created by
+// tryStartHTTP — explicitly-supplied transports via WithDistTransport are
+// the caller's responsibility to bound.
+func WithDistHTTPLimits(limits DistHTTPLimits) DistMemoryOption {
+	return func(dm *DistMemory) { dm.httpLimits = limits }
 }
 
 // NewDistMemory creates a new DistMemory backend.
@@ -1973,7 +1992,12 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 		return
 	}
 
-	server := newDistHTTPServer(dm.nodeAddr)
+	// Resolve once so server and auto-created client share the same
+	// timeouts / body caps — a request that the server would reject as
+	// too large is also one the client should not attempt to send.
+	limits := dm.httpLimits.withDefaults()
+
+	server := newDistHTTPServer(dm.nodeAddr, limits)
 
 	err := server.start(ctx, dm)
 	if err != nil { // best-effort
@@ -1998,7 +2022,7 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 		return "", false
 	}
 
-	dm.storeTransport(NewDistHTTPTransport(2*time.Second, resolver))
+	dm.storeTransport(NewDistHTTPTransportWithLimits(limits, resolver))
 }
 
 // startHeartbeatIfEnabled launches heartbeat loop if configured.

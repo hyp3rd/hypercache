@@ -4,7 +4,6 @@ package backend
 
 import (
 	"context"
-	"time"
 )
 
 // DisableHTTPForTest stops the internal HTTP server and clears transport (testing helper).
@@ -27,7 +26,9 @@ func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) {
 		return
 	}
 
-	server := newDistHTTPServer(dm.nodeAddr)
+	limits := dm.httpLimits.withDefaults()
+
+	server := newDistHTTPServer(dm.nodeAddr, limits)
 
 	err := server.start(ctx, dm)
 	if err != nil {
@@ -52,7 +53,7 @@ func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) {
 		return "", false
 	}
 
-	dm.storeTransport(NewDistHTTPTransport(2*time.Second, resolver))
+	dm.storeTransport(NewDistHTTPTransportWithLimits(limits, resolver))
 }
 
 // HintedQueueSize returns number of queued hints for a node (testing helper).

@@ -22,6 +22,9 @@ type ManagementHTTPServer struct {
 	app              *fiber.App
 	readTimeout      time.Duration
 	writeTimeout     time.Duration
+	idleTimeout      time.Duration
+	bodyLimit        int
+	concurrency      int
 	authFunc         func(fiber.Ctx) error
 	ln               net.Listener
 	started          bool
@@ -43,29 +46,76 @@ func WithMgmtWriteTimeout(d time.Duration) ManagementHTTPOption {
 	return func(s *ManagementHTTPServer) { s.writeTimeout = d }
 }
 
+// WithMgmtIdleTimeout sets the keep-alive idle timeout. Without this idle
+// connections accumulate; fiber's default is unbounded. <=0 keeps the
+// package default.
+func WithMgmtIdleTimeout(d time.Duration) ManagementHTTPOption {
+	return func(s *ManagementHTTPServer) {
+		if d > 0 {
+			s.idleTimeout = d
+		}
+	}
+}
+
+// WithMgmtBodyLimit caps inbound request body bytes. Defaults to fiber's
+// 4 MiB. <=0 keeps the package default.
+func WithMgmtBodyLimit(bytes int) ManagementHTTPOption {
+	return func(s *ManagementHTTPServer) {
+		if bytes > 0 {
+			s.bodyLimit = bytes
+		}
+	}
+}
+
+// WithMgmtConcurrency caps simultaneous in-flight handlers. <=0 keeps the
+// package default (256 KiB, matching fiber).
+func WithMgmtConcurrency(n int) ManagementHTTPOption {
+	return func(s *ManagementHTTPServer) {
+		if n > 0 {
+			s.concurrency = n
+		}
+	}
+}
+
 const (
 	defaultReadTimeout      = 5 * time.Second
 	defaultWriteTimeout     = 5 * time.Second
 	defaultListenerDeadline = 2 * time.Second
+	// defaultMgmtIdleTimeout caps keep-alive idle connections.
+	defaultMgmtIdleTimeout = 60 * time.Second
+	// defaultMgmtBodyLimit matches fiber's own default but is stated
+	// explicitly so the value is visible in /config and tunable via
+	// WithMgmtBodyLimit.
+	defaultMgmtBodyLimit = 4 * 1024 * 1024
+	// defaultMgmtConcurrency matches fiber's own default.
+	defaultMgmtConcurrency = 256 * 1024
 )
 
 // NewManagementHTTPServer builds an HTTP server holder (lazy start).
 func NewManagementHTTPServer(addr string, opts ...ManagementHTTPOption) *ManagementHTTPServer {
-	app := fiber.New(fiber.Config{
-		ReadTimeout:  defaultReadTimeout,
-		WriteTimeout: defaultWriteTimeout,
-	})
-
 	srv := &ManagementHTTPServer{
 		addr:             addr,
-		app:              app,
 		readTimeout:      defaultReadTimeout,
 		writeTimeout:     defaultWriteTimeout,
+		idleTimeout:      defaultMgmtIdleTimeout,
+		bodyLimit:        defaultMgmtBodyLimit,
+		concurrency:      defaultMgmtConcurrency,
 		listenerDeadline: defaultListenerDeadline,
 	}
 	for _, opt := range opts { // apply options
 		opt(srv)
 	}
+
+	// Construct the fiber app *after* options apply so user-supplied
+	// timeouts/limits actually take effect (the previous order built the
+	// app with default config, then mutated unrelated struct fields).
+	srv.app = fiber.New(fiber.Config{
+		ReadTimeout:  srv.readTimeout,
+		WriteTimeout: srv.writeTimeout,
+		IdleTimeout:  srv.idleTimeout,
+		BodyLimit:    srv.bodyLimit,
+		Concurrency:  srv.concurrency,
+	})
 
 	return srv
 }

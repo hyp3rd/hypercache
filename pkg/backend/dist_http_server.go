@@ -26,10 +26,98 @@ type distHTTPServer struct {
 const (
 	httpReadTimeout  = 5 * time.Second
 	httpWriteTimeout = 5 * time.Second
+
+	// defaultDistHTTPBodyLimit caps inbound request bodies the dist HTTP
+	// server will accept. 16 MiB is generous for typical cache values
+	// while still rejecting absurd payloads. Tunable via
+	// WithDistHTTPLimits.
+	defaultDistHTTPBodyLimit = 16 * 1024 * 1024
+	// defaultDistHTTPResponseLimit caps inbound response bodies the dist
+	// HTTP client will accept. Mirrors BodyLimit so a peer cannot OOM
+	// the requester via an oversized response.
+	defaultDistHTTPResponseLimit int64 = 16 * 1024 * 1024
+	// defaultDistHTTPIdleTimeout is the keep-alive idle timeout. Without
+	// it idle connections accumulate; fiber's default is unbounded.
+	defaultDistHTTPIdleTimeout = 60 * time.Second
+	// defaultDistHTTPConcurrency caps simultaneous in-flight handlers.
+	// Matches fiber's own default but stated explicitly so it shows up in
+	// /config introspection.
+	defaultDistHTTPConcurrency = 256 * 1024
+	// defaultDistHTTPClientTimeout is the per-request deadline for the
+	// dist HTTP client when the caller doesn't supply one. 5s aligns with
+	// server read/write timeouts; the previous 2s caused flakes under
+	// -race when the fiber listener was slow to accept the first request.
+	defaultDistHTTPClientTimeout = 5 * time.Second
 )
 
-func newDistHTTPServer(addr string) *distHTTPServer {
-	app := fiber.New(fiber.Config{ReadTimeout: httpReadTimeout, WriteTimeout: httpWriteTimeout})
+// DistHTTPLimits bundles the tunable HTTP-transport limits applied to both
+// the dist HTTP server (inbound request bodies, timeouts, concurrency) and
+// the auto-created dist HTTP client (outbound request timeout, inbound
+// response size). Zero-valued fields fall back to the defaults below.
+//
+// Use [WithDistHTTPLimits] to override defaults; partial overrides keep
+// the rest at their default values.
+type DistHTTPLimits struct {
+	// BodyLimit caps inbound request body bytes (server-side).
+	BodyLimit int
+	// ResponseLimit caps inbound response body bytes (client-side).
+	ResponseLimit int64
+	// ReadTimeout is the server read deadline.
+	ReadTimeout time.Duration
+	// WriteTimeout is the server write deadline.
+	WriteTimeout time.Duration
+	// IdleTimeout is the keep-alive idle timeout (server-side).
+	IdleTimeout time.Duration
+	// Concurrency is the maximum number of concurrent in-flight handlers.
+	Concurrency int
+	// ClientTimeout is the per-request deadline for the dist HTTP client.
+	ClientTimeout time.Duration
+}
+
+// withDefaults fills any zero-valued field on l with the package default.
+// Returned by value — callers should treat the result as immutable.
+func (l DistHTTPLimits) withDefaults() DistHTTPLimits {
+	if l.BodyLimit <= 0 {
+		l.BodyLimit = defaultDistHTTPBodyLimit
+	}
+
+	if l.ResponseLimit <= 0 {
+		l.ResponseLimit = defaultDistHTTPResponseLimit
+	}
+
+	if l.ReadTimeout <= 0 {
+		l.ReadTimeout = httpReadTimeout
+	}
+
+	if l.WriteTimeout <= 0 {
+		l.WriteTimeout = httpWriteTimeout
+	}
+
+	if l.IdleTimeout <= 0 {
+		l.IdleTimeout = defaultDistHTTPIdleTimeout
+	}
+
+	if l.Concurrency <= 0 {
+		l.Concurrency = defaultDistHTTPConcurrency
+	}
+
+	if l.ClientTimeout <= 0 {
+		l.ClientTimeout = defaultDistHTTPClientTimeout
+	}
+
+	return l
+}
+
+func newDistHTTPServer(addr string, limits DistHTTPLimits) *distHTTPServer {
+	limits = limits.withDefaults()
+
+	app := fiber.New(fiber.Config{
+		ReadTimeout:  limits.ReadTimeout,
+		WriteTimeout: limits.WriteTimeout,
+		IdleTimeout:  limits.IdleTimeout,
+		BodyLimit:    limits.BodyLimit,
+		Concurrency:  limits.Concurrency,
+	})
 
 	return &distHTTPServer{app: app, addr: addr}
 }
