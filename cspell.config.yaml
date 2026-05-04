@@ -35,10 +35,13 @@ dictionaries: []
 words:
   - acks
   - ALPN
+  - assertable
   - autosync
   - backpressure
+  - baselining
   - benchmarkdist
   - benchmem
+  - benchstat
   - benchtime
   - bitnami
   - bodyclose
@@ -54,6 +57,7 @@ words:
   - cmap
   - Cmder
   - codacy
+  - codemod
   - containedctx
   - contextcheck
   - cpuprofile
@@ -85,6 +89,7 @@ words:
   - Fprintln
   - freqs
   - funlen
+  - geomean
   - gerr
   - gitversion
   - GITVERSION
@@ -95,6 +100,7 @@ words:
   - goconst
   - gofiber
   - GOFILES
+  - gofmt
   - gofumpt
   - goimports
   - golangci
@@ -145,6 +151,7 @@ words:
   - NOVENDOR
   - paralleltest
   - Pipeliner
+  - pluggability
   - popd
   - Prealloc
   - protoc
