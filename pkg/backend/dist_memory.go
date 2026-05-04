@@ -134,6 +134,21 @@ type DistMemory struct {
 	// dist_http_server.go via DistHTTPLimits.withDefaults().
 	httpLimits DistHTTPLimits
 
+	// httpAuth configures bearer-token / signing-fn auth applied to both
+	// the dist HTTP server (inbound validation) and the auto-created
+	// HTTP client (outbound signing). Zero-value disables auth — same
+	// behavior as before WithDistHTTPAuth was added.
+	httpAuth DistHTTPAuth
+
+	// lifeCtx is the server-lifetime context. Derived from the
+	// constructor ctx but with its own cancel func wired into Stop, so
+	// in-flight HTTP handlers and replica forwards observe Done() when
+	// the user calls Stop — not just when the constructor ctx happens
+	// to cancel (which it usually doesn't, since callers pass
+	// context.Background()).
+	lifeCtx    context.Context //nolint:containedctx // server-lifecycle, not request-scope
+	lifeCancel context.CancelFunc
+
 	// replica-only diff scan limits
 	replicaDiffMaxPerTick int // 0 = unlimited
 
@@ -206,6 +221,13 @@ func (dm *DistMemory) Membership() *cluster.Membership { return dm.membership }
 
 // Ring returns the ring reference.
 func (dm *DistMemory) Ring() *cluster.Ring { return dm.ring }
+
+// LifecycleContext returns the server-lifecycle context derived from the
+// ctx supplied to NewDistMemory. Stop cancels this context, so callers
+// (including HTTP handlers and background loops) can observe shutdown
+// without polling the various stopCh channels. Read-only — modifying
+// the returned ctx has no effect.
+func (dm *DistMemory) LifecycleContext() context.Context { return dm.lifeCtx }
 
 type distShard struct {
 	items             cache.ConcurrentMap
@@ -585,14 +607,37 @@ func WithDistHTTPLimits(limits DistHTTPLimits) DistMemoryOption {
 	return func(dm *DistMemory) { dm.httpLimits = limits }
 }
 
+// WithDistHTTPAuth configures bearer-token (or custom verify/sign)
+// authentication for the dist HTTP server and auto-created HTTP client.
+// See DistHTTPAuth for the policy struct shape and defaults.
+//
+// Operators must apply the same auth policy to every node in the
+// cluster — peers with mismatched tokens will reject each other's
+// requests with HTTP 401. Like WithDistHTTPLimits this only affects the
+// internal transport; an externally-supplied DistTransport is the
+// caller's responsibility to authenticate.
+func WithDistHTTPAuth(auth DistHTTPAuth) DistMemoryOption {
+	return func(dm *DistMemory) { dm.httpAuth = auth }
+}
+
 // NewDistMemory creates a new DistMemory backend.
 func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[DistMemory], error) {
+	// Derive a server-lifetime context from the caller's ctx so that:
+	//   1. If the caller cancels their ctx, our background work and HTTP
+	//      handlers see it (chains via WithCancel parent).
+	//   2. Stop() can independently cancel without touching the caller's
+	//      ctx — gives operators a deterministic shutdown signal even
+	//      when they pass context.Background().
+	lifeCtx, lifeCancel := context.WithCancel(ctx)
+
 	dm := &DistMemory{
 		shardCount:       defaultDistShardCount,
 		replication:      1,
 		readConsistency:  ConsistencyOne,
 		writeConsistency: ConsistencyQuorum,
 		latency:          newDistLatencyCollector(),
+		lifeCtx:          lifeCtx,
+		lifeCancel:       lifeCancel,
 	}
 	for _, opt := range opts {
 		opt(dm)
@@ -600,13 +645,16 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 
 	dm.ensureShardConfig()
 	dm.initMembershipIfNeeded()
+	// Pass the lifecycle ctx to subsystems that capture it (HTTP handlers,
+	// background loops). The constructor ctx is used only for operations
+	// that must complete during NewDistMemory itself (e.g. listener bind).
 	dm.tryStartHTTP(ctx)
-	dm.startHeartbeatIfEnabled(ctx)
-	dm.startHintReplayIfEnabled(ctx)
+	dm.startHeartbeatIfEnabled(lifeCtx)
+	dm.startHintReplayIfEnabled(lifeCtx)
 	dm.startGossipIfEnabled()
-	dm.startAutoSyncIfEnabled(ctx)
+	dm.startAutoSyncIfEnabled(lifeCtx)
 	dm.startTombstoneSweeper()
-	dm.startRebalancerIfEnabled(ctx)
+	dm.startRebalancerIfEnabled(lifeCtx)
 
 	return dm, nil
 }
@@ -1136,6 +1184,14 @@ func (dm *DistMemory) LatencyHistograms() map[string][]uint64 {
 func (dm *DistMemory) Stop(ctx context.Context) error {
 	if !dm.stopped.CompareAndSwap(false, true) {
 		return nil
+	}
+
+	// Cancel the lifecycle context first so in-flight HTTP handlers and
+	// background loops see Done() before we start tearing down channels.
+	// Background loops still listen on their stopCh below for backward
+	// compatibility; new code should prefer ctx.Done() over the channel.
+	if dm.lifeCancel != nil {
+		dm.lifeCancel()
 	}
 
 	if dm.stopCh != nil {
@@ -1987,6 +2043,11 @@ func (dm *DistMemory) initMembershipIfNeeded() {
 }
 
 // tryStartHTTP starts internal HTTP transport if not provided.
+//
+// The bind ctx (parameter) controls the listener.Listen call only; the
+// server stores dm.lifeCtx as its handler-side operation context, so
+// in-flight backend work observes Stop's cancellation independent of
+// the constructor ctx the caller supplied.
 func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 	if dm.loadTransport() != nil || dm.nodeAddr == "" {
 		return
@@ -1997,7 +2058,9 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 	// too large is also one the client should not attempt to send.
 	limits := dm.httpLimits.withDefaults()
 
-	server := newDistHTTPServer(dm.nodeAddr, limits)
+	server := newDistHTTPServer(dm.nodeAddr, limits, dm.httpAuth)
+
+	server.ctx = dm.lifeCtx // handler-side cancellation tied to Stop
 
 	err := server.start(ctx, dm)
 	if err != nil { // best-effort
@@ -2006,23 +2069,38 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 
 	dm.httpServer = server
 
-	resolver := func(nodeID string) (string, bool) {
+	resolver := dm.makePeerURLResolver(limits)
+
+	dm.storeTransport(NewDistHTTPTransportWithAuth(limits, dm.httpAuth, resolver))
+}
+
+// makePeerURLResolver returns a resolver that maps node IDs to base URLs.
+// The scheme follows whether TLS is configured: https:// when
+// limits.TLSConfig is non-nil, http:// otherwise. Extracted from
+// tryStartHTTP / EnableHTTPForTest so both share one source of truth for
+// scheme selection — getting it wrong causes the client to dial plaintext
+// against a TLS listener (or vice versa).
+func (dm *DistMemory) makePeerURLResolver(limits DistHTTPLimits) func(string) (string, bool) {
+	scheme := "http://"
+	if limits.TLSConfig != nil {
+		scheme = "https://"
+	}
+
+	return func(nodeID string) (string, bool) {
 		if dm.membership != nil {
 			for _, n := range dm.membership.List() {
 				if string(n.ID) == nodeID {
-					return "http://" + n.Address, true
+					return scheme + n.Address, true
 				}
 			}
 		}
 
 		if dm.localNode != nil && string(dm.localNode.ID) == nodeID {
-			return "http://" + dm.localNode.Address, true
+			return scheme + dm.localNode.Address, true
 		}
 
 		return "", false
 	}
-
-	dm.storeTransport(NewDistHTTPTransportWithLimits(limits, resolver))
 }
 
 // startHeartbeatIfEnabled launches heartbeat loop if configured.

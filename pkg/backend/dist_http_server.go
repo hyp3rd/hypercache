@@ -2,8 +2,12 @@ package backend
 
 import (
 	"context"
+	"crypto/subtle"
+	"crypto/tls"
 	"net"
+	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -11,6 +15,7 @@ import (
 	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
@@ -28,6 +33,94 @@ type distHTTPServer struct {
 	// when applySet's replica fan-out goes through http.Client.Do.
 	// See the race trace captured during phase-5b investigation.
 	ctx context.Context //nolint:containedctx // captured server lifecycle, not request scope
+	// auth is the configured authentication policy. Zero-valued means no
+	// auth (current default behavior).
+	auth DistHTTPAuth
+	// tlsConfig (when non-nil) wraps the listener with tls.NewListener.
+	// Resolver advertises https:// in that case; clients with the same
+	// TLSConfig handshake successfully, plaintext peers are rejected at
+	// the TCP level by Go's TLS server.
+	tlsConfig *tls.Config
+	// serveErr captures the last error returned by app.Listener when the
+	// background serve goroutine exits. Operators can read it via
+	// LastServeError() to surface listener failures (e.g. port already in
+	// use, TLS handshake failure on accept) instead of having them
+	// silently swallowed.
+	serveErr atomic.Pointer[error]
+}
+
+// DistHTTPAuth configures bearer-token authentication for the dist HTTP
+// server (inbound) and the auto-created HTTP client (outbound). Zero-value
+// disables auth — current behavior. When configured, *all* dist endpoints
+// (including /health) require a valid token; operators who want a public
+// health endpoint can supply a custom ServerVerify that exempts that path.
+//
+// Most clusters need only Token: every node sets the same string, the
+// server validates incoming Authorization: Bearer <token> headers via
+// constant-time compare, and the client sends the same header on every
+// outgoing request.
+//
+// ServerVerify and ClientSign are escape hatches for JWT, mTLS-derived
+// identity, HMAC signing, etc. When set they fully replace the default
+// token check / header injection.
+type DistHTTPAuth struct {
+	// Token is the shared bearer string. When set (and ServerVerify is
+	// nil), the server requires `Authorization: Bearer <token>` on every
+	// request. The auto-created client sends the same header.
+	Token string
+	// ServerVerify (optional) inspects each incoming request and returns
+	// non-nil to reject with HTTP 401. Use for JWT, OAuth introspection,
+	// path-based exemptions, etc. When set it replaces the Token check.
+	ServerVerify func(fiber.Ctx) error
+	// ClientSign (optional) decorates each outgoing request before send.
+	// Use for HMAC signing, mTLS-derived headers, etc. When set it
+	// replaces the default `Authorization: Bearer <token>` header.
+	ClientSign func(*http.Request) error
+}
+
+// configured reports whether the auth policy is active.
+func (a DistHTTPAuth) configured() bool {
+	return a.Token != "" || a.ServerVerify != nil || a.ClientSign != nil
+}
+
+// verify validates the incoming request against the configured policy.
+// Returns nil when the request is authorized, non-nil otherwise. The
+// default (Token-only) check uses constant-time compare to defeat timing
+// side-channels.
+func (a DistHTTPAuth) verify(fctx fiber.Ctx) error {
+	if a.ServerVerify != nil {
+		return a.ServerVerify(fctx)
+	}
+
+	if a.Token == "" {
+		return nil
+	}
+
+	got := fctx.Get("Authorization")
+	want := "Bearer " + a.Token
+
+	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		return sentinel.ErrUnauthorized
+	}
+
+	return nil
+}
+
+// sign decorates an outgoing request with the configured auth header.
+// Default (Token-only) sets `Authorization: Bearer <token>`. ClientSign
+// fully overrides when set.
+func (a DistHTTPAuth) sign(req *http.Request) error {
+	if a.ClientSign != nil {
+		return a.ClientSign(req)
+	}
+
+	if a.Token == "" {
+		return nil
+	}
+
+	req.Header.Set("Authorization", "Bearer "+a.Token)
+
+	return nil
 }
 
 // minimal request/response types reused by transport
@@ -82,6 +175,18 @@ type DistHTTPLimits struct {
 	Concurrency int
 	// ClientTimeout is the per-request deadline for the dist HTTP client.
 	ClientTimeout time.Duration
+	// TLSConfig (when non-nil) enables TLS for both the dist HTTP server
+	// (wraps the TCP listener with tls.NewListener) and the auto-created
+	// HTTP client (sets Transport.TLSClientConfig). Operators must apply
+	// the same config to every node; mismatched roots/certs cause peer
+	// handshakes to fail. The same struct is shared by server and client
+	// because in this codebase a node is both — but tests / advanced
+	// callers can fork the value and assign different ones if needed.
+	//
+	// For mTLS, set both Certificates (server cert) and ClientCAs +
+	// ClientAuth=tls.RequireAndVerifyClientCert. The auto-client uses
+	// the same cert as its client cert via Certificates[0].
+	TLSConfig *tls.Config
 }
 
 // withDefaults fills any zero-valued field on l with the package default.
@@ -118,7 +223,7 @@ func (l DistHTTPLimits) withDefaults() DistHTTPLimits {
 	return l
 }
 
-func newDistHTTPServer(addr string, limits DistHTTPLimits) *distHTTPServer {
+func newDistHTTPServer(addr string, limits DistHTTPLimits, auth DistHTTPAuth) *distHTTPServer {
 	limits = limits.withDefaults()
 
 	app := fiber.New(fiber.Config{
@@ -129,18 +234,64 @@ func newDistHTTPServer(addr string, limits DistHTTPLimits) *distHTTPServer {
 		Concurrency:  limits.Concurrency,
 	})
 
-	return &distHTTPServer{app: app, addr: addr}
+	return &distHTTPServer{app: app, addr: addr, auth: auth, tlsConfig: limits.TLSConfig}
 }
 
-func (s *distHTTPServer) start(ctx context.Context, dm *DistMemory) error {
-	s.ctx = ctx
+// LastServeError returns the last error captured from the background
+// serve goroutine (typically Listener accept-loop failure or TLS-level
+// rejection). Returns nil when the server shut down cleanly. Replaces
+// the pre-5e silent-swallow pattern where serveErr was assigned to _ and
+// dropped, leaving operators with no signal that the listener died.
+func (s *distHTTPServer) LastServeError() error {
+	if s == nil {
+		return nil
+	}
+
+	if errp := s.serveErr.Load(); errp != nil {
+		return *errp
+	}
+
+	return nil
+}
+
+// wrapAuth returns an auth-checking wrapper around the supplied handler
+// when the server's auth policy is configured; otherwise returns the
+// handler untouched (zero overhead for unauthenticated deployments).
+func (s *distHTTPServer) wrapAuth(handler fiber.Handler) fiber.Handler {
+	if !s.auth.configured() {
+		return handler
+	}
+
+	return func(fctx fiber.Ctx) error {
+		err := s.auth.verify(fctx)
+		if err != nil {
+			return fctx.Status(fiber.StatusUnauthorized).JSON(fiber.Map{constants.ErrorLabel: err.Error()})
+		}
+
+		return handler(fctx)
+	}
+}
+
+// start registers handlers and binds the listener. The caller MUST set
+// s.ctx to the desired handler-side lifecycle context before calling
+// start — that ctx is captured into handler closures and used as the
+// operation ctx for backend ops (applySet, applyRemove). The bindCtx
+// argument controls only the listener.Listen call.
+func (s *distHTTPServer) start(bindCtx context.Context, dm *DistMemory) error {
+	if s.ctx == nil {
+		// Defensive default: fall back to the bind ctx so the server is
+		// usable even if the caller forgot to set a lifecycle ctx. This
+		// matches the pre-5d behavior where start captured its own ctx.
+		s.ctx = bindCtx
+	}
+
 	s.registerSet(dm)
 	s.registerGet(dm)
 	s.registerRemove(dm)
 	s.registerHealth()
 	s.registerMerkle(dm)
 
-	return s.listen(ctx)
+	return s.listen(bindCtx)
 }
 
 // handleSet decodes a httpSetRequest and applies it locally + optionally
@@ -170,7 +321,7 @@ func (s *distHTTPServer) handleSet(fctx fiber.Ctx, dm *DistMemory) error {
 }
 
 func (s *distHTTPServer) registerSet(dm *DistMemory) {
-	handler := func(fctx fiber.Ctx) error { return s.handleSet(fctx, dm) }
+	handler := s.wrapAuth(func(fctx fiber.Ctx) error { return s.handleSet(fctx, dm) })
 	// legacy + canonical paths share the same handler.
 	s.app.Post("/internal/cache/set", handler)
 	s.app.Post("/internal/set", handler)
@@ -198,7 +349,7 @@ func (*distHTTPServer) handleGet(fctx fiber.Ctx, dm *DistMemory) error {
 }
 
 func (s *distHTTPServer) registerGet(dm *DistMemory) {
-	handler := func(fctx fiber.Ctx) error { return s.handleGet(fctx, dm) }
+	handler := s.wrapAuth(func(fctx fiber.Ctx) error { return s.handleGet(fctx, dm) })
 	s.app.Get("/internal/cache/get", handler)
 	s.app.Get("/internal/get", handler)
 }
@@ -223,17 +374,20 @@ func (s *distHTTPServer) handleRemove(fctx fiber.Ctx, dm *DistMemory) error {
 }
 
 func (s *distHTTPServer) registerRemove(dm *DistMemory) {
-	handler := func(fctx fiber.Ctx) error { return s.handleRemove(fctx, dm) }
+	handler := s.wrapAuth(func(fctx fiber.Ctx) error { return s.handleRemove(fctx, dm) })
 	s.app.Delete("/internal/cache/remove", handler)
 	s.app.Delete("/internal/del", handler)
 }
 
 func (s *distHTTPServer) registerHealth() {
-	s.app.Get("/health", func(fctx fiber.Ctx) error { return fctx.SendString("ok") })
+	// Auth-wrapped: when a token is configured, /health requires it too.
+	// Operators who want a public health probe should supply a custom
+	// ServerVerify that exempts the /health path.
+	s.app.Get("/health", s.wrapAuth(func(fctx fiber.Ctx) error { return fctx.SendString("ok") }))
 }
 
 func (s *distHTTPServer) registerMerkle(dm *DistMemory) {
-	s.app.Get("/internal/merkle", func(fctx fiber.Ctx) error {
+	s.app.Get("/internal/merkle", s.wrapAuth(func(fctx fiber.Ctx) error {
 		tree := dm.BuildMerkleTree()
 
 		return fctx.JSON(fiber.Map{
@@ -241,10 +395,10 @@ func (s *distHTTPServer) registerMerkle(dm *DistMemory) {
 			"leaf_hashes": tree.LeafHashes,
 			"chunk_size":  tree.ChunkSize,
 		})
-	})
+	}))
 
 	// naive keys listing for anti-entropy (testing only). Not efficient for large datasets.
-	s.app.Get("/internal/keys", func(fctx fiber.Ctx) error {
+	s.app.Get("/internal/keys", s.wrapAuth(func(fctx fiber.Ctx) error {
 		var keys []string
 
 		for _, shard := range dm.shards {
@@ -258,7 +412,7 @@ func (s *distHTTPServer) registerMerkle(dm *DistMemory) {
 		}
 
 		return fctx.JSON(fiber.Map{"keys": keys})
-	})
+	}))
 }
 
 func (s *distHTTPServer) listen(ctx context.Context) error {
@@ -269,15 +423,26 @@ func (s *distHTTPServer) listen(ctx context.Context) error {
 		return ewrap.Wrap(err, "dist http listen")
 	}
 
+	// Wrap the TCP listener with TLS when configured. Plaintext peers
+	// connecting to a TLS-wrapped listener fail at the handshake — Go
+	// returns a tls.RecordHeaderError to the accept loop, which we
+	// capture in serveErr below.
+	if s.tlsConfig != nil {
+		ln = tls.NewListener(ln, s.tlsConfig)
+	}
+
 	s.ln = ln
 
-	go func() { // capture server errors (ignored intentionally for now)
+	go func() {
 		// DisableStartupMessage avoids fiber's per-instance banner spam,
-		// which would otherwise flood test output at -count=N (see hundreds of
-		// "INFO Server started on..." lines drowning real failures).
+		// which would otherwise flood test output at -count=N (see hundreds
+		// of "INFO Server started on..." lines drowning real failures).
 		serveErr := s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true})
-		if serveErr != nil { // separated for noinlineerr linter
-			_ = serveErr
+		if serveErr != nil {
+			// Stash so operators can read it via LastServeError(); a
+			// listener that crashed silently is the worst kind of
+			// production bug.
+			s.serveErr.Store(&serveErr)
 		}
 	}()
 

@@ -3,6 +3,7 @@ package backend
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
 	"net/http"
 	"net/url"
@@ -24,6 +25,11 @@ type DistHTTPTransport struct {
 	// respBodyLimit caps response bodies so a malicious or compromised
 	// peer cannot OOM the requester via a giant response. <=0 disables.
 	respBodyLimit int64
+	// auth (zero-value = disabled) decorates outgoing requests with a
+	// bearer token or custom signing function. Server-side validation
+	// lives on distHTTPServer; the two share the same DistHTTPAuth
+	// struct when constructed via NewDistHTTPTransportWithAuth.
+	auth DistHTTPAuth
 }
 
 const statusThreshold = 300
@@ -48,12 +54,61 @@ func NewDistHTTPTransport(timeout time.Duration, resolver func(string) (string, 
 // the caller needs to raise/lower the response-body cap or align the client
 // timeout with custom DistHTTPLimits applied to the server.
 func NewDistHTTPTransportWithLimits(limits DistHTTPLimits, resolver func(string) (string, bool)) *DistHTTPTransport {
+	return NewDistHTTPTransportWithAuth(limits, DistHTTPAuth{}, resolver)
+}
+
+// NewDistHTTPTransportWithAuth combines explicit limits and auth policy in
+// a single constructor. DistMemory uses this when WithDistHTTPAuth is set
+// so the auto-created HTTP client signs requests with the same token the
+// server validates against.
+//
+// If limits.TLSConfig is non-nil, the underlying http.Transport is
+// configured with the same *tls.Config used by the server, so client
+// connections to peer https:// endpoints handshake against the same
+// roots and certificates.
+func NewDistHTTPTransportWithAuth(limits DistHTTPLimits, auth DistHTTPAuth, resolver func(string) (string, bool)) *DistHTTPTransport {
 	limits = limits.withDefaults()
 
+	client := &http.Client{Timeout: limits.ClientTimeout}
+	if limits.TLSConfig != nil {
+		// Clone http.DefaultTransport's settings (timeouts, idle pools)
+		// then attach the TLS config. Cloning vs constructing from
+		// scratch avoids reinventing default timeouts that future Go
+		// versions may tighten.
+		tr, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			// Defensive: stdlib has always returned *http.Transport
+			// here, but if a third party rewrote DefaultTransport at
+			// init we still want a usable client.
+			tr = &http.Transport{}
+		} else {
+			tr = tr.Clone()
+		}
+
+		// Clone the TLS config and force HTTP/1.1 via ALPN. The dist
+		// HTTP server is fiber+fasthttp which speaks HTTP/1.1 only —
+		// without this constraint Go's stdlib transport advertises h2
+		// via ALPN, succeeds the handshake, then immediately fails
+		// reading the response with "http2: frame too large, note that
+		// the frame header looked like an HTTP/1.1 header". The
+		// http/1.1 NextProto override is the canonical fix from
+		// net/http docs.
+		tlsConf := limits.TLSConfig.Clone()
+		if len(tlsConf.NextProtos) == 0 {
+			tlsConf.NextProtos = []string{"http/1.1"}
+		}
+
+		tr.TLSClientConfig = tlsConf
+		tr.ForceAttemptHTTP2 = false
+		tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+		client.Transport = tr
+	}
+
 	return &DistHTTPTransport{
-		client:        &http.Client{Timeout: limits.ClientTimeout},
+		client:        client,
 		baseURLFn:     resolver,
 		respBodyLimit: limits.ResponseLimit,
+		auth:          auth,
 	}
 }
 
@@ -417,6 +472,11 @@ func (t *DistHTTPTransport) newNodeRequest(
 	req, err := http.NewRequestWithContext(ctx, method, targetURL.String(), body)
 	if err != nil {
 		return nil, ewrap.Wrap(err, "create new request")
+	}
+
+	err = t.auth.sign(req)
+	if err != nil {
+		return nil, ewrap.Wrap(err, "sign request")
 	}
 
 	return req, nil

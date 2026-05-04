@@ -34,12 +34,14 @@ dictionaryDefinitions: []
 dictionaries: []
 words:
   - acks
+  - ALPN
   - autosync
   - backpressure
   - benchmarkdist
   - benchmem
   - benchtime
   - bitnami
+  - bodyclose
   - bufbuild
   - cacheerrors
   - cachev
@@ -53,7 +55,9 @@ words:
   - Cmder
   - codacy
   - containedctx
+  - contextcheck
   - cpuprofile
+  - cret
   - cyclop
   - daixiang
   - Decr
@@ -64,11 +68,13 @@ words:
   - EDITMSG
   - elif
   - errcheck
+  - errp
   - ewrap
   - excalidraw
   - excludeonly
   - exhaustruct
   - Fanout
+  - fasthttp
   - fatals
   - fctx
   - ferr
@@ -102,6 +108,7 @@ words:
   - HMAC
   - honnef
   - hreq
+  - HTTPTLS
   - hypercache
   - idxs
   - Iface

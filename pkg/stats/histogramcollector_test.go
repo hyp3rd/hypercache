@@ -283,7 +283,7 @@ func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
 		c.Histogram(constants.StatHistogram, int64(i))
 	}
 
-	runtime.GC() //nolint:revive // intentional GC to take a clean heap reading for the leak assertion
+	runtime.GC() //nolint:revive
 
 	var before runtime.MemStats
 
@@ -296,7 +296,7 @@ func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
 		c.Histogram(constants.StatHistogram, int64(i))
 	}
 
-	runtime.GC() //nolint:revive // intentional GC to take a clean heap reading for the leak assertion
+	runtime.GC() //nolint:revive
 
 	var after runtime.MemStats
 

@@ -3,6 +3,7 @@ package hypercache
 import (
 	"context"
 	"net"
+	"sync/atomic"
 	"time"
 
 	fiber "github.com/gofiber/fiber/v3"
@@ -28,14 +29,24 @@ type ManagementHTTPServer struct {
 	ln               net.Listener
 	started          bool
 	listenerDeadline time.Duration
-	// ctx is the server-lifecycle context captured at Start. Handlers
+	// ctx is the server-lifecycle context derived from the ctx supplied
+	// to Start, with its own cancel func wired into Shutdown. Handlers
 	// pass it to backend operations (Clear in particular) so cancellation
-	// propagates from HyperCache.Stop. We do NOT use the per-request
-	// fiber.Ctx for this: fiber.Ctx is pooled and reset after the handler
-	// returns, racing with happy-eyeballs goroutines spawned by
-	// net.(*Dialer).DialContext when DistMemory's transport fan-out goes
-	// through http.Client.Do.
+	// propagates when the operator calls hyperCache.Stop.
+	//
+	// We do NOT use the per-request fiber.Ctx for this: fiber.Ctx is
+	// pooled and reset after the handler returns, racing with
+	// happy-eyeballs goroutines spawned by net.(*Dialer).DialContext
+	// when DistMemory's transport fan-out goes through http.Client.Do.
 	ctx context.Context //nolint:containedctx // captured server lifecycle, not request scope
+	// lifeCancel cancels s.ctx; called from Shutdown so in-flight
+	// handlers see Done() before fiber drains the listeners.
+	lifeCancel context.CancelFunc
+	// serveErr captures the last error returned by app.Listener when the
+	// background serve goroutine exits. Operators can read it via
+	// LastServeError() to surface listener failures (e.g. port already
+	// bound) instead of having them silently swallowed.
+	serveErr atomic.Pointer[error]
 }
 
 // WithMgmtAuth sets an auth function (return error to block).
@@ -127,6 +138,20 @@ func NewManagementHTTPServer(addr string, opts ...ManagementHTTPOption) *Managem
 	return srv
 }
 
+// LastServeError returns the last error captured from the background
+// serve goroutine. Returns nil when the server shut down cleanly.
+func (s *ManagementHTTPServer) LastServeError() error {
+	if s == nil {
+		return nil
+	}
+
+	if errp := s.serveErr.Load(); errp != nil {
+		return *errp
+	}
+
+	return nil
+}
+
 // mountRoutes registers endpoints onto the Fiber app.
 type managementCache interface {
 	GetStats() stats.Stats
@@ -168,7 +193,10 @@ func (s *ManagementHTTPServer) Start(ctx context.Context, hc managementCache) er
 		return nil
 	}
 
-	s.ctx = ctx
+	// Derive a lifecycle ctx so Shutdown can cancel in-flight handlers
+	// independently of the caller's ctx (which usually never cancels —
+	// production code passes context.Background()).
+	s.ctx, s.lifeCancel = context.WithCancel(ctx)
 	s.mountRoutes(hc)
 
 	lc := net.ListenConfig{}
@@ -180,12 +208,15 @@ func (s *ManagementHTTPServer) Start(ctx context.Context, hc managementCache) er
 
 	s.ln = ln
 
-	go func() { // serve in background (optional server errors are ignored intentionally)
+	go func() {
 		// Suppress fiber's startup banner so tests at -count=N do not drown
 		// real failures under hundreds of "INFO Server started on..." lines.
-		err = s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true})
-		if err != nil { // optional server; log hook could be added in future
-			_ = err
+		serveErr := s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true})
+		if serveErr != nil {
+			// Stash so operators can read it via LastServeError(); a
+			// listener that crashed silently is the worst kind of
+			// production bug.
+			s.serveErr.Store(&serveErr)
 		}
 	}()
 
@@ -209,10 +240,14 @@ func (s *ManagementHTTPServer) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	// ShutdownWithContext closes listeners gracefully, waits for in-flight
-	// requests, and force-closes once ctx's deadline elapses. Replaces
-	// the previous go-routine + select pattern that leaked the shutdown
-	// goroutine when our ctx fired first.
+	// Cancel s.ctx first so in-flight handlers see Done() before fiber
+	// starts draining listeners. ShutdownWithContext then closes
+	// listeners gracefully, waits for in-flight requests, and
+	// force-closes once ctx's deadline elapses.
+	if s.lifeCancel != nil {
+		s.lifeCancel()
+	}
+
 	return s.app.ShutdownWithContext(ctx)
 }
 
