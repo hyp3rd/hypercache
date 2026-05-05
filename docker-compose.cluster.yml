@@ -1,0 +1,108 @@
+---
+# 5-node hypercache-server cluster, all sharing one docker network.
+# Each node knows the other four as seeds; replication=3 means every
+# key is held by 3 nodes (tolerates 1 failure with quorum reads).
+#
+# Run with:
+#   docker compose -f docker-compose.cluster.yml up --build
+#
+# Client API is exposed on the host as 8081..8085 mapped to each
+# node's :8080 (the fixed in-container port). Management HTTP is
+# exposed on 9081..9085 mapped to :8081 in-container.
+#
+# Try it:
+#   curl -H 'Authorization: Bearer dev-token' \
+#     -X PUT --data 'hello' http://localhost:8081/v1/cache/greeting
+#   curl -H 'Authorization: Bearer dev-token' http://localhost:8085/v1/cache/greeting
+#   curl -H 'Authorization: Bearer dev-token' http://localhost:9082/cluster/members | jq
+
+x-hypercache-base: &hypercache-base
+  build:
+    context: .
+    dockerfile: cmd/hypercache-server/Dockerfile
+  image: hypercache-server:cluster
+  restart: unless-stopped
+  environment: &hypercache-base-env
+    HYPERCACHE_API_ADDR: ":8080"
+    HYPERCACHE_MGMT_ADDR: ":8081"
+    HYPERCACHE_REPLICATION: "3"
+    HYPERCACHE_CAPACITY: "100000"
+    HYPERCACHE_AUTH_TOKEN: "dev-token"
+    HYPERCACHE_LOG_LEVEL: "info"
+    HYPERCACHE_HEARTBEAT: "1s"
+    HYPERCACHE_INDIRECT_PROBE_K: "2"
+    HYPERCACHE_HINT_TTL: "30s"
+    HYPERCACHE_HINT_REPLAY: "200ms"
+    HYPERCACHE_REBALANCE_INTERVAL: "250ms"
+  networks:
+    - hypercache
+
+services:
+  hypercache-1:
+    <<: *hypercache-base
+    container_name: hypercache-1
+    hostname: hypercache-1
+    ports:
+      - "8081:8080"
+      - "9081:8081"
+    environment:
+      <<: *hypercache-base-env
+      HYPERCACHE_NODE_ID: "node-1"
+      HYPERCACHE_DIST_ADDR: "hypercache-1:7946"
+      HYPERCACHE_SEEDS: "node-2@hypercache-2:7946,node-3@hypercache-3:7946,node-4@hypercache-4:7946,node-5@hypercache-5:7946"
+
+  hypercache-2:
+    <<: *hypercache-base
+    container_name: hypercache-2
+    hostname: hypercache-2
+    ports:
+      - "8082:8080"
+      - "9082:8081"
+    environment:
+      <<: *hypercache-base-env
+      HYPERCACHE_NODE_ID: "node-2"
+      HYPERCACHE_DIST_ADDR: "hypercache-2:7946"
+      HYPERCACHE_SEEDS: "node-1@hypercache-1:7946,node-3@hypercache-3:7946,node-4@hypercache-4:7946,node-5@hypercache-5:7946"
+
+  hypercache-3:
+    <<: *hypercache-base
+    container_name: hypercache-3
+    hostname: hypercache-3
+    ports:
+      - "8083:8080"
+      - "9083:8081"
+    environment:
+      <<: *hypercache-base-env
+      HYPERCACHE_NODE_ID: "node-3"
+      HYPERCACHE_DIST_ADDR: "hypercache-3:7946"
+      HYPERCACHE_SEEDS: "node-1@hypercache-1:7946,node-2@hypercache-2:7946,node-4@hypercache-4:7946,node-5@hypercache-5:7946"
+
+  hypercache-4:
+    <<: *hypercache-base
+    container_name: hypercache-4
+    hostname: hypercache-4
+    ports:
+      - "8084:8080"
+      - "9084:8081"
+    environment:
+      <<: *hypercache-base-env
+      HYPERCACHE_NODE_ID: "node-4"
+      HYPERCACHE_DIST_ADDR: "hypercache-4:7946"
+      HYPERCACHE_SEEDS: "node-1@hypercache-1:7946,node-2@hypercache-2:7946,node-3@hypercache-3:7946,node-5@hypercache-5:7946"
+
+  hypercache-5:
+    <<: *hypercache-base
+    container_name: hypercache-5
+    hostname: hypercache-5
+    ports:
+      - "8085:8080"
+      - "9085:8081"
+    environment:
+      <<: *hypercache-base-env
+      HYPERCACHE_NODE_ID: "node-5"
+      HYPERCACHE_DIST_ADDR: "hypercache-5:7946"
+      HYPERCACHE_SEEDS: "node-1@hypercache-1:7946,node-2@hypercache-2:7946,node-3@hypercache-3:7946,node-4@hypercache-4:7946"
+
+networks:
+  hypercache:
+    name: hypercache-cluster

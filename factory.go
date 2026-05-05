@@ -44,11 +44,17 @@ func (RedisClusterBackendConstructor) Create(
 type DistMemoryBackendConstructor struct{}
 
 // Create creates a new DistMemory backend.
+//
+// Pre-fix this discarded `cfg.DistMemoryOptions` and constructed a
+// default standalone node — every WithDistNode / WithDistSeeds /
+// WithDistReplication call on the Config was a silent no-op, so the
+// cluster never actually clustered. Production deployments wiring a
+// HyperCache around DistMemory MUST receive their option list.
 func (DistMemoryBackendConstructor) Create(
 	ctx context.Context,
-	_ *Config[backend.DistMemory],
+	cfg *Config[backend.DistMemory],
 ) (backend.IBackend[backend.DistMemory], error) {
-	return backend.NewDistMemory(ctx)
+	return backend.NewDistMemory(ctx, cfg.DistMemoryOptions...)
 }
 
 // BackendManager is a factory for creating HyperCache backend instances.

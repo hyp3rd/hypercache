@@ -69,6 +69,7 @@ words:
   - depguard
   - derr
   - distconfig
+  - distroless
   - EDITMSG
   - elif
   - errcheck
@@ -150,6 +151,7 @@ words:
   - nolint
   - nolintlint
   - nonamedreturns
+  - nonroot
   - nosec
   - NOVENDOR
   - paralleltest

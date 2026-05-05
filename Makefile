@@ -27,6 +27,16 @@ build:
 	@echo "Building..."
 	go build -v ./...
 
+start-dev-cluster: stop-dev-cluster
+	@echo "building and lifting a new hypercache stack"
+	@echo
+	COMPOSE_BAKE=true docker compose -f docker-compose.cluster.yml up --build
+
+stop-dev-cluster:
+	@echo "Stopping any previously running stack"
+	@echo
+	docker compose -f docker-compose.cluster.yml down -v --rmi local --remove-orphans
+
 # ci aggregates the gates required before declaring a task done (see AGENTS.md).
 ci: lint typecheck test-race sec build
 	@echo "All CI gates passed."

@@ -1,0 +1,29 @@
+# Keep the build context tight: skip everything that doesn't affect
+# the Go build. Big wins are .git and the __examples directory.
+.git
+.github
+.vscode
+.idea
+.DS_Store
+*.log
+*.tmp
+
+# Example projects — separate go.mod files, not built into the
+# server binary.
+__examples
+
+# Test artifacts.
+*.test
+*.out
+*.prof
+coverage.txt
+bench-*.txt
+
+# Local dev helpers.
+docker-compose.yml
+docker-compose.*.yml
+!docker-compose.cluster.yml
+
+# Docs that don't affect the binary.
+*.md
+docs

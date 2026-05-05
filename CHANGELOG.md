@@ -8,6 +8,66 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Cluster propagation was completely broken.** The
+  `DistMemoryBackendConstructor.Create` factory in `factory.go`
+  silently discarded `cfg.DistMemoryOptions` and called
+  `backend.NewDistMemory(ctx)` with **no arguments**. Every
+  `WithDistNode`, `WithDistSeeds`, `WithDistReplication`, etc. that
+  callers wired through `hypercache.NewConfig` was a silent no-op,
+  leaving every node with a default standalone configuration that
+  only knew itself. The factory now forwards
+  `cfg.DistMemoryOptions...` like every other backend constructor
+  does. This was the production-blocking bug — a Set on one node
+  never reached its peers because the other nodes weren't actually
+  in any node's ring.
+- **Seed addresses without node IDs produced a broken ring.**
+  `initStandaloneMembership` added every seed to membership with an
+  empty `NodeID`, so the consistent-hash ring was built over
+  empty-string owners. `Set` would resolve owners as
+  `["", "", "self"]`, fan-outs to `""` failed with
+  `ErrBackendNotFound`, the writer self-promoted, and the data
+  never reached its peers. The HTTP transport has no node-discovery
+  protocol, so the only way to populate node IDs in the ring is at
+  configuration time. Seeds now accept an optional `id@addr` syntax
+  (`node-2@hypercache-2:7946`) — bare `addr` keeps the legacy
+  empty-ID behavior for in-process tests. Production deployments
+  must use `id@addr`.
+- **`Remove` from a non-primary owner skipped the primary.**
+  `removeImpl` checked `dm.ownsKeyInternal(key)` (true for any
+  ring owner) and ran `applyRemove` locally — but `applyRemove`'s
+  fan-out only covers `owners[1:]` under the assumption the caller
+  is `owners[0]`. When a replica initiated the remove, the primary
+  never got the delete. The Remove path now mirrors Set:
+  non-primary callers forward to the primary, primary applies +
+  fans out. Tombstones now propagate cluster-wide regardless of
+  which node receives the DELETE.
+- **Client API responses were unhelpful.** Set/Remove returned
+  `204 No Content` with empty bodies; errors were raw text via
+  `SendString`. Replaced with structured JSON: PUT/DELETE return
+  `{key, stored|deleted, bytes, node, owners}` so operators can
+  immediately see where the value landed; errors return
+  `{error, code}` with stable code strings (`BAD_REQUEST`,
+  `NOT_FOUND`, `DRAINING`, `INTERNAL`). Added
+  `GET /v1/owners/:key` for client-side ring visibility.
+- **GET response leaked base64 on replicas.** `[]byte` values
+  round-trip through JSON as base64 strings; replica nodes that
+  received a value via the dist HTTP transport stored it as a
+  `string` and returned it raw, so a `PUT world` on node-A
+  resulted in `d29ybGQ=` from `GET` on node-B. The client GET
+  handler now base64-decodes string values when they look like
+  valid byte content, restoring writer-receiver symmetry.
+- **GET on non-owner nodes returned a JSON-quoted base64 string.**
+  The dist HTTP transport's `decodeGetBody` decodes `Item.Value` as
+  `json.RawMessage` to preserve wire-bytes type fidelity. The
+  client GET handler's type switch only matched `[]byte` and
+  `string`, so non-owner GETs (which always go through the
+  forward-fetch path) fell to the `default` branch and re-emitted
+  the value as JSON — producing `"d29ybGQ="` instead of `world`.
+  Added an explicit `json.RawMessage` case that interprets the raw
+  JSON as a string when possible, then base64-decodes if applicable.
+  Verified end-to-end against the 5-node Docker cluster where two
+  of the five nodes are non-owners for any given key.
+
 - **Race in `queueHint` between hint enqueue and hint replay.** Pre-fix,
   the metric write `dm.metrics.hintedBytes.Store(dm.hintBytes)` happened
   *after* releasing `hintsMu`, so a concurrent `adjustHintAccounting`
@@ -121,6 +181,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   procedure, and capacity-planning notes. Cross-links each failure
   mode to the metrics that surface it. Phase C.3 of the
   production-readiness work.
+- **Production server binary** at
+  [`cmd/hypercache-server`](cmd/hypercache-server). Wraps DistMemory
+  via HyperCache and exposes three HTTP listeners per node: the
+  client REST API (`PUT`/`GET`/`DELETE /v1/cache/:key`),
+  management HTTP (`/health`, `/stats`, `/config`,
+  `/dist/metrics`, `/cluster/*`), and the inter-node dist HTTP.
+  12-factor configuration via `HYPERCACHE_*` environment
+  variables — same binary runs in Docker, k8s, and bare-metal.
+  Graceful shutdown on SIGTERM/SIGINT runs Drain → API stop →
+  HyperCache Stop with a 30 s deadline. JSON-formatted slog
+  logger pre-bound with `node_id`. Multi-stage `Dockerfile` builds
+  a distroless static image (`gcr.io/distroless/static-debian12:nonroot`).
+- **5-node local cluster compose** at
+  [`docker-compose.cluster.yml`](docker-compose.cluster.yml) — five
+  hypercache-server nodes on a shared `hypercache-cluster` Docker
+  network, each knowing the other four as seeds, replication=3.
+  Client APIs exposed on host ports 8081–8085, management HTTP on
+  9081–9085. Includes a smoke-test recipe in the
+  [server README](cmd/hypercache-server/README.md). Phase D of the
+  production-readiness work.
+- **`HyperCache.DistDrain(ctx)`** convenience method in
+  [hypercache_dist.go](hypercache_dist.go) — calls Drain on the
+  underlying DistMemory backend when one is configured, no-op on
+  in-memory / Redis backends. Lets the server binary trigger drain
+  without type-asserting through the unexported backend field.
 
 ## [0.5.0] — 2026-05-05
 

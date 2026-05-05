@@ -3220,17 +3220,48 @@ func (dm *DistMemory) initStandaloneMembership() {
 
 	membership.Upsert(dm.localNode)
 
-	for _, seedAddr := range dm.seeds { // add seeds
-		if seedAddr == dm.localNode.Address { // skip self
+	for _, raw := range dm.seeds { // add seeds
+		spec := parseSeedSpec(raw)
+		if spec.addr == dm.localNode.Address { // skip self
 			continue
 		}
 
-		n := cluster.NewNode("", seedAddr)
-		membership.Upsert(n)
+		if spec.id == string(dm.localNode.ID) { // skip self by ID too
+			continue
+		}
+
+		membership.Upsert(cluster.NewNode(spec.id, spec.addr))
 	}
 
 	dm.membership = membership
 	dm.ring = ring
+}
+
+// seedSpec carries a parsed seed entry. Returned as a struct (not two
+// strings) so the same-typed pair doesn't trip the confusing-results
+// linter while staying compatible with the no-named-returns rule.
+type seedSpec struct {
+	id   string
+	addr string
+}
+
+// parseSeedSpec splits a seed entry into id + addr. The accepted
+// shapes are `id@addr` (cross-process clusters where every node
+// must know its peers' IDs to route through the consistent hash
+// ring) and bare `addr` (legacy / in-process tests that rely on
+// heartbeat or gossip to fill the ID later). Everything before the
+// first `@` is the ID; everything after is the address.
+//
+// `id@addr` is what the production server binary uses — without IDs
+// in seeds, the ring lookups return empty owners, every node
+// promotes itself, and writes never propagate across the cluster.
+func parseSeedSpec(raw string) seedSpec {
+	id, addr, found := strings.Cut(raw, "@")
+	if !found {
+		return seedSpec{addr: raw}
+	}
+
+	return seedSpec{id: id, addr: addr}
 }
 
 // heartbeatLoop probes peers and updates membership (best-effort experimental).
@@ -3351,27 +3382,36 @@ func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.
 	return nil
 }
 
-// removeImpl is the business logic for Remove.
+// removeImpl is the business logic for Remove. Mirrors setImpl's
+// primary-routing semantics: only owners[0] runs applyRemove +
+// replica fan-out locally; everyone else (replicas, non-owners)
+// forwards to the primary so the delete reaches every owner.
+//
+// Pre-fix this branched on dm.ownsKeyInternal which returns true for
+// any owner — replica-initiated removes ran applyRemove locally,
+// whose fan-out then skipped owners[0] under the assumption that
+// the caller WAS owners[0]. Net effect: deletes from a replica
+// never reached the primary, and the value lingered until TTL.
 func (dm *DistMemory) removeImpl(ctx context.Context, keys []string) error {
 	if dm.draining.Load() {
 		return sentinel.ErrDraining
 	}
 
 	for _, key := range keys {
-		if dm.ownsKeyInternal(key) { // primary path
+		owners := dm.lookupOwners(key)
+		if len(owners) == 0 {
+			continue
+		}
+
+		if owners[0] == dm.localNode.ID { // primary path
 			dm.applyRemove(ctx, key, true)
 
 			continue
 		}
 
 		transport := dm.loadTransport()
-		if transport == nil { // non-owner without transport
+		if transport == nil { // non-primary without transport
 			return sentinel.ErrNotOwner
-		}
-
-		owners := dm.ring.Lookup(key)
-		if len(owners) == 0 {
-			continue
 		}
 
 		dm.metrics.forwardRemove.Add(1)
