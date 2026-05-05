@@ -21,7 +21,8 @@ func TestHintGlobalCaps(t *testing.T) { //nolint:paralleltest
 	n1 := cluster.NewNode("", "n1")
 	n2 := cluster.NewNode("", "n2")
 
-	b1i, _ := backend.NewDistMemory(ctx,
+	b1i, _ := backend.NewDistMemory(
+		ctx,
 		backend.WithDistMembership(membership, n1),
 		backend.WithDistTransport(transport),
 		backend.WithDistReplication(2),
@@ -32,7 +33,8 @@ func TestHintGlobalCaps(t *testing.T) { //nolint:paralleltest
 		backend.WithDistHintMaxTotal(3), // very small global caps
 		backend.WithDistHintMaxBytes(64),
 	)
-	b2i, _ := backend.NewDistMemory(ctx,
+	b2i, _ := backend.NewDistMemory(
+		ctx,
 		backend.WithDistMembership(membership, n2),
 		backend.WithDistTransport(transport),
 		backend.WithDistReplication(2),

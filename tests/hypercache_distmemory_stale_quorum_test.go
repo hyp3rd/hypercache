@@ -26,7 +26,8 @@ func pickNonAheadRequester(dc *DistCluster, ahead *backend.DistMemory) *backend.
 func TestDistMemoryStaleQuorum(t *testing.T) {
 	t.Parallel()
 
-	dc := SetupInProcessCluster(t, 3,
+	dc := SetupInProcessCluster(
+		t, 3,
 		backend.WithDistReadConsistency(backend.ConsistencyQuorum),
 	)
 

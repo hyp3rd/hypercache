@@ -23,7 +23,8 @@ func TestDistMemory_HandlerCtxCancelsOnStop(t *testing.T) {
 	ctx := context.Background()
 	addr := AllocatePort(t)
 
-	bi, err := backend.NewDistMemory(ctx,
+	bi, err := backend.NewDistMemory(
+		ctx,
 		backend.WithDistNode("life-test", addr),
 		backend.WithDistReplication(1),
 	)

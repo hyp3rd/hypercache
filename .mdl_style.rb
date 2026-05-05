@@ -5,3 +5,11 @@ exclude_rule 'MD013'
 rule 'MD007', :indent => 3
 
 rule "MD029", style => "one"
+
+# Keep-a-Changelog (https://keepachangelog.com) uses repeated `### Added`,
+# `### Fixed`, `### Security` headings under each `## [version]` heading by
+# design. MD024 with the default config flags those as duplicates.
+# allow_different_nesting permits same-text headings as long as they sit
+# under distinct parent headings — which is exactly the Keep-a-Changelog
+# shape, and still catches genuine duplicates within the same section.
+rule "MD024", :allow_different_nesting => true

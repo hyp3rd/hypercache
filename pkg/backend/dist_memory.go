@@ -8,19 +8,32 @@ import (
 	"errors"
 	"hash"
 	"hash/fnv"
+	"log/slog"
 	"math/big"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/hyp3rd/ewrap"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
+
+// distTracerName is the OpenTelemetry instrumentation-library name for
+// dist-backend spans. Stable, package-qualified — operators can grep
+// span streams by it without depending on individual span names.
+const distTracerName = "github.com/hyp3rd/hypercache/pkg/backend"
 
 // Internal tuning constants.
 const (
@@ -157,6 +170,34 @@ type DistMemory struct {
 
 	// stopped guards Stop() against double-invocation (idempotent shutdown).
 	stopped atomic.Bool
+
+	// tracer is the OpenTelemetry tracer used to create spans on the
+	// public Get/Set/Remove ops and on replication fan-out. Defaults
+	// to noop.NewTracerProvider so library code emits no spans unless
+	// the caller opts in via WithDistTracerProvider. The noop tracer's
+	// Span values are zero-allocation, so the always-on instrumentation
+	// is cheap on the hot path when tracing is disabled.
+	tracer trace.Tracer
+
+	// meter is the OpenTelemetry meter used to register observable
+	// counters/gauges that mirror the in-process distMetrics atomics.
+	// Defaults to noop.NewMeterProvider so library code emits no
+	// metrics unless the caller opts in via WithDistMeterProvider.
+	// metricRegistration retains the registration handle returned by
+	// meter.RegisterCallback so Stop can unregister cleanly — without
+	// it the SDK would keep invoking the callback after shutdown.
+	meter              metric.Meter
+	metricRegistration metric.Registration
+
+	// logger is the structured logger used by background loops
+	// (heartbeat, hint replay, rebalance, gossip, merkle sync) and
+	// error surfaces (transport bind failures, sync errors, dropped
+	// hints). Defaults to a no-op handler writing to io.Discard so
+	// library code does not write to stderr unless the caller opts
+	// in via WithDistLogger. All log lines are pre-bound with
+	// `node_id` so operators can grep/filter without the call sites
+	// having to weave the ID through every record.
+	logger *slog.Logger
 }
 
 const (
@@ -195,6 +236,22 @@ const (
 	// ConsistencyAll waits for all owners.
 	ConsistencyAll
 )
+
+// String returns the human-readable form for logs and span attributes.
+// Unknown values render as `consistency(<int>)` rather than panicking
+// so a corrupted/forwards-compatible value still produces useful telemetry.
+func (l ConsistencyLevel) String() string {
+	switch l {
+	case ConsistencyOne:
+		return "ONE"
+	case ConsistencyQuorum:
+		return "QUORUM"
+	case ConsistencyAll:
+		return "ALL"
+	default:
+		return "consistency(" + strconv.Itoa(int(l)) + ")"
+	}
+}
 
 // WithDistReadConsistency sets read consistency (default ONE).
 func WithDistReadConsistency(l ConsistencyLevel) DistMemoryOption {
@@ -433,6 +490,12 @@ func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error {
 
 	remoteTree, err := transport.FetchMerkle(ctx, nodeID)
 	if err != nil {
+		dm.logger.Warn(
+			"merkle sync fetch failed",
+			slog.String("peer_id", nodeID),
+			slog.Any("err", err),
+		)
+
 		return err
 	}
 
@@ -625,6 +688,88 @@ func WithDistHTTPAuth(auth DistHTTPAuth) DistMemoryOption {
 	return func(dm *DistMemory) { dm.httpAuth = auth }
 }
 
+// WithDistLogger supplies a structured logger for the dist backend's
+// background loops (heartbeat, hint replay, rebalance, gossip, merkle
+// auto-sync) and operational error surfaces (HTTP listener failures,
+// transport errors, dropped hints). The supplied logger is wrapped with
+// `node_id` and `component=dist_memory` attributes before use, so call
+// sites do not need to weave the node ID through every record.
+//
+// Pass slog.Default() to inherit the application's logger, or supply a
+// custom *slog.Logger with the desired level / handler. Zero-value (no
+// option call) keeps the dist backend silent — the default uses an
+// io.Discard handler, which means library code never writes to stderr
+// unless the caller opts in.
+//
+// nil is treated as "no change" — useful when callers conditionally
+// build options.
+func WithDistLogger(logger *slog.Logger) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if logger != nil {
+			dm.logger = logger
+		}
+	}
+}
+
+// WithDistTracerProvider supplies an OpenTelemetry TracerProvider for
+// the dist backend. When set, every public Get/Set/Remove call opens a
+// span (`dist.get` / `dist.set` / `dist.remove`) carrying consistency
+// level and key length attributes; replication fan-out adds child spans
+// (`dist.replicate.set` / `dist.replicate.remove`) per peer so operators
+// can see where time is spent under load.
+//
+// Span attributes intentionally omit the cache key value — keys can be
+// PII (user IDs, session tokens). Only `cache.key.length` is recorded.
+// Callers needing the key value should add their own outer span before
+// invoking the dist backend.
+//
+// Pass otel.GetTracerProvider() to inherit the application's globally
+// registered provider, or supply a custom *sdktrace.TracerProvider to
+// route dist spans to a dedicated exporter. nil is treated as "no
+// change" — useful for conditional option building.
+//
+// Library default (no option call) installs a no-op tracer, so library
+// code emits no spans unless the caller opts in.
+func WithDistTracerProvider(tp trace.TracerProvider) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if tp != nil {
+			dm.tracer = tp.Tracer(distTracerName)
+		}
+	}
+}
+
+// WithDistMeterProvider supplies an OpenTelemetry MeterProvider for the
+// dist backend. When set, NewDistMemory registers an observable
+// instrument for every field on DistMetrics — counters for cumulative
+// totals (writes, forwards, hints, rebalance batches, etc.), gauges for
+// current state (active tombstones, hint queue size, alive/suspect/dead
+// member counts) and last-operation latencies (merkle build/diff/fetch
+// nanoseconds, last rebalance/auto-sync duration). Instrument names use
+// the `dist.` prefix so a Prometheus exporter can route them under a
+// dedicated subsystem.
+//
+// A single registered callback drives all instruments: on each
+// collection cycle it takes one Metrics() snapshot and observes every
+// instrument from that snapshot. There is no per-operation overhead
+// when a real meter is configured beyond the existing atomic counters
+// the dist backend already maintains.
+//
+// Pass otel.GetMeterProvider() to inherit the application's globally
+// registered provider, or supply a custom MeterProvider built via the
+// otel/sdk/metric package (typically wrapping a Prometheus exporter or
+// OTLP pipeline). nil is treated as "no change" — useful for
+// conditional option building.
+//
+// Library default (no option call) installs a no-op meter, so library
+// code emits no metrics unless the caller opts in.
+func WithDistMeterProvider(mp metric.MeterProvider) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if mp != nil {
+			dm.meter = mp.Meter(distTracerName)
+		}
+	}
+}
+
 // NewDistMemory creates a new DistMemory backend.
 func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[DistMemory], error) {
 	// Derive a server-lifetime context from the caller's ctx so that:
@@ -658,6 +803,8 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 
 		return nil, authErr
 	}
+
+	dm.installTelemetryDefaults()
 
 	dm.ensureShardConfig()
 	dm.initMembershipIfNeeded()
@@ -790,84 +937,56 @@ func (dm *DistMemory) Count(_ context.Context) int {
 
 // Get fetches item.
 func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) {
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.get",
+		trace.WithAttributes(
+			attribute.Int("cache.key.length", len(key)),
+			attribute.String("dist.consistency", dm.readConsistency.String()),
+		),
+	)
+	defer span.End()
+
 	start := time.Now()
-	defer func() {
-		if dm.latency != nil {
-			dm.latency.observe(opGet, time.Since(start))
-		}
-	}()
+	item, hit := dm.getImpl(ctx, key)
 
-	if dm.readConsistency == ConsistencyOne { // fast local path
-		if it, ok := dm.shardFor(key).items.GetCopy(key); ok {
-			return it, true
-		}
+	span.SetAttributes(attribute.Bool("cache.hit", hit))
+
+	if dm.latency != nil {
+		dm.latency.observe(opGet, time.Since(start))
 	}
 
-	owners := dm.lookupOwners(key)
-	if len(owners) == 0 {
-		return nil, false
-	}
-
-	if dm.readConsistency == ConsistencyOne {
-		return dm.getOne(ctx, key, owners)
-	}
-
-	if dm.parallelReads {
-		return dm.getWithConsistencyParallel(ctx, key, owners)
-	}
-
-	return dm.getWithConsistency(ctx, key, owners)
+	return item, hit
 }
 
 // Set stores item.
 func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error {
-	err := item.Valid()
-	if err != nil {
-		return err
+	validateErr := item.Valid()
+	if validateErr != nil {
+		return validateErr
 	}
+
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.set",
+		trace.WithAttributes(
+			attribute.Int("cache.key.length", len(item.Key)),
+			attribute.String("dist.consistency", dm.writeConsistency.String()),
+		),
+	)
+	defer span.End()
 
 	start := time.Now()
-	defer func() {
-		if dm.latency != nil {
-			dm.latency.observe(opSet, time.Since(start))
-		}
-	}()
 
-	dm.metrics.writeAttempts.Add(1)
-
-	owners := dm.lookupOwners(item.Key)
-	if len(owners) == 0 {
-		return sentinel.ErrNotOwner
+	err := dm.setImpl(ctx, item, span)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 	}
 
-	if owners[0] != dm.localNode.ID { // attempt forward; may promote
-		proceedAsPrimary, ferr := dm.handleForwardPrimary(ctx, owners, item)
-		if ferr != nil {
-			return ferr
-		}
-
-		if !proceedAsPrimary { // forwarded successfully; nothing else to do
-			return nil
-		}
+	if dm.latency != nil {
+		dm.latency.observe(opSet, time.Since(start))
 	}
 
-	// primary path: assign version & timestamp
-	item.Version = dm.versionCounter.Add(1)
-	item.Origin = string(dm.localNode.ID)
-	item.LastUpdated = time.Now()
-	dm.applySet(ctx, item, false)
-
-	acks := 1 + dm.replicateTo(ctx, item, owners[1:])
-	dm.metrics.writeAcks.Add(int64(acks))
-
-	needed := dm.requiredAcks(len(owners), dm.writeConsistency)
-	if acks < needed {
-		dm.metrics.writeQuorumFailures.Add(1)
-
-		return sentinel.ErrQuorumFailed
-	}
-
-	return nil
+	return err
 }
 
 // --- Consistency helper methods. ---
@@ -888,36 +1007,25 @@ func (dm *DistMemory) List(_ context.Context, _ ...IFilter) ([]*cache.Item, erro
 
 // Remove deletes keys.
 func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error {
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.remove",
+		trace.WithAttributes(attribute.Int("dist.keys.count", len(keys))),
+	)
+	defer span.End()
+
 	start := time.Now()
-	defer func() {
-		if dm.latency != nil {
-			dm.latency.observe(opRemove, time.Since(start))
-		}
-	}()
 
-	for _, key := range keys {
-		if dm.ownsKeyInternal(key) { // primary path
-			dm.applyRemove(ctx, key, true)
-
-			continue
-		}
-
-		transport := dm.loadTransport()
-		if transport == nil { // non-owner without transport
-			return sentinel.ErrNotOwner
-		}
-
-		owners := dm.ring.Lookup(key)
-		if len(owners) == 0 {
-			continue
-		}
-
-		dm.metrics.forwardRemove.Add(1)
-
-		_ = transport.ForwardRemove(ctx, string(owners[0]), key, true)
+	err := dm.removeImpl(ctx, keys)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 	}
 
-	return nil
+	if dm.latency != nil {
+		dm.latency.observe(opRemove, time.Since(start))
+	}
+
+	return err
 }
 
 // Clear wipes all shards.
@@ -1244,6 +1352,21 @@ func (dm *DistMemory) Stop(ctx context.Context) error {
 		close(dm.rebalanceStopCh)
 
 		dm.rebalanceStopCh = nil
+	}
+
+	// Unregister the OTel metric callback before tearing down the HTTP
+	// server so the SDK does not invoke a callback against a
+	// half-stopped DistMemory (Metrics() reads membership which is
+	// still safe, but the snapshot would be misleading). Errors are
+	// logged, not propagated — Stop is idempotent and the unregister
+	// path is best-effort.
+	if dm.metricRegistration != nil {
+		err := dm.metricRegistration.Unregister()
+		if err != nil {
+			dm.logger.Error("dist meter: callback unregister failed", slog.Any("err", err))
+		}
+
+		dm.metricRegistration = nil
 	}
 
 	if dm.httpServer != nil {
@@ -1917,7 +2040,19 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) {
 	dm.metrics.rebalancedKeys.Add(1)
 	dm.metrics.rebalancedPrimary.Add(1)
 
-	_ = transport.ForwardSet(ctx, string(owners[0]), item, true)
+	// Fire-and-forget forwarding: failures are dropped silently today
+	// (Phase B will introduce a retry queue). Logging is the minimum
+	// surface so operators can correlate vanished keys with transport
+	// failures during rolling deploys.
+	migrationErr := transport.ForwardSet(ctx, string(owners[0]), item, true)
+	if migrationErr != nil {
+		dm.logger.Warn(
+			"rebalance migration forward failed",
+			slog.String("key", item.Key),
+			slog.String("new_primary", string(owners[0])),
+			slog.Any("err", migrationErr),
+		)
+	}
 
 	// Update originalPrimary so we don't recount repeatedly.
 	sh := dm.shardFor(item.Key)
@@ -2077,13 +2212,27 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 	server := newDistHTTPServer(dm.nodeAddr, limits, dm.httpAuth)
 
 	server.ctx = dm.lifeCtx // handler-side cancellation tied to Stop
+	server.logger = dm.logger
 
 	err := server.start(ctx, dm)
-	if err != nil { // best-effort
+	if err != nil { // best-effort, but the operator must see this
+		dm.logger.Error(
+			"dist HTTP listener bind failed",
+			slog.String("addr", dm.nodeAddr),
+			slog.Any("err", err),
+		)
+
 		return
 	}
 
 	dm.httpServer = server
+
+	dm.logger.Info(
+		"dist HTTP listener started",
+		slog.String("addr", dm.nodeAddr),
+		slog.Bool("tls", limits.TLSConfig != nil),
+		slog.Bool("auth", dm.httpAuth.inboundConfigured()),
+	)
 
 	resolver := dm.makePeerURLResolver(limits)
 
@@ -2353,7 +2502,12 @@ func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replica
 			continue
 		}
 
-		err := transport.ForwardSet(ctx, string(oid), item, false)
+		// Reuse the per-peer child-span helper so the primary-path
+		// fan-out emits the same `dist.replicate.set` spans that
+		// applySet's incoming-replica fan-out emits — operators see a
+		// uniform trace tree regardless of which path drove the
+		// replication.
+		err := dm.replicateSetWithSpan(ctx, transport, oid, item)
 		if err == nil {
 			acks++
 
@@ -2608,6 +2762,13 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 	}
 
 	dm.metrics.hintedDropped.Add(1)
+
+	dm.logger.Warn(
+		"hint dropped after replay error",
+		slog.String("peer_id", nodeID),
+		slog.String("key", entry.item.Key),
+		slog.Any("err", err),
+	)
 
 	return 1
 }
@@ -2992,6 +3153,508 @@ func (dm *DistMemory) ownsKeyInternal(key string) bool {
 	return len(owners) == 0 // empty ring => owner
 }
 
+// getImpl is the business logic for Get, separated so the public Get
+// stays a thin tracing/latency wrapper. The split keeps the tracing
+// wrapper to a literal `defer span.End()`, avoids named returns, and
+// still lets the wrapper set `cache.hit` after the impl returns.
+func (dm *DistMemory) getImpl(ctx context.Context, key string) (*cache.Item, bool) {
+	if dm.readConsistency == ConsistencyOne { // fast local path
+		if it, ok := dm.shardFor(key).items.GetCopy(key); ok {
+			return it, true
+		}
+	}
+
+	owners := dm.lookupOwners(key)
+	if len(owners) == 0 {
+		return nil, false
+	}
+
+	if dm.readConsistency == ConsistencyOne {
+		return dm.getOne(ctx, key, owners)
+	}
+
+	if dm.parallelReads {
+		return dm.getWithConsistencyParallel(ctx, key, owners)
+	}
+
+	return dm.getWithConsistency(ctx, key, owners)
+}
+
+// setImpl is the business logic for Set. Takes the active span as a
+// param so it can attach owners.count / acks attributes mid-flight;
+// returns the operation error for the wrapper to record on the span.
+func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.Span) error {
+	dm.metrics.writeAttempts.Add(1)
+
+	owners := dm.lookupOwners(item.Key)
+	if len(owners) == 0 {
+		return sentinel.ErrNotOwner
+	}
+
+	span.SetAttributes(attribute.Int("dist.owners.count", len(owners)))
+
+	if owners[0] != dm.localNode.ID { // attempt forward; may promote
+		proceedAsPrimary, ferr := dm.handleForwardPrimary(ctx, owners, item)
+		if ferr != nil {
+			return ferr
+		}
+
+		if !proceedAsPrimary { // forwarded successfully; nothing else to do
+			return nil
+		}
+	}
+
+	// primary path: assign version & timestamp
+	item.Version = dm.versionCounter.Add(1)
+	item.Origin = string(dm.localNode.ID)
+	item.LastUpdated = time.Now()
+	dm.applySet(ctx, item, false)
+
+	acks := 1 + dm.replicateTo(ctx, item, owners[1:])
+	dm.metrics.writeAcks.Add(int64(acks))
+
+	span.SetAttributes(attribute.Int("dist.acks", acks))
+
+	needed := dm.requiredAcks(len(owners), dm.writeConsistency)
+	if acks < needed {
+		dm.metrics.writeQuorumFailures.Add(1)
+
+		return sentinel.ErrQuorumFailed
+	}
+
+	return nil
+}
+
+// removeImpl is the business logic for Remove.
+func (dm *DistMemory) removeImpl(ctx context.Context, keys []string) error {
+	for _, key := range keys {
+		if dm.ownsKeyInternal(key) { // primary path
+			dm.applyRemove(ctx, key, true)
+
+			continue
+		}
+
+		transport := dm.loadTransport()
+		if transport == nil { // non-owner without transport
+			return sentinel.ErrNotOwner
+		}
+
+		owners := dm.ring.Lookup(key)
+		if len(owners) == 0 {
+			continue
+		}
+
+		dm.metrics.forwardRemove.Add(1)
+
+		_ = transport.ForwardRemove(ctx, string(owners[0]), key, true)
+	}
+
+	return nil
+}
+
+// distMetricSpec describes one OTel observable instrument backed by a
+// field on DistMetrics. The kind selects between cumulative-counter and
+// gauge semantics (OTel exporters render them differently); `get` reads
+// the value from a DistMetrics snapshot.
+type distMetricSpec struct {
+	name    string
+	desc    string
+	unit    string
+	counter bool // true = ObservableCounter, false = ObservableGauge
+	get     func(DistMetrics) int64
+}
+
+// OTel UCUM-compatible unit annotations for the dist metrics. Pulled
+// out as constants so adjacent table entries don't repeat the literal
+// (and trip the goconst linter).
+const (
+	unitOp         = "{op}"
+	unitProbe      = "{probe}"
+	unitTransition = "{transition}"
+	unitResolution = "{resolution}"
+	unitHint       = "{hint}"
+	unitBytes      = "By"
+	unitSync       = "{sync}"
+	unitKey        = "{key}"
+	unitTick       = "{tick}"
+	unitTombstone  = "{tombstone}"
+	unitAck        = "{ack}"
+	unitBatch      = "{batch}"
+	unitEvent      = "{event}"
+	unitNanos      = "ns"
+	unitNode       = "{node}"
+	unitVersion    = "{version}"
+)
+
+// distMetricSpecs is the registry of every DistMetrics field exposed
+// via OpenTelemetry. Names are dot-separated and `dist.`-prefixed so a
+// Prometheus exporter renders them as `dist_<metric>` under a single
+// subsystem. New atomics on distMetrics MUST be mirrored here — the
+// JSON snapshot at /dist/metrics is the human-facing surface, OTel is
+// the production-pipeline surface, and divergence between them creates
+// confusing operator handoffs.
+//
+//nolint:gochecknoglobals // package-level table is the registration source of truth; alternatives hurt readability
+var distMetricSpecs = []distMetricSpec{
+	// --- Routing / forwarding (cumulative) ---
+	{
+		name: "dist.forward.get", unit: unitOp, counter: true,
+		desc: "Get requests forwarded to a remote owner",
+		get:  func(m DistMetrics) int64 { return m.ForwardGet },
+	},
+	{
+		name: "dist.forward.set", unit: unitOp, counter: true,
+		desc: "Set requests forwarded to a remote primary",
+		get:  func(m DistMetrics) int64 { return m.ForwardSet },
+	},
+	{
+		name: "dist.forward.remove", unit: unitOp, counter: true,
+		desc: "Remove requests forwarded to a remote primary",
+		get:  func(m DistMetrics) int64 { return m.ForwardRemove },
+	},
+	{
+		name: "dist.replica.fanout.set", unit: unitOp, counter: true,
+		desc: "Replica fan-out attempts on Set",
+		get:  func(m DistMetrics) int64 { return m.ReplicaFanoutSet },
+	},
+	{
+		name: "dist.replica.fanout.remove", unit: unitOp, counter: true,
+		desc: "Replica fan-out attempts on Remove",
+		get:  func(m DistMetrics) int64 { return m.ReplicaFanoutRemove },
+	},
+	{
+		name: "dist.read.repair", unit: unitOp, counter: true,
+		desc: "Read-repair operations triggered by stale-replica reads",
+		get:  func(m DistMetrics) int64 { return m.ReadRepair },
+	},
+	{
+		name: "dist.replica.get.miss", unit: unitOp, counter: true,
+		desc: "Replica Get returned not-found for a key the primary holds",
+		get:  func(m DistMetrics) int64 { return m.ReplicaGetMiss },
+	},
+	{
+		name: "dist.read.primary_promote", unit: unitOp, counter: true,
+		desc: "Read path promoted to next owner after primary unreachable",
+		get:  func(m DistMetrics) int64 { return m.ReadPrimaryPromote },
+	},
+
+	// --- Heartbeat / membership transitions (cumulative) ---
+	{
+		name: "dist.heartbeat.success", unit: unitProbe, counter: true,
+		desc: "Successful heartbeat probes",
+		get:  func(m DistMetrics) int64 { return m.HeartbeatSuccess },
+	},
+	{
+		name: "dist.heartbeat.failure", unit: unitProbe, counter: true,
+		desc: "Failed heartbeat probes",
+		get:  func(m DistMetrics) int64 { return m.HeartbeatFailure },
+	},
+	{
+		name: "dist.nodes.suspect", unit: unitTransition, counter: true,
+		desc: "Cumulative peer transitions to suspect state",
+		get:  func(m DistMetrics) int64 { return m.NodesSuspect },
+	},
+	{
+		name: "dist.nodes.dead", unit: unitTransition, counter: true,
+		desc: "Cumulative peer transitions to dead state",
+		get:  func(m DistMetrics) int64 { return m.NodesDead },
+	},
+	{
+		name: "dist.nodes.removed", unit: unitTransition, counter: true,
+		desc: "Cumulative peer prunes from membership",
+		get:  func(m DistMetrics) int64 { return m.NodesRemoved },
+	},
+
+	// --- Versioning (cumulative) ---
+	{
+		name: "dist.version.conflicts", unit: unitResolution, counter: true,
+		desc: "Version-conflict resolutions (later version replaced earlier)",
+		get:  func(m DistMetrics) int64 { return m.VersionConflicts },
+	},
+	{
+		name: "dist.version.tie_breaks", unit: unitResolution, counter: true,
+		desc: "Version-conflict tie-breaks decided by origin",
+		get:  func(m DistMetrics) int64 { return m.VersionTieBreaks },
+	},
+
+	// --- Hinted handoff (cumulative + bytes gauge) ---
+	{
+		name: "dist.hinted.queued", unit: unitHint, counter: true,
+		desc: "Hints queued for unreachable peers",
+		get:  func(m DistMetrics) int64 { return m.HintedQueued },
+	},
+	{
+		name: "dist.hinted.replayed", unit: unitHint, counter: true,
+		desc: "Hints successfully replayed",
+		get:  func(m DistMetrics) int64 { return m.HintedReplayed },
+	},
+	{
+		name: "dist.hinted.expired", unit: unitHint, counter: true,
+		desc: "Hints expired before delivery",
+		get:  func(m DistMetrics) int64 { return m.HintedExpired },
+	},
+	{
+		name: "dist.hinted.dropped", unit: unitHint, counter: true,
+		desc: "Hints dropped after replay error (non-recoverable)",
+		get:  func(m DistMetrics) int64 { return m.HintedDropped },
+	},
+	{
+		name: "dist.hinted.global_dropped", unit: unitHint, counter: true,
+		desc: "Hints dropped due to global queue caps (count/bytes)",
+		get:  func(m DistMetrics) int64 { return m.HintedGlobalDropped },
+	},
+	{
+		name: "dist.hinted.bytes", unit: unitBytes, counter: false,
+		desc: "Approximate total bytes currently queued in hints",
+		get:  func(m DistMetrics) int64 { return m.HintedBytes },
+	},
+
+	// --- Anti-entropy (Merkle) ---
+	{
+		name: "dist.merkle.syncs", unit: unitSync, counter: true,
+		desc: "Completed Merkle sync operations",
+		get:  func(m DistMetrics) int64 { return m.MerkleSyncs },
+	},
+	{
+		name: "dist.merkle.keys_pulled", unit: unitKey, counter: true,
+		desc: "Keys applied during Merkle sync",
+		get:  func(m DistMetrics) int64 { return m.MerkleKeysPulled },
+	},
+	{
+		name: "dist.merkle.last_build_ns", unit: unitNanos, counter: false,
+		desc: "Duration of last Merkle tree build",
+		get:  func(m DistMetrics) int64 { return m.MerkleBuildNanos },
+	},
+	{
+		name: "dist.merkle.last_diff_ns", unit: unitNanos, counter: false,
+		desc: "Duration of last Merkle diff computation",
+		get:  func(m DistMetrics) int64 { return m.MerkleDiffNanos },
+	},
+	{
+		name: "dist.merkle.last_fetch_ns", unit: unitNanos, counter: false,
+		desc: "Duration of last remote Merkle tree fetch",
+		get:  func(m DistMetrics) int64 { return m.MerkleFetchNanos },
+	},
+	{
+		name: "dist.auto_sync.loops", unit: unitTick, counter: true,
+		desc: "Auto-sync ticks executed",
+		get:  func(m DistMetrics) int64 { return m.AutoSyncLoops },
+	},
+	{
+		name: "dist.auto_sync.last_ns", unit: unitNanos, counter: false,
+		desc: "Duration of last auto-sync loop",
+		get:  func(m DistMetrics) int64 { return m.LastAutoSyncNanos },
+	},
+
+	// --- Tombstones ---
+	{
+		name: "dist.tombstones.active", unit: unitTombstone, counter: false,
+		desc: "Approximate active tombstones across all shards",
+		get:  func(m DistMetrics) int64 { return m.TombstonesActive },
+	},
+	{
+		name: "dist.tombstones.purged", unit: unitTombstone, counter: true,
+		desc: "Cumulative tombstones purged by sweeper",
+		get:  func(m DistMetrics) int64 { return m.TombstonesPurged },
+	},
+
+	// --- Writes / quorum ---
+	{
+		name: "dist.write.attempts", unit: unitOp, counter: true,
+		desc: "Total Set operations attempted",
+		get:  func(m DistMetrics) int64 { return m.WriteAttempts },
+	},
+	{
+		name: "dist.write.acks", unit: unitAck, counter: true,
+		desc: "Cumulative Set replica acks (includes primary)",
+		get:  func(m DistMetrics) int64 { return m.WriteAcks },
+	},
+	{
+		name: "dist.write.quorum_failures", unit: unitOp, counter: true,
+		desc: "Set operations that failed quorum",
+		get:  func(m DistMetrics) int64 { return m.WriteQuorumFailures },
+	},
+
+	// --- Rebalance ---
+	{
+		name: "dist.rebalance.keys", unit: unitKey, counter: true,
+		desc: "Keys migrated during rebalance",
+		get:  func(m DistMetrics) int64 { return m.RebalancedKeys },
+	},
+	{
+		name: "dist.rebalance.batches", unit: unitBatch, counter: true,
+		desc: "Rebalance batches processed",
+		get:  func(m DistMetrics) int64 { return m.RebalanceBatches },
+	},
+	{
+		name: "dist.rebalance.throttle", unit: unitEvent, counter: true,
+		desc: "Rebalance throttle events (concurrency cap reached)",
+		get:  func(m DistMetrics) int64 { return m.RebalanceThrottle },
+	},
+	{
+		name: "dist.rebalance.last_ns", unit: unitNanos, counter: false,
+		desc: "Duration of last rebalance scan",
+		get:  func(m DistMetrics) int64 { return m.RebalanceLastNanos },
+	},
+	{
+		name: "dist.rebalance.replica_diff", unit: unitKey, counter: true,
+		desc: "Keys pushed to newly added replicas (replica-only diff)",
+		get:  func(m DistMetrics) int64 { return m.RebalancedReplicaDiff },
+	},
+	{
+		name: "dist.rebalance.replica_diff_throttle", unit: unitEvent, counter: true,
+		desc: "Replica-diff scans that exited early due to per-tick limit",
+		get:  func(m DistMetrics) int64 { return m.RebalanceReplicaDiffThrottle },
+	},
+	{
+		name: "dist.rebalance.primary", unit: unitKey, counter: true,
+		desc: "Keys whose primary ownership changed",
+		get:  func(m DistMetrics) int64 { return m.RebalancedPrimary },
+	},
+
+	// --- Membership state (gauges) ---
+	{
+		name: "dist.members.alive", unit: unitNode, counter: false,
+		desc: "Currently alive members in the cluster",
+		get:  func(m DistMetrics) int64 { return m.MembersAlive },
+	},
+	{
+		name: "dist.members.suspect", unit: unitNode, counter: false,
+		desc: "Currently suspect members in the cluster",
+		get:  func(m DistMetrics) int64 { return m.MembersSuspect },
+	},
+	{
+		name: "dist.members.dead", unit: unitNode, counter: false,
+		desc: "Currently dead members in the cluster",
+		get:  func(m DistMetrics) int64 { return m.MembersDead },
+	},
+	{
+		name: "dist.membership.version", unit: unitVersion, counter: false,
+		desc: "Membership version (monotonic, increments on changes)",
+		get:  func(m DistMetrics) int64 { return int64(m.MembershipVersion) },
+	},
+}
+
+// installTelemetryDefaults wires the no-op fallbacks for logger,
+// tracer, and meter so every call site downstream can use them without
+// nil-checks; binds node identity onto the logger so call sites don't
+// have to re-attach it on every record; and registers the OTel metric
+// callback. Extracted from NewDistMemory to keep that constructor
+// under the function-length lint cap.
+func (dm *DistMemory) installTelemetryDefaults() {
+	if dm.logger == nil {
+		dm.logger = slog.New(slog.DiscardHandler)
+	}
+
+	dm.logger = dm.logger.With(
+		slog.String("component", "dist_memory"),
+		slog.String("node_id", dm.nodeID),
+	)
+
+	if dm.tracer == nil {
+		dm.tracer = noop.NewTracerProvider().Tracer(distTracerName)
+	}
+
+	if dm.meter == nil {
+		dm.meter = metricnoop.NewMeterProvider().Meter(distTracerName)
+	}
+
+	dm.setupOTelMetrics()
+}
+
+// distMetricInstruments holds the OTel observable instruments created
+// for each distMetricSpec. Indexed by spec position so the callback
+// can pair each spec back with its instrument; counter/gauge maps are
+// disjoint.
+type distMetricInstruments struct {
+	counters    map[int]metric.Int64ObservableCounter
+	gauges      map[int]metric.Int64ObservableGauge
+	instruments []metric.Observable
+}
+
+// createInstrument turns one spec into the appropriate observable
+// instrument and stashes it on `inst`. Errors are logged and the spec
+// is skipped — registration glue must never abort cache startup.
+func (dm *DistMemory) createInstrument(idx int, spec distMetricSpec, inst *distMetricInstruments) {
+	if spec.counter {
+		counter, err := dm.meter.Int64ObservableCounter(spec.name,
+			metric.WithDescription(spec.desc), metric.WithUnit(spec.unit))
+		if err != nil {
+			dm.logger.Error("dist meter: counter registration failed",
+				slog.String("metric", spec.name), slog.Any("err", err))
+
+			return
+		}
+
+		inst.counters[idx] = counter
+		inst.instruments = append(inst.instruments, counter)
+
+		return
+	}
+
+	gauge, err := dm.meter.Int64ObservableGauge(spec.name,
+		metric.WithDescription(spec.desc), metric.WithUnit(spec.unit))
+	if err != nil {
+		dm.logger.Error("dist meter: gauge registration failed",
+			slog.String("metric", spec.name), slog.Any("err", err))
+
+		return
+	}
+
+	inst.gauges[idx] = gauge
+	inst.instruments = append(inst.instruments, gauge)
+}
+
+// setupOTelMetrics registers every distMetricSpec as an observable
+// instrument and wires a single callback that observes all of them
+// from one Metrics() snapshot per collection cycle. Failures are
+// logged (not returned) because metric registration is library-side
+// glue: the cache must remain functional even if the meter pipeline
+// rejects an instrument.
+func (dm *DistMemory) setupOTelMetrics() {
+	inst := &distMetricInstruments{
+		counters:    make(map[int]metric.Int64ObservableCounter, len(distMetricSpecs)),
+		gauges:      make(map[int]metric.Int64ObservableGauge, len(distMetricSpecs)),
+		instruments: make([]metric.Observable, 0, len(distMetricSpecs)),
+	}
+
+	for i, spec := range distMetricSpecs {
+		dm.createInstrument(i, spec, inst)
+	}
+
+	if len(inst.instruments) == 0 {
+		return
+	}
+
+	reg, regErr := dm.meter.RegisterCallback(
+		func(_ context.Context, observer metric.Observer) error {
+			snapshot := dm.Metrics()
+
+			for i, spec := range distMetricSpecs {
+				if c, ok := inst.counters[i]; ok {
+					observer.ObserveInt64(c, spec.get(snapshot))
+
+					continue
+				}
+
+				if g, ok := inst.gauges[i]; ok {
+					observer.ObserveInt64(g, spec.get(snapshot))
+				}
+			}
+
+			return nil
+		},
+		inst.instruments...,
+	)
+	if regErr != nil {
+		dm.logger.Error("dist meter: callback registration failed", slog.Any("err", regErr))
+
+		return
+	}
+
+	dm.metricRegistration = reg
+}
+
 // applySet stores item locally and optionally replicates to other owners.
 // replicate indicates whether replication fan-out should occur (false for replica writes).
 func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate bool) {
@@ -3017,8 +3680,30 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 			continue
 		}
 
-		_ = transport.ForwardSet(ctx, string(oid), item, false)
+		_ = dm.replicateSetWithSpan(ctx, transport, oid, item)
 	}
+}
+
+// replicateSetWithSpan opens a child span around a single replica
+// ForwardSet so operators can attribute fan-out latency per peer, and
+// returns the underlying transport error for callers that count acks
+// or queue hints. Used by both applySet's incoming-replica fan-out and
+// the primary Set's replicateTo loop, so the trace tree shape is the
+// same regardless of which path drove the replication.
+func (dm *DistMemory) replicateSetWithSpan(ctx context.Context, transport DistTransport, oid cluster.NodeID, item *cache.Item) error {
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.replicate.set",
+		trace.WithAttributes(attribute.String("peer.id", string(oid))),
+	)
+	defer span.End()
+
+	err := transport.ForwardSet(ctx, string(oid), item, false)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+
+	return err
 }
 
 // recordOriginalPrimary stores first-seen primary owner for key.
@@ -3102,7 +3787,24 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 			continue
 		}
 
-		_ = transport.ForwardRemove(ctx, string(oid), key, false)
+		dm.replicateRemoveWithSpan(ctx, transport, oid, key)
+	}
+}
+
+// replicateRemoveWithSpan mirrors replicateSetWithSpan for tombstone
+// fan-out — keeps the trace tree symmetric so a Set followed by a
+// Remove has the same shape under tracing.
+func (dm *DistMemory) replicateRemoveWithSpan(ctx context.Context, transport DistTransport, oid cluster.NodeID, key string) {
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.replicate.remove",
+		trace.WithAttributes(attribute.String("peer.id", string(oid))),
+	)
+	defer span.End()
+
+	err := transport.ForwardRemove(ctx, string(oid), key, false)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 	}
 }
 
@@ -3153,6 +3855,13 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 		if dm.membership.Remove(node.ID) {
 			dm.metrics.nodesRemoved.Add(1)
 			dm.metrics.nodesDead.Add(1)
+
+			dm.logger.Warn(
+				"peer pruned (dead)",
+				slog.String("peer_id", string(node.ID)),
+				slog.String("peer_addr", node.Address),
+				slog.Duration("elapsed_since_seen", elapsed),
+			)
 		}
 
 		return
@@ -3161,6 +3870,12 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 	if dm.hbSuspectAfter > 0 && elapsed > dm.hbSuspectAfter && node.State == cluster.NodeAlive { // suspect
 		dm.membership.Mark(node.ID, cluster.NodeSuspect)
 		dm.metrics.nodesSuspect.Add(1)
+
+		dm.logger.Info(
+			"peer marked suspect (timeout)",
+			slog.String("peer_id", string(node.ID)),
+			slog.Duration("elapsed_since_seen", elapsed),
+		)
 	}
 
 	transport := dm.loadTransport()
@@ -3179,6 +3894,12 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 		if node.State == cluster.NodeAlive { // escalate
 			dm.membership.Mark(node.ID, cluster.NodeSuspect)
 			dm.metrics.nodesSuspect.Add(1)
+
+			dm.logger.Info(
+				"peer marked suspect (probe failed)",
+				slog.String("peer_id", string(node.ID)),
+				slog.Any("err", err),
+			)
 		}
 
 		return

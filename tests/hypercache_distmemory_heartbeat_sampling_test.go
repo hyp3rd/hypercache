@@ -81,7 +81,8 @@ func TestHeartbeatSamplingAndTransitions(t *testing.T) { //nolint:paralleltest /
 	// under shuffle. Previous values (interval=15ms, dead=90ms) were tight
 	// enough that under heavy parallel test load the heartbeat goroutine could
 	// starve and never advance the dead transition within deadline.
-	b1 := newDistPeerNode(t, membership, transport, "n1",
+	b1 := newDistPeerNode(
+		t, membership, transport, "n1",
 		backend.WithDistHeartbeat(80*time.Millisecond, 320*time.Millisecond, 640*time.Millisecond),
 		backend.WithDistHeartbeatSample(0),
 	)

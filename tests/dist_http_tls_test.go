@@ -76,7 +76,8 @@ func generateTLSConfig(t *testing.T) *tls.Config {
 func newTLSNode(t *testing.T, id, addr string, seeds []string, tlsConfig *tls.Config) *backend.DistMemory {
 	t.Helper()
 
-	bi, err := backend.NewDistMemory(context.Background(),
+	bi, err := backend.NewDistMemory(
+		context.Background(),
 		backend.WithDistNode(id, addr),
 		backend.WithDistSeeds(seeds),
 		backend.WithDistReplication(2),
@@ -161,7 +162,8 @@ func TestDistHTTPTLS_PlaintextPeerRejected(t *testing.T) {
 	tlsConfig := generateTLSConfig(t)
 	addr := AllocatePort(t)
 
-	bi, err := backend.NewDistMemory(context.Background(),
+	bi, err := backend.NewDistMemory(
+		context.Background(),
 		backend.WithDistNode("tls-only", addr),
 		backend.WithDistReplication(1),
 		backend.WithDistHTTPLimits(backend.DistHTTPLimits{TLSConfig: tlsConfig}),

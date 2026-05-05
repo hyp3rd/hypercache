@@ -16,7 +16,8 @@ import (
 func newMerkleNode(t *testing.T, transport *backend.InProcessTransport, id string) *backend.DistMemory {
 	t.Helper()
 
-	bi, err := backend.NewDistMemory(context.Background(),
+	bi, err := backend.NewDistMemory(
+		context.Background(),
 		backend.WithDistNode(id, AllocatePort(t)),
 		backend.WithDistReplication(1),
 		backend.WithDistMerkleChunkSize(2),

@@ -155,7 +155,8 @@ func TestDistMemoryHeartbeatLiveness(t *testing.T) { //nolint:paralleltest // mu
 	membership := cluster.NewMembership(ring)
 	transport := backend.NewInProcessTransport()
 
-	b1 := newDistPeerNode(t, membership, transport, "n1",
+	b1 := newDistPeerNode(
+		t, membership, transport, "n1",
 		backend.WithDistHeartbeat(interval, suspectAfter, deadAfter),
 	)
 	b2 := newDistPeerNode(t, membership, transport, "n2")

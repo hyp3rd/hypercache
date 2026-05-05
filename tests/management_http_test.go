@@ -40,7 +40,8 @@ func TestManagementHTTP_BasicEndpoints(t *testing.T) {
 		t.Fatalf("NewConfig: %v", err)
 	}
 
-	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
+	cfg.HyperCacheOptions = append(
+		cfg.HyperCacheOptions,
 		hypercache.WithEvictionInterval[backend.InMemory](0),
 		hypercache.WithManagementHTTP[backend.InMemory]("127.0.0.1:0"),
 	)

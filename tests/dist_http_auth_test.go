@@ -30,7 +30,8 @@ func newAuthDistNode(t *testing.T, auth backend.DistHTTPAuth) *backend.DistMemor
 	ctx := context.Background()
 	addr := AllocatePort(t)
 
-	bi, err := backend.NewDistMemory(ctx,
+	bi, err := backend.NewDistMemory(
+		ctx,
 		backend.WithDistNode("auth-test", addr),
 		backend.WithDistReplication(1),
 		backend.WithDistHTTPAuth(auth),
@@ -193,7 +194,8 @@ func TestDistHTTPAuth_AcceptsValidToken(t *testing.T) {
 func newAuthReplicatedNode(t *testing.T, id, addr string, seeds []string, auth backend.DistHTTPAuth) *backend.DistMemory {
 	t.Helper()
 
-	bi, err := backend.NewDistMemory(context.Background(),
+	bi, err := backend.NewDistMemory(
+		context.Background(),
 		backend.WithDistNode(id, addr),
 		backend.WithDistSeeds(seeds),
 		backend.WithDistReplication(2),
@@ -286,7 +288,8 @@ func TestDistHTTPAuth_RejectsClientSignOnlyConfig(t *testing.T) {
 
 	addr := AllocatePort(t)
 
-	bi, err := backend.NewDistMemory(context.Background(),
+	bi, err := backend.NewDistMemory(
+		context.Background(),
 		backend.WithDistNode("auth-reject", addr),
 		backend.WithDistReplication(1),
 		backend.WithDistHTTPAuth(backend.DistHTTPAuth{

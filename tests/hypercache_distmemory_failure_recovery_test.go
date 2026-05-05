@@ -60,7 +60,8 @@ func assertNodeFailureMetrics(t *testing.T, m backend.DistMetrics) {
 func TestDistFailureRecovery(t *testing.T) { //nolint:paralleltest // mutates shared transport
 	ctx := context.Background()
 
-	dc := SetupInProcessClusterRF(t, 2, 2,
+	dc := SetupInProcessClusterRF(
+		t, 2, 2,
 		backend.WithDistReplication(2),
 		backend.WithDistHeartbeat(15*time.Millisecond, 40*time.Millisecond, 90*time.Millisecond),
 		backend.WithDistHintTTL(2*time.Minute),

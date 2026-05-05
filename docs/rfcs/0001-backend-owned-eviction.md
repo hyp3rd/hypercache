@@ -253,7 +253,7 @@ Per the RFC's own discipline (`Reject A and revisit if any criterion fails`):
    "slower on Get, semantically-correct LRU." Default stays legacy.
 1. **Do not pursue Option A2** (co-located locks) — the win Option A
    would have justified A2 isn't there to amortize the bigger refactor.
-1. **The "Get does not touch LRU" semantic gap is a separate concern**
+1n. **The "Get does not touch LRU" semantic gap is a separate concern**
    that could be addressed inside the legacy path (have HyperCache.Get
    call `evictionAlgorithm.Get(key)`) at similar cost to the Item-aware
    Touch — i.e., the cost is fundamental to "real LRU", not specific

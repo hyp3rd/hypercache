@@ -37,7 +37,8 @@ func allocatePort(tb testing.TB) string {
 func makePhase1Node(ctx context.Context, t *testing.T, id, addr string, seeds []string) *backend.DistMemory {
 	t.Helper()
 
-	bm, err := backend.NewDistMemory(ctx,
+	bm, err := backend.NewDistMemory(
+		ctx,
 		backend.WithDistNode(id, addr),
 		backend.WithDistSeeds(seeds),
 		backend.WithDistReplication(3),

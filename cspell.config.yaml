@@ -132,6 +132,8 @@ words:
   - longbridgeapp
   - maxmemory
   - memprofile
+  - metricdata
+  - metricnoop
   - Merkle
   - mfinal
   - Mgmt
@@ -146,6 +148,7 @@ words:
   - noctx
   - noinlineerr
   - nolint
+  - nolintlint
   - nonamedreturns
   - nosec
   - NOVENDOR
@@ -162,6 +165,7 @@ words:
   - Repls
   - rerr
   - sarif
+  - sdkmetric
   - sectools
   - securego
   - sess
@@ -180,6 +184,7 @@ words:
   - thelper
   - toplevel
   - tparallel
+  - tracetest
   - traefik
   - ugorji
   - unmarshals
