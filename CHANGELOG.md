@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-05-05
+
+### Security
+
+- **Fixed silent inbound auth bypass when `DistHTTPAuth.ClientSign` was
+  set without a matching inbound verifier.** Previously, a config of
+  `DistHTTPAuth{ClientSign: hmacSign}` flipped the internal `configured`
+  predicate to true (causing the auto-client to sign outbound traffic),
+  but `verify()` had no inbound material and silently allowed every
+  request — so an operator wiring half of an HMAC scheme could end up
+  with signed-out / open-in nodes that looked authenticated. The
+  internal predicate is now split into `inboundConfigured()` /
+  outbound-path checks, and `NewDistMemory` rejects this shape at
+  construction with `sentinel.ErrInsecureAuthConfig`. Operators who
+  legitimately want signed-out / open-in deployments (e.g. inbound is
+  gated by an L4 firewall or service mesh below this server) must opt
+  in via the new `DistHTTPAuth.AllowAnonymousInbound` field. All other
+  configurations (`Token`-only, `Token+ServerVerify`, `Token+ClientSign`,
+  `ServerVerify`-only) are unaffected. Reported by the post-tag
+  security review; addressed before any v2.0.0 public announcement.
+
+### Added
+
+- `DistHTTPAuth.AllowAnonymousInbound` — explicit opt-in for asymmetric
+  signed-out / open-in configurations.
+- `sentinel.ErrInsecureAuthConfig` — surfaced from `NewDistMemory` when
+  the auth policy would silently disable inbound enforcement.
+
 ## [2.0.0] — 2026-05-04
 
 A modernization release. The headline themes:

@@ -616,6 +616,11 @@ func WithDistHTTPLimits(limits DistHTTPLimits) DistMemoryOption {
 // requests with HTTP 401. Like WithDistHTTPLimits this only affects the
 // internal transport; an externally-supplied DistTransport is the
 // caller's responsibility to authenticate.
+//
+// NewDistMemory validates the resulting policy and returns
+// sentinel.ErrInsecureAuthConfig if ClientSign is set without a
+// matching inbound verifier (Token or ServerVerify) and
+// AllowAnonymousInbound is not set — see DistHTTPAuth for the rationale.
 func WithDistHTTPAuth(auth DistHTTPAuth) DistMemoryOption {
 	return func(dm *DistMemory) { dm.httpAuth = auth }
 }
@@ -641,6 +646,17 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 	}
 	for _, opt := range opts {
 		opt(dm)
+	}
+
+	// Reject incoherent auth configs (e.g. ClientSign-only) before
+	// any subsystem captures the policy. validate returns
+	// sentinel.ErrInsecureAuthConfig for the misconfiguration that
+	// previously caused silent inbound bypass.
+	authErr := dm.httpAuth.validate()
+	if authErr != nil {
+		lifeCancel()
+
+		return nil, authErr
 	}
 
 	dm.ensureShardConfig()
