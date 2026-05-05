@@ -10,6 +10,7 @@ import (
 
 	fiber "github.com/gofiber/fiber/v3"
 
+	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
@@ -266,6 +267,133 @@ func TestDistHTTPAuth_ClientSignsRequests(t *testing.T) {
 	}
 
 	t.Fatalf("replication did not propagate to nodeB — client likely failed to sign requests")
+}
+
+// errClientSignInvoked is the sentinel returned by the client-sign hook
+// in TestDistHTTPAuth_RejectsClientSignOnlyConfig — a value the test
+// can identify if the hook were ever invoked (it should not be: the
+// constructor must reject before any HTTP traffic).
+var errClientSignInvoked = errors.New("client sign hook should not run")
+
+// TestDistHTTPAuth_RejectsClientSignOnlyConfig pins the
+// constructor-time guard that prevents the silent-inbound-bypass shape
+// (CVE-style: ClientSign set, no Token, no ServerVerify, no opt-in).
+// Without this guard the dist HTTP server would have signed outbound
+// traffic while accepting unauthenticated inbound — see
+// sentinel.ErrInsecureAuthConfig for the rationale.
+func TestDistHTTPAuth_RejectsClientSignOnlyConfig(t *testing.T) {
+	t.Parallel()
+
+	addr := AllocatePort(t)
+
+	bi, err := backend.NewDistMemory(context.Background(),
+		backend.WithDistNode("auth-reject", addr),
+		backend.WithDistReplication(1),
+		backend.WithDistHTTPAuth(backend.DistHTTPAuth{
+			ClientSign: func(*http.Request) error { return errClientSignInvoked },
+		}),
+	)
+	if !errors.Is(err, sentinel.ErrInsecureAuthConfig) {
+		t.Fatalf("expected ErrInsecureAuthConfig, got err=%v bi=%v", err, bi)
+	}
+
+	if bi != nil {
+		t.Fatalf("expected nil backend on validation failure, got %T", bi)
+	}
+}
+
+// TestDistHTTPAuth_AnonymousInboundOptIn confirms operators can
+// deliberately wire signed-out / open-in deployments by setting
+// AllowAnonymousInbound — used when an L4 firewall or service mesh
+// gates inbound at a layer below this server. The server must accept
+// anonymous /internal/* requests while the auto-client still signs
+// outbound.
+func TestDistHTTPAuth_AnonymousInboundOptIn(t *testing.T) {
+	t.Parallel()
+
+	var signCalls atomic.Int64
+
+	auth := backend.DistHTTPAuth{
+		ClientSign: func(req *http.Request) error {
+			signCalls.Add(1)
+			req.Header.Set("X-Asymmetric-Sig", "ok")
+
+			return nil
+		},
+		AllowAnonymousInbound: true,
+	}
+
+	dm := newAuthDistNode(t, auth)
+
+	// Inbound /internal/get without any auth header must succeed
+	// (returns 404 not-owner because no key is set, but importantly
+	// not 401 — auth is skipped per the explicit opt-in).
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"http://"+dm.LocalNodeAddr()+"/internal/get?key=anything",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("AllowAnonymousInbound did not skip auth wrap; got 401")
+	}
+}
+
+// TestDistHTTPAuth_TokenWithClientSignOverride covers the asymmetric
+// (but valid) shape where Token validates inbound and ClientSign
+// overrides the default outbound header — e.g. a node fronting an HMAC
+// peer mesh while still gating its own inbound on a shared bearer.
+func TestDistHTTPAuth_TokenWithClientSignOverride(t *testing.T) {
+	t.Parallel()
+
+	var signCalls atomic.Int64
+
+	auth := backend.DistHTTPAuth{
+		Token: authTestToken,
+		ClientSign: func(req *http.Request) error {
+			signCalls.Add(1)
+			req.Header.Set("Authorization", "Bearer "+authTestToken)
+
+			return nil
+		},
+	}
+
+	// Construction must succeed — Token covers inbound, ClientSign
+	// overrides outbound, no insecure shape.
+	dm := newAuthDistNode(t, auth)
+
+	// Inbound without a token still 401s (Token-driven inbound).
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"http://"+dm.LocalNodeAddr()+"/internal/get?key=anything",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("Token-inbound did not enforce; got %d", resp.StatusCode)
+	}
 }
 
 // TestDistHTTPAuth_CustomVerify proves the ServerVerify escape hatch is

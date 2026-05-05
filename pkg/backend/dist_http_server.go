@@ -49,24 +49,31 @@ type distHTTPServer struct {
 	serveErr atomic.Pointer[error]
 }
 
-// DistHTTPAuth configures bearer-token authentication for the dist HTTP
-// server (inbound) and the auto-created HTTP client (outbound). Zero-value
-// disables auth — current behavior. When configured, *all* dist endpoints
-// (including /health) require a valid token; operators who want a public
-// health endpoint can supply a custom ServerVerify that exempts that path.
+// DistHTTPAuth configures authentication for the dist HTTP server
+// (inbound) and the auto-created HTTP client (outbound). The two sides
+// are independent: ServerVerify+Token govern inbound validation, while
+// ClientSign+Token govern outbound signing. Zero-value disables both.
 //
-// Most clusters need only Token: every node sets the same string, the
-// server validates incoming Authorization: Bearer <token> headers via
-// constant-time compare, and the client sends the same header on every
-// outgoing request.
+// Symmetric clusters use Token alone: every node sets the same string,
+// the server validates incoming `Authorization: Bearer <token>` via
+// constant-time compare, and the client sends the same header.
 //
-// ServerVerify and ClientSign are escape hatches for JWT, mTLS-derived
-// identity, HMAC signing, etc. When set they fully replace the default
-// token check / header injection.
+// ServerVerify (inbound) and ClientSign (outbound) are escape hatches
+// for JWT, mTLS-derived identity, HMAC signing, etc. When set, each
+// fully replaces the corresponding Token-based default on its side.
+//
+// Asymmetric configs are valid but require explicit intent. In
+// particular, setting ClientSign without any inbound verifier (Token
+// or ServerVerify) is dangerous — the node would sign outbound traffic
+// while accepting unauthenticated inbound. NewDistMemory rejects that
+// shape with sentinel.ErrInsecureAuthConfig. Operators who genuinely
+// want signed-out / open-in (e.g. inbound is gated by an L4 firewall
+// or service mesh) must opt in via AllowAnonymousInbound.
 type DistHTTPAuth struct {
-	// Token is the shared bearer string. When set (and ServerVerify is
-	// nil), the server requires `Authorization: Bearer <token>` on every
-	// request. The auto-created client sends the same header.
+	// Token is the shared bearer string. When set, the server requires
+	// `Authorization: Bearer <token>` on every request (unless
+	// ServerVerify overrides) and the auto-created client sends the
+	// same header (unless ClientSign overrides).
 	Token string
 	// ServerVerify (optional) inspects each incoming request and returns
 	// non-nil to reject with HTTP 401. Use for JWT, OAuth introspection,
@@ -76,17 +83,46 @@ type DistHTTPAuth struct {
 	// Use for HMAC signing, mTLS-derived headers, etc. When set it
 	// replaces the default `Authorization: Bearer <token>` header.
 	ClientSign func(*http.Request) error
+	// AllowAnonymousInbound permits this node to accept inbound requests
+	// without authentication when no inbound verifier is configured
+	// (neither Token nor ServerVerify) but ClientSign is. Without this
+	// flag, that combination is rejected at construction time to prevent
+	// silent inbound bypass when an operator wires only one side of an
+	// HMAC scheme. Setting this flag is an explicit acknowledgment that
+	// inbound traffic is protected at a layer below this server (L4
+	// firewall, service mesh mTLS, etc.).
+	AllowAnonymousInbound bool
 }
 
-// configured reports whether the auth policy is active.
-func (a DistHTTPAuth) configured() bool {
-	return a.Token != "" || a.ServerVerify != nil || a.ClientSign != nil
+// inboundConfigured reports whether server-side validation is active —
+// drives whether incoming requests are auth-checked. ClientSign alone
+// does NOT count: it is an outbound concern. Outbound signing has no
+// equivalent predicate because sign() is already path-specific (it
+// short-circuits when both Token and ClientSign are zero).
+func (a DistHTTPAuth) inboundConfigured() bool {
+	return a.Token != "" || a.ServerVerify != nil
 }
 
-// verify validates the incoming request against the configured policy.
-// Returns nil when the request is authorized, non-nil otherwise. The
-// default (Token-only) check uses constant-time compare to defeat timing
-// side-channels.
+// validate enforces the inbound/outbound coherence rules at construction
+// time. Returns sentinel.ErrInsecureAuthConfig when ClientSign is set
+// without any inbound verifier and the operator has not explicitly
+// opted into anonymous inbound — the configuration shape that previously
+// caused a silent inbound auth bypass.
+func (a DistHTTPAuth) validate() error {
+	signOnly := a.ClientSign != nil && !a.inboundConfigured()
+	if signOnly && !a.AllowAnonymousInbound {
+		return sentinel.ErrInsecureAuthConfig
+	}
+
+	return nil
+}
+
+// verify validates the incoming request against the configured inbound
+// policy. Returns nil when the request is authorized, non-nil otherwise.
+// The default (Token-only) check uses constant-time compare to defeat
+// timing side-channels. Callers must gate this behind inboundConfigured()
+// — verify itself returns nil when no inbound check is configured, which
+// is the intended behavior only when inbound is deliberately open.
 func (a DistHTTPAuth) verify(fctx fiber.Ctx) error {
 	if a.ServerVerify != nil {
 		return a.ServerVerify(fctx)
@@ -255,10 +291,15 @@ func (s *distHTTPServer) LastServeError() error {
 }
 
 // wrapAuth returns an auth-checking wrapper around the supplied handler
-// when the server's auth policy is configured; otherwise returns the
-// handler untouched (zero overhead for unauthenticated deployments).
+// when the server's *inbound* auth policy is configured; otherwise
+// returns the handler untouched (zero overhead for unauthenticated
+// deployments). Outbound-only configs (ClientSign without Token or
+// ServerVerify) intentionally fall through to the bare handler — that
+// shape is rejected at NewDistMemory unless AllowAnonymousInbound is
+// set, which is the operator's explicit acknowledgment that inbound is
+// protected by a layer below this server.
 func (s *distHTTPServer) wrapAuth(handler fiber.Handler) fiber.Handler {
-	if !s.auth.configured() {
+	if !s.auth.inboundConfigured() {
 		return handler
 	}
 

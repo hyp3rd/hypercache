@@ -267,6 +267,8 @@ func TestHistogramStatsCollector_GetStatsSnapshotIsolated(t *testing.T) {
 // TestHistogramStatsCollector_NoMemoryLeak verifies the bounded sample window
 // keeps memory usage flat under sustained recording. The previous
 // implementation appended forever and would grow unbounded.
+//
+//nolint:revive
 func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
 	t.Parallel()
 
@@ -283,7 +285,8 @@ func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
 		c.Histogram(constants.StatHistogram, int64(i))
 	}
 
-	runtime.GC() //nolint:revive
+	// Force a GC to clean up any garbage from priming the buffer, so we start with a clean slate.
+	runtime.GC()
 
 	var before runtime.MemStats
 
@@ -296,7 +299,7 @@ func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
 		c.Histogram(constants.StatHistogram, int64(i))
 	}
 
-	runtime.GC() //nolint:revive
+	runtime.GC()
 
 	var after runtime.MemStats
 
