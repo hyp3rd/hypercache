@@ -58,7 +58,8 @@ func newHintedHandoffNode(t *testing.T, m *cluster.Membership, id string, baseOp
 	opts := make([]backend.DistMemoryOption, 0, len(baseOpts)+2)
 
 	opts = append(opts, baseOpts...)
-	opts = append(opts,
+	opts = append(
+		opts,
 		backend.WithDistNode(id, id),
 		backend.WithDistMembership(m, cluster.NewNode(id, id)),
 	)

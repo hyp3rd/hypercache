@@ -14,7 +14,8 @@ import (
 func TestDistMemoryVersionTieBreak(t *testing.T) { //nolint:paralleltest // mutates shared transport
 	const interval = 5 * time.Millisecond
 
-	dc := SetupInProcessCluster(t, 3,
+	dc := SetupInProcessCluster(
+		t, 3,
 		backend.WithDistReplication(3),
 		backend.WithDistHeartbeat(interval, 0, 0),
 		backend.WithDistReadConsistency(backend.ConsistencyQuorum),

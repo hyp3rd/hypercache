@@ -106,7 +106,8 @@ func TestDistMemory_LoggerEmitsListenerStart(t *testing.T) {
 	handler := newCaptureHandler()
 	logger := slog.New(handler)
 
-	bi, err := backend.NewDistMemory(context.Background(),
+	bi, err := backend.NewDistMemory(
+		context.Background(),
 		backend.WithDistNode("log-test-A", addr),
 		backend.WithDistReplication(1),
 		backend.WithDistLogger(logger),
@@ -170,7 +171,8 @@ func TestDistMemory_LoggerDefaultIsSilent(t *testing.T) {
 
 	addr := AllocatePort(t)
 
-	bi, err := backend.NewDistMemory(context.Background(),
+	bi, err := backend.NewDistMemory(
+		context.Background(),
 		backend.WithDistNode("log-default", addr),
 		backend.WithDistReplication(1),
 	)

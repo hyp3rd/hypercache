@@ -146,6 +146,7 @@ words:
   - noctx
   - noinlineerr
   - nolint
+  - nolintlint
   - nonamedreturns
   - nosec
   - NOVENDOR
@@ -180,6 +181,7 @@ words:
   - thelper
   - toplevel
   - tparallel
+  - tracetest
   - traefik
   - ugorji
   - unmarshals

@@ -41,7 +41,8 @@ func TestManagementHTTPDistMemory(t *testing.T) { //nolint:paralleltest // mgmt 
 		t.Fatalf("NewConfig: %v", err)
 	}
 
-	cfg.HyperCacheOptions = append(cfg.HyperCacheOptions,
+	cfg.HyperCacheOptions = append(
+		cfg.HyperCacheOptions,
 		hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:0"),
 	)
 	cfg.DistMemoryOptions = []backend.DistMemoryOption{

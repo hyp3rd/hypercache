@@ -18,6 +18,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stderr unless the caller opts in. Every record is pre-bound with
   `component=dist_memory` and `node_id=<id>` attributes for grep/filter.
   Phase A.1 of the production-readiness work.
+- **OpenTelemetry tracing on the dist backend.** New
+  `WithDistTracerProvider(trace.TracerProvider)` option opens spans on
+  every public `Get` / `Set` / `Remove`, with child spans
+  (`dist.replicate.set` / `dist.replicate.remove`) per peer during
+  fan-out. Span attributes include `cache.key.length`,
+  `dist.consistency`, `dist.owners.count`, `dist.acks`, `cache.hit`,
+  and `peer.id`. Cache key *values* are intentionally never recorded
+  on spans — keys can be PII (user IDs, session tokens). Library
+  default is a no-op tracer (`noop.NewTracerProvider`), so spans cost
+  nothing unless the caller opts in. New `ConsistencyLevel.String()`
+  method renders consistency levels human-readably for log/span attrs.
+  Phase A.2 of the production-readiness work.
 
 ## [0.5.0] — 2026-05-05
 

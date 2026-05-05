@@ -27,7 +27,8 @@ func TestDistHTTPServer_RejectsOversizedBody(t *testing.T) {
 	ctx := context.Background()
 	addr := AllocatePort(t)
 
-	bi, err := backend.NewDistMemory(ctx,
+	bi, err := backend.NewDistMemory(
+		ctx,
 		backend.WithDistNode("oversized-server", addr),
 		backend.WithDistReplication(1),
 		backend.WithDistHTTPLimits(backend.DistHTTPLimits{BodyLimit: tinyBodyLimit}),
@@ -123,7 +124,8 @@ func TestDistHTTPLimits_DefaultsApply(t *testing.T) {
 	ctx := context.Background()
 	addr := AllocatePort(t)
 
-	bi, err := backend.NewDistMemory(ctx,
+	bi, err := backend.NewDistMemory(
+		ctx,
 		backend.WithDistNode("default-limits", addr),
 		backend.WithDistReplication(1),
 	)
@@ -160,7 +162,8 @@ func TestDistHTTPServer_StopRespectsCanceledContext(t *testing.T) {
 	ctx := context.Background()
 	addr := AllocatePort(t)
 
-	bi, err := backend.NewDistMemory(ctx,
+	bi, err := backend.NewDistMemory(
+		ctx,
 		backend.WithDistNode("stop-test", addr),
 		backend.WithDistReplication(1),
 	)

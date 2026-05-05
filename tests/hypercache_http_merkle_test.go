@@ -24,7 +24,8 @@ func newHTTPMerkleNode(t *testing.T, membership *cluster.Membership, id, addr st
 
 	node := cluster.NewNode("", addr)
 
-	bi, err := backend.NewDistMemory(context.Background(),
+	bi, err := backend.NewDistMemory(
+		context.Background(),
 		backend.WithDistMembership(membership, node),
 		backend.WithDistNode(id, addr),
 		backend.WithDistMerkleChunkSize(2),

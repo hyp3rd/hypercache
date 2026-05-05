@@ -268,7 +268,7 @@ func TestHistogramStatsCollector_GetStatsSnapshotIsolated(t *testing.T) {
 // keeps memory usage flat under sustained recording. The previous
 // implementation appended forever and would grow unbounded.
 //
-//nolint:revive
+//nolint:nolintlint,revive
 func TestHistogramStatsCollector_NoMemoryLeak(t *testing.T) {
 	t.Parallel()
 

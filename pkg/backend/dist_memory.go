@@ -11,17 +11,27 @@ import (
 	"log/slog"
 	"math/big"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/hyp3rd/ewrap"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
+
+// distTracerName is the OpenTelemetry instrumentation-library name for
+// dist-backend spans. Stable, package-qualified — operators can grep
+// span streams by it without depending on individual span names.
+const distTracerName = "github.com/hyp3rd/hypercache/pkg/backend"
 
 // Internal tuning constants.
 const (
@@ -159,6 +169,14 @@ type DistMemory struct {
 	// stopped guards Stop() against double-invocation (idempotent shutdown).
 	stopped atomic.Bool
 
+	// tracer is the OpenTelemetry tracer used to create spans on the
+	// public Get/Set/Remove ops and on replication fan-out. Defaults
+	// to noop.NewTracerProvider so library code emits no spans unless
+	// the caller opts in via WithDistTracerProvider. The noop tracer's
+	// Span values are zero-allocation, so the always-on instrumentation
+	// is cheap on the hot path when tracing is disabled.
+	tracer trace.Tracer
+
 	// logger is the structured logger used by background loops
 	// (heartbeat, hint replay, rebalance, gossip, merkle sync) and
 	// error surfaces (transport bind failures, sync errors, dropped
@@ -206,6 +224,22 @@ const (
 	// ConsistencyAll waits for all owners.
 	ConsistencyAll
 )
+
+// String returns the human-readable form for logs and span attributes.
+// Unknown values render as `consistency(<int>)` rather than panicking
+// so a corrupted/forwards-compatible value still produces useful telemetry.
+func (l ConsistencyLevel) String() string {
+	switch l {
+	case ConsistencyOne:
+		return "ONE"
+	case ConsistencyQuorum:
+		return "QUORUM"
+	case ConsistencyAll:
+		return "ALL"
+	default:
+		return "consistency(" + strconv.Itoa(int(l)) + ")"
+	}
+}
 
 // WithDistReadConsistency sets read consistency (default ONE).
 func WithDistReadConsistency(l ConsistencyLevel) DistMemoryOption {
@@ -444,7 +478,8 @@ func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error {
 
 	remoteTree, err := transport.FetchMerkle(ctx, nodeID)
 	if err != nil {
-		dm.logger.Warn("merkle sync fetch failed",
+		dm.logger.Warn(
+			"merkle sync fetch failed",
 			slog.String("peer_id", nodeID),
 			slog.Any("err", err),
 		)
@@ -664,6 +699,33 @@ func WithDistLogger(logger *slog.Logger) DistMemoryOption {
 	}
 }
 
+// WithDistTracerProvider supplies an OpenTelemetry TracerProvider for
+// the dist backend. When set, every public Get/Set/Remove call opens a
+// span (`dist.get` / `dist.set` / `dist.remove`) carrying consistency
+// level and key length attributes; replication fan-out adds child spans
+// (`dist.replicate.set` / `dist.replicate.remove`) per peer so operators
+// can see where time is spent under load.
+//
+// Span attributes intentionally omit the cache key value — keys can be
+// PII (user IDs, session tokens). Only `cache.key.length` is recorded.
+// Callers needing the key value should add their own outer span before
+// invoking the dist backend.
+//
+// Pass otel.GetTracerProvider() to inherit the application's globally
+// registered provider, or supply a custom *sdktrace.TracerProvider to
+// route dist spans to a dedicated exporter. nil is treated as "no
+// change" — useful for conditional option building.
+//
+// Library default (no option call) installs a no-op tracer, so library
+// code emits no spans unless the caller opts in.
+func WithDistTracerProvider(tp trace.TracerProvider) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if tp != nil {
+			dm.tracer = tp.Tracer(distTracerName)
+		}
+	}
+}
+
 // NewDistMemory creates a new DistMemory backend.
 func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[DistMemory], error) {
 	// Derive a server-lifetime context from the caller's ctx so that:
@@ -711,6 +773,14 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 		slog.String("component", "dist_memory"),
 		slog.String("node_id", dm.nodeID),
 	)
+
+	// Default the tracer to a no-op so call sites can always invoke
+	// tracer.Start without a nil check. The noop tracer's Start returns
+	// a zero-value Span and updated context with no allocation, so the
+	// hot path stays cheap when tracing is disabled.
+	if dm.tracer == nil {
+		dm.tracer = noop.NewTracerProvider().Tracer(distTracerName)
+	}
 
 	dm.ensureShardConfig()
 	dm.initMembershipIfNeeded()
@@ -843,84 +913,56 @@ func (dm *DistMemory) Count(_ context.Context) int {
 
 // Get fetches item.
 func (dm *DistMemory) Get(ctx context.Context, key string) (*cache.Item, bool) {
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.get",
+		trace.WithAttributes(
+			attribute.Int("cache.key.length", len(key)),
+			attribute.String("dist.consistency", dm.readConsistency.String()),
+		),
+	)
+	defer span.End()
+
 	start := time.Now()
-	defer func() {
-		if dm.latency != nil {
-			dm.latency.observe(opGet, time.Since(start))
-		}
-	}()
+	item, hit := dm.getImpl(ctx, key)
 
-	if dm.readConsistency == ConsistencyOne { // fast local path
-		if it, ok := dm.shardFor(key).items.GetCopy(key); ok {
-			return it, true
-		}
+	span.SetAttributes(attribute.Bool("cache.hit", hit))
+
+	if dm.latency != nil {
+		dm.latency.observe(opGet, time.Since(start))
 	}
 
-	owners := dm.lookupOwners(key)
-	if len(owners) == 0 {
-		return nil, false
-	}
-
-	if dm.readConsistency == ConsistencyOne {
-		return dm.getOne(ctx, key, owners)
-	}
-
-	if dm.parallelReads {
-		return dm.getWithConsistencyParallel(ctx, key, owners)
-	}
-
-	return dm.getWithConsistency(ctx, key, owners)
+	return item, hit
 }
 
 // Set stores item.
 func (dm *DistMemory) Set(ctx context.Context, item *cache.Item) error {
-	err := item.Valid()
-	if err != nil {
-		return err
+	validateErr := item.Valid()
+	if validateErr != nil {
+		return validateErr
 	}
+
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.set",
+		trace.WithAttributes(
+			attribute.Int("cache.key.length", len(item.Key)),
+			attribute.String("dist.consistency", dm.writeConsistency.String()),
+		),
+	)
+	defer span.End()
 
 	start := time.Now()
-	defer func() {
-		if dm.latency != nil {
-			dm.latency.observe(opSet, time.Since(start))
-		}
-	}()
 
-	dm.metrics.writeAttempts.Add(1)
-
-	owners := dm.lookupOwners(item.Key)
-	if len(owners) == 0 {
-		return sentinel.ErrNotOwner
+	err := dm.setImpl(ctx, item, span)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 	}
 
-	if owners[0] != dm.localNode.ID { // attempt forward; may promote
-		proceedAsPrimary, ferr := dm.handleForwardPrimary(ctx, owners, item)
-		if ferr != nil {
-			return ferr
-		}
-
-		if !proceedAsPrimary { // forwarded successfully; nothing else to do
-			return nil
-		}
+	if dm.latency != nil {
+		dm.latency.observe(opSet, time.Since(start))
 	}
 
-	// primary path: assign version & timestamp
-	item.Version = dm.versionCounter.Add(1)
-	item.Origin = string(dm.localNode.ID)
-	item.LastUpdated = time.Now()
-	dm.applySet(ctx, item, false)
-
-	acks := 1 + dm.replicateTo(ctx, item, owners[1:])
-	dm.metrics.writeAcks.Add(int64(acks))
-
-	needed := dm.requiredAcks(len(owners), dm.writeConsistency)
-	if acks < needed {
-		dm.metrics.writeQuorumFailures.Add(1)
-
-		return sentinel.ErrQuorumFailed
-	}
-
-	return nil
+	return err
 }
 
 // --- Consistency helper methods. ---
@@ -941,36 +983,25 @@ func (dm *DistMemory) List(_ context.Context, _ ...IFilter) ([]*cache.Item, erro
 
 // Remove deletes keys.
 func (dm *DistMemory) Remove(ctx context.Context, keys ...string) error {
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.remove",
+		trace.WithAttributes(attribute.Int("dist.keys.count", len(keys))),
+	)
+	defer span.End()
+
 	start := time.Now()
-	defer func() {
-		if dm.latency != nil {
-			dm.latency.observe(opRemove, time.Since(start))
-		}
-	}()
 
-	for _, key := range keys {
-		if dm.ownsKeyInternal(key) { // primary path
-			dm.applyRemove(ctx, key, true)
-
-			continue
-		}
-
-		transport := dm.loadTransport()
-		if transport == nil { // non-owner without transport
-			return sentinel.ErrNotOwner
-		}
-
-		owners := dm.ring.Lookup(key)
-		if len(owners) == 0 {
-			continue
-		}
-
-		dm.metrics.forwardRemove.Add(1)
-
-		_ = transport.ForwardRemove(ctx, string(owners[0]), key, true)
+	err := dm.removeImpl(ctx, keys)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 	}
 
-	return nil
+	if dm.latency != nil {
+		dm.latency.observe(opRemove, time.Since(start))
+	}
+
+	return err
 }
 
 // Clear wipes all shards.
@@ -1976,7 +2007,8 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) {
 	// failures during rolling deploys.
 	migrationErr := transport.ForwardSet(ctx, string(owners[0]), item, true)
 	if migrationErr != nil {
-		dm.logger.Warn("rebalance migration forward failed",
+		dm.logger.Warn(
+			"rebalance migration forward failed",
 			slog.String("key", item.Key),
 			slog.String("new_primary", string(owners[0])),
 			slog.Any("err", migrationErr),
@@ -2145,7 +2177,8 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 
 	err := server.start(ctx, dm)
 	if err != nil { // best-effort, but the operator must see this
-		dm.logger.Error("dist HTTP listener bind failed",
+		dm.logger.Error(
+			"dist HTTP listener bind failed",
 			slog.String("addr", dm.nodeAddr),
 			slog.Any("err", err),
 		)
@@ -2155,7 +2188,8 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 
 	dm.httpServer = server
 
-	dm.logger.Info("dist HTTP listener started",
+	dm.logger.Info(
+		"dist HTTP listener started",
 		slog.String("addr", dm.nodeAddr),
 		slog.Bool("tls", limits.TLSConfig != nil),
 		slog.Bool("auth", dm.httpAuth.inboundConfigured()),
@@ -2429,7 +2463,12 @@ func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replica
 			continue
 		}
 
-		err := transport.ForwardSet(ctx, string(oid), item, false)
+		// Reuse the per-peer child-span helper so the primary-path
+		// fan-out emits the same `dist.replicate.set` spans that
+		// applySet's incoming-replica fan-out emits — operators see a
+		// uniform trace tree regardless of which path drove the
+		// replication.
+		err := dm.replicateSetWithSpan(ctx, transport, oid, item)
 		if err == nil {
 			acks++
 
@@ -2685,7 +2724,8 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 
 	dm.metrics.hintedDropped.Add(1)
 
-	dm.logger.Warn("hint dropped after replay error",
+	dm.logger.Warn(
+		"hint dropped after replay error",
 		slog.String("peer_id", nodeID),
 		slog.String("key", entry.item.Key),
 		slog.Any("err", err),
@@ -3074,6 +3114,105 @@ func (dm *DistMemory) ownsKeyInternal(key string) bool {
 	return len(owners) == 0 // empty ring => owner
 }
 
+// getImpl is the business logic for Get, separated so the public Get
+// stays a thin tracing/latency wrapper. The split keeps the tracing
+// wrapper to a literal `defer span.End()`, avoids named returns, and
+// still lets the wrapper set `cache.hit` after the impl returns.
+func (dm *DistMemory) getImpl(ctx context.Context, key string) (*cache.Item, bool) {
+	if dm.readConsistency == ConsistencyOne { // fast local path
+		if it, ok := dm.shardFor(key).items.GetCopy(key); ok {
+			return it, true
+		}
+	}
+
+	owners := dm.lookupOwners(key)
+	if len(owners) == 0 {
+		return nil, false
+	}
+
+	if dm.readConsistency == ConsistencyOne {
+		return dm.getOne(ctx, key, owners)
+	}
+
+	if dm.parallelReads {
+		return dm.getWithConsistencyParallel(ctx, key, owners)
+	}
+
+	return dm.getWithConsistency(ctx, key, owners)
+}
+
+// setImpl is the business logic for Set. Takes the active span as a
+// param so it can attach owners.count / acks attributes mid-flight;
+// returns the operation error for the wrapper to record on the span.
+func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.Span) error {
+	dm.metrics.writeAttempts.Add(1)
+
+	owners := dm.lookupOwners(item.Key)
+	if len(owners) == 0 {
+		return sentinel.ErrNotOwner
+	}
+
+	span.SetAttributes(attribute.Int("dist.owners.count", len(owners)))
+
+	if owners[0] != dm.localNode.ID { // attempt forward; may promote
+		proceedAsPrimary, ferr := dm.handleForwardPrimary(ctx, owners, item)
+		if ferr != nil {
+			return ferr
+		}
+
+		if !proceedAsPrimary { // forwarded successfully; nothing else to do
+			return nil
+		}
+	}
+
+	// primary path: assign version & timestamp
+	item.Version = dm.versionCounter.Add(1)
+	item.Origin = string(dm.localNode.ID)
+	item.LastUpdated = time.Now()
+	dm.applySet(ctx, item, false)
+
+	acks := 1 + dm.replicateTo(ctx, item, owners[1:])
+	dm.metrics.writeAcks.Add(int64(acks))
+
+	span.SetAttributes(attribute.Int("dist.acks", acks))
+
+	needed := dm.requiredAcks(len(owners), dm.writeConsistency)
+	if acks < needed {
+		dm.metrics.writeQuorumFailures.Add(1)
+
+		return sentinel.ErrQuorumFailed
+	}
+
+	return nil
+}
+
+// removeImpl is the business logic for Remove.
+func (dm *DistMemory) removeImpl(ctx context.Context, keys []string) error {
+	for _, key := range keys {
+		if dm.ownsKeyInternal(key) { // primary path
+			dm.applyRemove(ctx, key, true)
+
+			continue
+		}
+
+		transport := dm.loadTransport()
+		if transport == nil { // non-owner without transport
+			return sentinel.ErrNotOwner
+		}
+
+		owners := dm.ring.Lookup(key)
+		if len(owners) == 0 {
+			continue
+		}
+
+		dm.metrics.forwardRemove.Add(1)
+
+		_ = transport.ForwardRemove(ctx, string(owners[0]), key, true)
+	}
+
+	return nil
+}
+
 // applySet stores item locally and optionally replicates to other owners.
 // replicate indicates whether replication fan-out should occur (false for replica writes).
 func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate bool) {
@@ -3099,8 +3238,30 @@ func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate 
 			continue
 		}
 
-		_ = transport.ForwardSet(ctx, string(oid), item, false)
+		_ = dm.replicateSetWithSpan(ctx, transport, oid, item)
 	}
+}
+
+// replicateSetWithSpan opens a child span around a single replica
+// ForwardSet so operators can attribute fan-out latency per peer, and
+// returns the underlying transport error for callers that count acks
+// or queue hints. Used by both applySet's incoming-replica fan-out and
+// the primary Set's replicateTo loop, so the trace tree shape is the
+// same regardless of which path drove the replication.
+func (dm *DistMemory) replicateSetWithSpan(ctx context.Context, transport DistTransport, oid cluster.NodeID, item *cache.Item) error {
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.replicate.set",
+		trace.WithAttributes(attribute.String("peer.id", string(oid))),
+	)
+	defer span.End()
+
+	err := transport.ForwardSet(ctx, string(oid), item, false)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+
+	return err
 }
 
 // recordOriginalPrimary stores first-seen primary owner for key.
@@ -3184,7 +3345,24 @@ func (dm *DistMemory) applyRemove(ctx context.Context, key string, replicate boo
 			continue
 		}
 
-		_ = transport.ForwardRemove(ctx, string(oid), key, false)
+		dm.replicateRemoveWithSpan(ctx, transport, oid, key)
+	}
+}
+
+// replicateRemoveWithSpan mirrors replicateSetWithSpan for tombstone
+// fan-out — keeps the trace tree symmetric so a Set followed by a
+// Remove has the same shape under tracing.
+func (dm *DistMemory) replicateRemoveWithSpan(ctx context.Context, transport DistTransport, oid cluster.NodeID, key string) {
+	ctx, span := dm.tracer.Start(
+		ctx, "dist.replicate.remove",
+		trace.WithAttributes(attribute.String("peer.id", string(oid))),
+	)
+	defer span.End()
+
+	err := transport.ForwardRemove(ctx, string(oid), key, false)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 	}
 }
 
@@ -3236,7 +3414,8 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 			dm.metrics.nodesRemoved.Add(1)
 			dm.metrics.nodesDead.Add(1)
 
-			dm.logger.Warn("peer pruned (dead)",
+			dm.logger.Warn(
+				"peer pruned (dead)",
 				slog.String("peer_id", string(node.ID)),
 				slog.String("peer_addr", node.Address),
 				slog.Duration("elapsed_since_seen", elapsed),
@@ -3250,7 +3429,8 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 		dm.membership.Mark(node.ID, cluster.NodeSuspect)
 		dm.metrics.nodesSuspect.Add(1)
 
-		dm.logger.Info("peer marked suspect (timeout)",
+		dm.logger.Info(
+			"peer marked suspect (timeout)",
 			slog.String("peer_id", string(node.ID)),
 			slog.Duration("elapsed_since_seen", elapsed),
 		)
@@ -3273,7 +3453,8 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 			dm.membership.Mark(node.ID, cluster.NodeSuspect)
 			dm.metrics.nodesSuspect.Add(1)
 
-			dm.logger.Info("peer marked suspect (probe failed)",
+			dm.logger.Info(
+				"peer marked suspect (probe failed)",
 				slog.String("peer_id", string(node.ID)),
 				slog.Any("err", err),
 			)

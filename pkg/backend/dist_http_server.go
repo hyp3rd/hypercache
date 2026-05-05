@@ -495,7 +495,8 @@ func (s *distHTTPServer) listen(ctx context.Context) error {
 			s.serveErr.Store(&serveErr)
 
 			if s.logger != nil {
-				s.logger.Error("dist HTTP serve goroutine exited",
+				s.logger.Error(
+					"dist HTTP serve goroutine exited",
 					slog.String("addr", s.addr),
 					slog.Any("err", serveErr),
 				)

@@ -17,7 +17,8 @@ import (
 func TestWriteQuorumSuccess(t *testing.T) {
 	t.Parallel()
 
-	dc := SetupInProcessClusterRF(t, 3, 2,
+	dc := SetupInProcessClusterRF(
+		t, 3, 2,
 		backend.WithDistReplication(2),
 		backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
 	)
@@ -43,7 +44,8 @@ func TestWriteQuorumSuccess(t *testing.T) {
 func TestWriteQuorumFailure(t *testing.T) {
 	t.Parallel()
 
-	dc := SetupInProcessCluster(t, 3,
+	dc := SetupInProcessCluster(
+		t, 3,
 		backend.WithDistReplication(3),
 		backend.WithDistWriteConsistency(backend.ConsistencyAll),
 		backend.WithDistHintTTL(time.Minute),

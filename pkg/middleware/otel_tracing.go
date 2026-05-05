@@ -56,7 +56,8 @@ func (mw OTelTracingMiddleware) Set(ctx context.Context, key string, value any, 
 	ctx, span := mw.startSpan(
 		ctx, "hypercache.Set",
 		attribute.Int(attrs.AttrKeyLength, len(key)),
-		attribute.Int64(attrs.AttrExpirationMS, expiration.Milliseconds()))
+		attribute.Int64(attrs.AttrExpirationMS, expiration.Milliseconds()),
+	)
 	defer span.End()
 
 	err := mw.next.Set(ctx, key, value, expiration)
@@ -72,7 +73,8 @@ func (mw OTelTracingMiddleware) GetOrSet(ctx context.Context, key string, value 
 	ctx, span := mw.startSpan(
 		ctx, "hypercache.GetOrSet",
 		attribute.Int(attrs.AttrKeyLength, len(key)),
-		attribute.Int64(attrs.AttrExpirationMS, expiration.Milliseconds()))
+		attribute.Int64(attrs.AttrExpirationMS, expiration.Milliseconds()),
+	)
 	defer span.End()
 
 	v, err := mw.next.GetOrSet(ctx, key, value, expiration)

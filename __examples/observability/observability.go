@@ -34,7 +34,8 @@ func main() {
 	tracer := trace.NewNoopTracerProvider().Tracer("hypercache/examples")
 
 	// Apply OTel tracing and metrics middleware.
-	svc = hypercache.ApplyMiddleware(svc,
+	svc = hypercache.ApplyMiddleware(
+		svc,
 		func(next hypercache.Service) hypercache.Service {
 			return middleware.NewOTelTracingMiddleware(next, tracer, middleware.WithCommonAttributes(
 				attribute.String("component", "hypercache"),

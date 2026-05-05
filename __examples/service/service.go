@@ -37,7 +37,8 @@ func main() {
 	logger := log.Default()
 
 	// apply middleware in the same order as you want to execute them
-	svc = hypercache.ApplyMiddleware(svc,
+	svc = hypercache.ApplyMiddleware(
+		svc,
 		// middleware.YourMiddleware,
 		func(next hypercache.Service) hypercache.Service {
 			return middleware.NewLoggingMiddleware(next, logger)
