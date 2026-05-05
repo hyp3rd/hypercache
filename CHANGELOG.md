@@ -6,7 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [2.0.1] — 2026-05-05
+### Added
+
+- **Structured logging on the dist backend.** New `WithDistLogger(*slog.Logger)`
+  option wires a structured logger into the dist backend's background
+  loops (heartbeat, hint replay, rebalance, merkle sync) and operational
+  error surfaces (HTTP listener bind failures, serve-goroutine exits,
+  failed migrations during rebalance, dropped hints, peer state
+  transitions). Library default is silent — `WithDistLogger` not called
+  installs a `slog.DiscardHandler` so the dist backend never writes to
+  stderr unless the caller opts in. Every record is pre-bound with
+  `component=dist_memory` and `node_id=<id>` attributes for grep/filter.
+  Phase A.1 of the production-readiness work.
+
+## [0.5.0] — 2026-05-05
 
 ### Security
 
@@ -25,7 +38,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in via the new `DistHTTPAuth.AllowAnonymousInbound` field. All other
   configurations (`Token`-only, `Token+ServerVerify`, `Token+ClientSign`,
   `ServerVerify`-only) are unaffected. Reported by the post-tag
-  security review; addressed before any v2.0.0 public announcement.
+  security review; addressed before any v0.5.0 public announcement.
 
 ### Added
 
@@ -34,7 +47,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `sentinel.ErrInsecureAuthConfig` — surfaced from `NewDistMemory` when
   the auth policy would silently disable inbound enforcement.
 
-## [2.0.0] — 2026-05-04
+## [0.4.3] — 2026-05-04
 
 A modernization release. The headline themes:
 
@@ -86,7 +99,6 @@ RFCs that informed the design decisions live under [docs/rfcs/](docs/rfcs/).
 ### Performance
 
 Measurements on Apple M4 Pro, `go test -bench`, `count=5`, benchstat.
-Full release snapshot captured in [bench-v2.0.0.txt](bench-v2.0.0.txt).
 
 - **Per-shard atomic `Count`.** `BenchmarkConcurrentMap_Count`:
   53 → ~10 ns/op. `_CountParallel`: 1181 → ~13 ns/op. Eliminates the
@@ -186,5 +198,5 @@ Worth surfacing for contributors:
   [RFC document](docs/rfcs/0001-backend-owned-eviction.md) preserves
   the measurement and the lessons.
 
-[Unreleased]: https://github.com/hyp3rd/hypercache/compare/v2.0.0...HEAD
-[2.0.0]: https://github.com/hyp3rd/hypercache/releases/tag/v2.0.0
+Unreleased: <https://github.com/hyp3rd/hypercache/compare/v0.5.0...HEAD>
+Released: [0.5.0](https://github.com/hyp3rd/hypercache/releases/tag/v0.5.0)

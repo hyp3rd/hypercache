@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -47,6 +48,12 @@ type distHTTPServer struct {
 	// use, TLS handshake failure on accept) instead of having them
 	// silently swallowed.
 	serveErr atomic.Pointer[error]
+	// logger is the structured logger inherited from the parent
+	// DistMemory. Used to surface serve-goroutine errors that previously
+	// only landed in serveErr (LastServeError accessor) — operators
+	// running with a configured logger now see them in their log stream
+	// at the moment of failure, not just on demand.
+	logger *slog.Logger
 }
 
 // DistHTTPAuth configures authentication for the dist HTTP server
@@ -482,8 +489,17 @@ func (s *distHTTPServer) listen(ctx context.Context) error {
 		if serveErr != nil {
 			// Stash so operators can read it via LastServeError(); a
 			// listener that crashed silently is the worst kind of
-			// production bug.
+			// production bug. Also surface to the structured logger when
+			// configured so the failure shows up in the operator's log
+			// stream at the moment it happens, not just on demand.
 			s.serveErr.Store(&serveErr)
+
+			if s.logger != nil {
+				s.logger.Error("dist HTTP serve goroutine exited",
+					slog.String("addr", s.addr),
+					slog.Any("err", serveErr),
+				)
+			}
 		}
 	}()
 

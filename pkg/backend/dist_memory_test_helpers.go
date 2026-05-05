@@ -31,6 +31,7 @@ func (dm *DistMemory) EnableHTTPForTest(ctx context.Context) {
 	server := newDistHTTPServer(dm.nodeAddr, limits, dm.httpAuth)
 
 	server.ctx = dm.lifeCtx // handler-side cancellation tied to Stop
+	server.logger = dm.logger
 
 	err := server.start(ctx, dm)
 	if err != nil {

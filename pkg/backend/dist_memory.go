@@ -8,6 +8,7 @@ import (
 	"errors"
 	"hash"
 	"hash/fnv"
+	"log/slog"
 	"math/big"
 	"slices"
 	"strings"
@@ -157,6 +158,16 @@ type DistMemory struct {
 
 	// stopped guards Stop() against double-invocation (idempotent shutdown).
 	stopped atomic.Bool
+
+	// logger is the structured logger used by background loops
+	// (heartbeat, hint replay, rebalance, gossip, merkle sync) and
+	// error surfaces (transport bind failures, sync errors, dropped
+	// hints). Defaults to a no-op handler writing to io.Discard so
+	// library code does not write to stderr unless the caller opts
+	// in via WithDistLogger. All log lines are pre-bound with
+	// `node_id` so operators can grep/filter without the call sites
+	// having to weave the ID through every record.
+	logger *slog.Logger
 }
 
 const (
@@ -433,6 +444,11 @@ func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error {
 
 	remoteTree, err := transport.FetchMerkle(ctx, nodeID)
 	if err != nil {
+		dm.logger.Warn("merkle sync fetch failed",
+			slog.String("peer_id", nodeID),
+			slog.Any("err", err),
+		)
+
 		return err
 	}
 
@@ -625,6 +641,29 @@ func WithDistHTTPAuth(auth DistHTTPAuth) DistMemoryOption {
 	return func(dm *DistMemory) { dm.httpAuth = auth }
 }
 
+// WithDistLogger supplies a structured logger for the dist backend's
+// background loops (heartbeat, hint replay, rebalance, gossip, merkle
+// auto-sync) and operational error surfaces (HTTP listener failures,
+// transport errors, dropped hints). The supplied logger is wrapped with
+// `node_id` and `component=dist_memory` attributes before use, so call
+// sites do not need to weave the node ID through every record.
+//
+// Pass slog.Default() to inherit the application's logger, or supply a
+// custom *slog.Logger with the desired level / handler. Zero-value (no
+// option call) keeps the dist backend silent — the default uses an
+// io.Discard handler, which means library code never writes to stderr
+// unless the caller opts in.
+//
+// nil is treated as "no change" — useful when callers conditionally
+// build options.
+func WithDistLogger(logger *slog.Logger) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if logger != nil {
+			dm.logger = logger
+		}
+	}
+}
+
 // NewDistMemory creates a new DistMemory backend.
 func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[DistMemory], error) {
 	// Derive a server-lifetime context from the caller's ctx so that:
@@ -658,6 +697,20 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 
 		return nil, authErr
 	}
+
+	// Default the logger to a no-op handler so library code never writes
+	// to stderr unless the caller opts in via WithDistLogger. Bind the
+	// node identity once here so call sites can log without re-attaching
+	// it on every record. Done before subsystem startup so background
+	// loops capture the bound logger when they spawn.
+	if dm.logger == nil {
+		dm.logger = slog.New(slog.DiscardHandler)
+	}
+
+	dm.logger = dm.logger.With(
+		slog.String("component", "dist_memory"),
+		slog.String("node_id", dm.nodeID),
+	)
 
 	dm.ensureShardConfig()
 	dm.initMembershipIfNeeded()
@@ -1917,7 +1970,18 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) {
 	dm.metrics.rebalancedKeys.Add(1)
 	dm.metrics.rebalancedPrimary.Add(1)
 
-	_ = transport.ForwardSet(ctx, string(owners[0]), item, true)
+	// Fire-and-forget forwarding: failures are dropped silently today
+	// (Phase B will introduce a retry queue). Logging is the minimum
+	// surface so operators can correlate vanished keys with transport
+	// failures during rolling deploys.
+	migrationErr := transport.ForwardSet(ctx, string(owners[0]), item, true)
+	if migrationErr != nil {
+		dm.logger.Warn("rebalance migration forward failed",
+			slog.String("key", item.Key),
+			slog.String("new_primary", string(owners[0])),
+			slog.Any("err", migrationErr),
+		)
+	}
 
 	// Update originalPrimary so we don't recount repeatedly.
 	sh := dm.shardFor(item.Key)
@@ -2077,13 +2141,25 @@ func (dm *DistMemory) tryStartHTTP(ctx context.Context) {
 	server := newDistHTTPServer(dm.nodeAddr, limits, dm.httpAuth)
 
 	server.ctx = dm.lifeCtx // handler-side cancellation tied to Stop
+	server.logger = dm.logger
 
 	err := server.start(ctx, dm)
-	if err != nil { // best-effort
+	if err != nil { // best-effort, but the operator must see this
+		dm.logger.Error("dist HTTP listener bind failed",
+			slog.String("addr", dm.nodeAddr),
+			slog.Any("err", err),
+		)
+
 		return
 	}
 
 	dm.httpServer = server
+
+	dm.logger.Info("dist HTTP listener started",
+		slog.String("addr", dm.nodeAddr),
+		slog.Bool("tls", limits.TLSConfig != nil),
+		slog.Bool("auth", dm.httpAuth.inboundConfigured()),
+	)
 
 	resolver := dm.makePeerURLResolver(limits)
 
@@ -2608,6 +2684,12 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 	}
 
 	dm.metrics.hintedDropped.Add(1)
+
+	dm.logger.Warn("hint dropped after replay error",
+		slog.String("peer_id", nodeID),
+		slog.String("key", entry.item.Key),
+		slog.Any("err", err),
+	)
 
 	return 1
 }
@@ -3153,6 +3235,12 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 		if dm.membership.Remove(node.ID) {
 			dm.metrics.nodesRemoved.Add(1)
 			dm.metrics.nodesDead.Add(1)
+
+			dm.logger.Warn("peer pruned (dead)",
+				slog.String("peer_id", string(node.ID)),
+				slog.String("peer_addr", node.Address),
+				slog.Duration("elapsed_since_seen", elapsed),
+			)
 		}
 
 		return
@@ -3161,6 +3249,11 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 	if dm.hbSuspectAfter > 0 && elapsed > dm.hbSuspectAfter && node.State == cluster.NodeAlive { // suspect
 		dm.membership.Mark(node.ID, cluster.NodeSuspect)
 		dm.metrics.nodesSuspect.Add(1)
+
+		dm.logger.Info("peer marked suspect (timeout)",
+			slog.String("peer_id", string(node.ID)),
+			slog.Duration("elapsed_since_seen", elapsed),
+		)
 	}
 
 	transport := dm.loadTransport()
@@ -3179,6 +3272,11 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 		if node.State == cluster.NodeAlive { // escalate
 			dm.membership.Mark(node.ID, cluster.NodeSuspect)
 			dm.metrics.nodesSuspect.Add(1)
+
+			dm.logger.Info("peer marked suspect (probe failed)",
+				slog.String("peer_id", string(node.ID)),
+				slog.Any("err", err),
+			)
 		}
 
 		return
