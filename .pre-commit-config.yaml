@@ -14,16 +14,27 @@ repos:
       - id: debug-statements
       - id: check-yaml
         files: .*\.(yaml|yml)$
-        exclude: mkdocs.yml
-        args: [--allow-multiple-documents]
+        # mkdocs.yml uses custom !! tags PyYAML doesn't grok.
+        # chart/**/templates/ contains Helm templates whose
+        # `{{ ... }}` Go-template syntax PyYAML can't parse —
+        # `helm lint` is the right validator for those.
+        exclude: ^(mkdocs\.yml|chart/.*/templates/.*)$
+        args: [ --allow-multiple-documents ]
       - id: requirements-txt-fixer
       - id: no-commit-to-branch
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.38.0
     hooks:
       - id: yamllint
         files: \.(yaml|yml)$
-        types: [file, yaml]
+        # Same exclusion as check-yaml above — Helm templates
+        # have their own validator (`helm lint`).
+        exclude: ^chart/.*/templates/.*$
+        types: [ file, yaml ]
         entry: yamllint --strict -f parsable
   - repo: https://github.com/hadolint/hadolint
     rev: v2.14.0
@@ -43,7 +54,7 @@ repos:
           - --no-summary
           - --files
           - .git/COMMIT_EDITMSG
-        stages: [commit-msg]
+        stages: [ commit-msg ]
         always_run: true
   - repo: https://github.com/markdownlint/markdownlint.git
     rev: v0.15.0

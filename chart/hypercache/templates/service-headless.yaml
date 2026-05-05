@@ -1,0 +1,32 @@
+---
+# Headless service. ClusterIP=None so each pod gets its own
+# A record (`<podname>.<svcname>.<ns>.svc.cluster.local`) which
+# is what the seed list in the StatefulSet relies on for
+# inter-node dist-HTTP routing. Don't expose this externally —
+# it's a cluster-internal name resolution helper, not a
+# load-balanced endpoint.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hypercache.headlessServiceName" . }}
+  labels:
+    {{- include "hypercache.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true   # peer DNS must resolve before /healthz turns green
+  selector:
+    {{- include "hypercache.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: dist
+      port: {{ .Values.ports.dist }}
+      targetPort: dist
+      protocol: TCP
+    - name: api
+      port: {{ .Values.ports.api }}
+      targetPort: api
+      protocol: TCP
+    - name: mgmt
+      port: {{ .Values.ports.mgmt }}
+      targetPort: mgmt
+      protocol: TCP

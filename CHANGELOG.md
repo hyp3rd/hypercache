@@ -39,6 +39,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (replica path), `json.RawMessage` (non-owner-GET path), and the
   base64-heuristic length floors. Runs without docker for tight
   feedback during development.
+- **GitHub Release automation** —
+  [.github/workflows/release.yml](.github/workflows/release.yml)
+  triggers on `v*.*.*` tag pushes and creates the GitHub Release
+  page via `softprops/action-gh-release@v2`. The release body
+  pins readers to the matching container image tag in GHCR and
+  the CHANGELOG.md at that ref; PR-since-previous-tag notes are
+  appended automatically. Pre-release tags (`v1.2.3-rc1`,
+  `v1.2.3-beta`) are flagged via the `prerelease` field;
+  `workflow_dispatch` lets operators (re-)create a release for
+  an existing tag without re-tagging.
+- **Helm chart for k8s deployment** at
+  [chart/hypercache/](chart/hypercache). Renders into a
+  StatefulSet (stable per-pod hostnames so the `id@addr` seed
+  list resolves deterministically), a headless Service for peer
+  DNS, separate client and management Services, an optional
+  chart-managed Secret for the auth token (or external Secret
+  reference for production rotation), a PodDisruptionBudget
+  (default `minAvailable: 4`), pod anti-affinity, and a
+  hardened pod security context (non-root, read-only rootfs,
+  all caps dropped). The ServiceAccount + Service + StatefulSet
+  composition matches what `helm install` emits via `helm lint`
+  and `helm template` against any kube-version. Configure cluster
+  size, replication factor, capacity, heartbeat, hint TTL,
+  rebalance interval, and resources via standard Helm values —
+  see [chart/hypercache/values.yaml](chart/hypercache/values.yaml)
+  for the full surface.
+- **Pre-commit excludes Helm templates** from `check-yaml` and
+  `yamllint`. Both validators choke on Go-template `{{ ... }}`
+  syntax inside the chart manifests; `helm lint` is the right
+  validator for those, and CI runs that separately.
 - **Multi-arch container image workflow** —
   [.github/workflows/image.yml](.github/workflows/image.yml) builds
   the `hypercache-server` Docker image for `linux/amd64` and

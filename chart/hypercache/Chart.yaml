@@ -1,0 +1,25 @@
+---
+apiVersion: v2
+name: hypercache
+description: Distributed in-memory cache running the hypercache-server binary as a StatefulSet.
+type: application
+
+# version is the chart's own version (bumped per chart change).
+# appVersion tracks the upstream container image tag — keep in sync
+# with the repo's release tags so `helm upgrade` reflects what's
+# running.
+version: 0.1.0
+appVersion: "v0.5.0"
+
+home: https://github.com/hyp3rd/hypercache
+sources:
+  - https://github.com/hyp3rd/hypercache
+
+keywords:
+  - cache
+  - distributed
+  - go
+
+maintainers:
+  - name: hyp3rd
+    url: https://github.com/hyp3rd

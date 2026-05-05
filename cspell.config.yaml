@@ -115,6 +115,7 @@ words:
   - healthz
   - histogramcollector
   - HMAC
+  - hostnames
   - honnef
   - hreq
   - HTTPTLS
@@ -148,6 +149,7 @@ words:
   - mvdan
   - nestif
   - Newf
+  - nindent
   - noctx
   - noinlineerr
   - nolint
@@ -159,6 +161,7 @@ words:
   - paralleltest
   - Pipeliner
   - pluggability
+  - podname
   - popd
   - Prealloc
   - protoc
@@ -168,6 +171,7 @@ words:
   - repls
   - Repls
   - rerr
+  - rootfs
   - sarif
   - sdkmetric
   - sectools
@@ -177,9 +181,12 @@ words:
   - shellcheck
   - skeys
   - SLRU
+  - softprops
   - staticcheck
+  - statefulset
   - stdlib
   - stretchr
+  - svcname
   - strfnv
   - strs
   - subtest
@@ -190,6 +197,8 @@ words:
   - tparallel
   - tracetest
   - traefik
+  - trunc
+  - tunables
   - TTLMs
   - ugorji
   - unmarshals

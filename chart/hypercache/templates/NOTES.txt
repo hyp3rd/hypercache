@@ -1,0 +1,39 @@
+{{ .Chart.Name }} v{{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Cluster size: {{ .Values.replicaCount }} pods, replication factor {{ .Values.cluster.replicationFactor }}.
+
+Endpoints (from inside the cluster):
+
+  Client API : http://{{ include "hypercache.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.client.port }}
+  Management : http://{{ include "hypercache.fullname" . }}-mgmt.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.mgmt.port }}
+
+Per-pod hostnames (for direct dist-HTTP debugging):
+{{- range $i, $_ := until (.Values.replicaCount | int) }}
+  {{ include "hypercache.fullname" $ }}-{{ $i }}.{{ include "hypercache.headlessServiceName" $ }}.{{ $.Release.Namespace }}.svc.cluster.local:{{ $.Values.ports.dist }}
+{{- end }}
+
+Quick verification:
+
+  # Wait for all pods to become Ready.
+  kubectl -n {{ .Release.Namespace }} rollout status statefulset/{{ include "hypercache.fullname" . }}
+
+  # Port-forward the client API to your workstation.
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "hypercache.fullname" . }} 8080:{{ .Values.service.client.port }} &
+
+  # PUT a value and read it back from a different pod via the
+  # service round-robin.
+  curl -X PUT --data 'world' http://localhost:8080/v1/cache/greeting
+  curl http://localhost:8080/v1/cache/greeting    # should print: world
+
+{{- if or .Values.auth.token.value .Values.auth.token.existingSecret }}
+
+Auth is ENABLED — every request must carry an
+`Authorization: Bearer <token>` header. The token is mounted
+{{- if .Values.auth.token.existingSecret }} from existing secret `{{ .Values.auth.token.existingSecret }}` (key `{{ .Values.auth.token.existingSecretKey }}`).
+{{- else }} from the chart-managed secret `{{ include "hypercache.fullname" . }}-auth`.
+{{- end }}
+{{- end }}
+
+Operations runbook: see docs/operations.md in the upstream
+repository for split-brain handling, hint-queue overflow,
+rebalance under load, and replica loss procedures.

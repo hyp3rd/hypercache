@@ -1,0 +1,48 @@
+---
+# Client API service. Routes external (or in-cluster app) traffic
+# to whichever pod is ready — the dist backend's quorum / forward
+# logic re-routes from there to the actual owners. Operators that
+# want sticky sessions can override `service.client.type` to a
+# LoadBalancer with `sessionAffinity: ClientIP`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hypercache.fullname" . }}
+  labels:
+    {{- include "hypercache.labels" . | nindent 4 }}
+  {{- with .Values.service.client.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.client.type }}
+  selector:
+    {{- include "hypercache.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: api
+      port: {{ .Values.service.client.port }}
+      targetPort: api
+      protocol: TCP
+---
+# Management HTTP service. Kept on its own service so operators
+# can lock it down independently (e.g. ClusterIP-only with
+# NetworkPolicy restricting ingress to /metrics scrape pods).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hypercache.fullname" . }}-mgmt
+  labels:
+    {{- include "hypercache.labels" . | nindent 4 }}
+  {{- with .Values.service.mgmt.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.mgmt.type }}
+  selector:
+    {{- include "hypercache.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: mgmt
+      port: {{ .Values.service.mgmt.port }}
+      targetPort: mgmt
+      protocol: TCP
