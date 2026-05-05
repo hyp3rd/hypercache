@@ -1,0 +1,59 @@
+---
+name: cluster
+
+# Cross-process cluster smoke. Boots the 5-node docker-compose
+# stack defined at docker-compose.cluster.yml, waits for every
+# node's /healthz to flip to 200, then runs the assertion script
+# under scripts/tests/. Catches the class of bugs that unit
+# tests miss because they only exercise in-process behavior:
+#   * config not flowing from HyperCache wrapper to DistMemory
+#   * seed lists with empty node IDs producing broken rings
+#   * wire-encoding asymmetries between writer and replica
+#
+# Container logs are dumped on failure so a CI failure is
+# debuggable without re-running locally.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: 5-node smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build cluster image
+        run: |
+          docker compose -f docker-compose.cluster.yml build
+
+      - name: Bring cluster up
+        run: |
+          docker compose -f docker-compose.cluster.yml up -d
+
+      - name: Wait for cluster /healthz
+        run: bash scripts/tests/wait-for-cluster.sh
+
+      - name: Run cross-node smoke
+        run: bash scripts/tests/10-test-cluster-api.sh
+
+      - name: Dump container logs (on failure)
+        if: failure()
+        run: |
+          for c in hypercache-1 hypercache-2 hypercache-3 hypercache-4 hypercache-5; do
+            echo "::group::$c"
+            docker logs --tail 200 "$c" || true
+            echo "::endgroup::"
+          done
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose -f docker-compose.cluster.yml down -v --remove-orphans

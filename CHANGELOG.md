@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Cross-process cluster smoke in CI** —
+  [.github/workflows/cluster.yml](.github/workflows/cluster.yml) boots
+  the 5-node `docker-compose.cluster.yml` stack on every PR/push,
+  waits for `/healthz` on every node, then runs the assertion
+  script at
+  [scripts/tests/10-test-cluster-api.sh](scripts/tests/10-test-cluster-api.sh).
+  Container logs are dumped on failure for debuggability without a
+  re-run. This catches the class of bugs that escaped the previous
+  PR (factory dropped DistMemoryOptions, seeds without IDs,
+  json.RawMessage on non-owner GET) — none would have been
+  detected by unit/integration tests because they only exercised
+  in-process behavior.
+- **`make test-cluster` Makefile target** mirrors the CI flow for
+  local development: brings the cluster up, waits, runs the smoke,
+  and tears down on the way out (preserving the smoke's exit code).
+- **`scripts/tests/wait-for-cluster.sh`** is the polling helper that
+  blocks until every node's `/healthz` returns 200, with a default
+  30-second deadline configurable via `TIMEOUT_SECS`. Used by both
+  the Makefile and the CI workflow so the assertion script downstream
+  never races the listener bind.
+- **`scripts/tests/10-test-cluster-api.sh` hardened** from a
+  print-only smoke into a real regression test: 17 explicit
+  assertions across propagation / wire-encoding / cross-node
+  delete, color-coded `OK`/`FAIL` output, exit code reflects
+  total failure count.
+- **`cmd/hypercache-server/main_test.go`** — fast Go unit tests
+  pinning the wire-encoding contracts on `writeValue` /
+  `decodeBase64Bytes`. Covers `[]byte` (writer path), `string`
+  (replica path), `json.RawMessage` (non-owner-GET path), and the
+  base64-heuristic length floors. Runs without docker for tight
+  feedback during development.
+
 ### Fixed
 
 - **Cluster propagation was completely broken.** The
@@ -77,7 +111,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the migration path swallowed errors silently, so the hint enqueue
   rate from rebalance ticks was much lower.
 
-### Added
+### Added (earlier in this cycle)
 
 - **Structured logging on the dist backend.** New `WithDistLogger(*slog.Logger)`
   option wires a structured logger into the dist backend's background
