@@ -132,6 +132,8 @@ words:
   - longbridgeapp
   - maxmemory
   - memprofile
+  - metricdata
+  - metricnoop
   - Merkle
   - mfinal
   - Mgmt
@@ -163,6 +165,7 @@ words:
   - Repls
   - rerr
   - sarif
+  - sdkmetric
   - sectools
   - securego
   - sess

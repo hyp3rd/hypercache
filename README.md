@@ -137,7 +137,7 @@ Available algorithm names you can pass to `WithEvictionAlgorithm`:
 
 Note: ARC is experimental and isn’t included in the default registry. If you choose to use it, register it manually or enable it explicitly in your build.
 
-#### Sharded eviction (default since v2.0.0)
+#### Sharded eviction (default since v0.5.0)
 
 The configured algorithm is wrapped by a 32-shard router (`pkg/eviction/sharded.go`) that uses the same key hash as `ConcurrentMap` — so a key's data shard and eviction shard line up. This eliminates the global mutex contention single-instance algorithms (LRU/LFU/Clock/CAWOLFU) suffer from. Total capacity is honored within ±32 (one slot of slack per shard), and items evict per-shard rather than in strict global LRU/LFU order.
 
@@ -263,7 +263,7 @@ Limitations / not yet implemented:
 - Compression on the wire.
 - Persistence / durability (out of scope presently).
 
-#### Transport hardening (since v2.0.0)
+#### Transport hardening (since v0.5.0)
 
 The dist HTTP server and the auto-created HTTP client share a single configuration surface — apply the same option to every node in the cluster.
 
@@ -347,7 +347,7 @@ Test helpers `AddPeer` and `RemovePeer` simulate join / leave events that trigge
 | Advanced versioning (HLC/vector) | Planned |
 | Client SDK (direct routing) | Planned |
 | Tracing spans | Planned |
-| Security (TLS/auth) | Done (since v2.0.0; see "Transport hardening") |
+| Security (TLS/auth) | Done (since v0.5.0; see "Transport hardening") |
 | Compression | Planned |
 | Persistence | Out of scope (current phase) |
 | Chaos / fault injection | Planned |

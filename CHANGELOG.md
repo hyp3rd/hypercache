@@ -30,6 +30,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nothing unless the caller opts in. New `ConsistencyLevel.String()`
   method renders consistency levels human-readably for log/span attrs.
   Phase A.2 of the production-readiness work.
+- **OpenTelemetry metrics on the dist backend.** New
+  `WithDistMeterProvider(metric.MeterProvider)` option registers an
+  observable instrument for every field on `DistMetrics` — counters
+  for cumulative totals (`dist.write.attempts`, `dist.forward.*`,
+  `dist.hinted.*`, `dist.merkle.syncs`, `dist.rebalance.*`, etc.),
+  gauges for current state (`dist.members.alive`,
+  `dist.tombstones.active`, `dist.hinted.bytes`, last-operation
+  latencies in nanoseconds, etc.). A single registered callback
+  observes all instruments from one `Metrics()` snapshot per
+  collection cycle, so there is no per-operation overhead beyond the
+  existing atomic counters. Names use the `dist.` prefix so a
+  Prometheus exporter renders them under a single subsystem.
+  `Stop` unregisters the callback so the SDK does not invoke it
+  against a stopped backend. Library default is a no-op meter, so
+  metrics cost nothing unless the caller opts in. Phase A.3 of the
+  production-readiness work.
 
 ## [0.5.0] — 2026-05-05
 
