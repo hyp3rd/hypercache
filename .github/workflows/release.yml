@@ -1,0 +1,83 @@
+---
+name: release
+
+# Create the GitHub Release page on every `v*.*.*` tag push. Notes
+# are auto-generated from PRs merged since the previous tag; a small
+# header points readers at the CHANGELOG (which is the source of
+# truth for the *operator-facing* summary) and at the matching
+# container image published by image.yml.
+#
+# This workflow does NOT build artifacts — the container image is
+# the canonical artifact and image.yml owns it. If a future release
+# needs binary tarballs, add a separate matrix-build job here.
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)create a release for'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Fetch the full history so the auto-notes generator can
+          # diff against the previous tag.
+          fetch-depth: 0
+
+      - name: Resolve tag ref
+        id: tag
+        run: |
+          # workflow_dispatch passes `inputs.tag`; tag pushes use
+          # GITHUB_REF_NAME. Either way we end up with a clean
+          # `v1.2.3`-style identifier in the output.
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compose release body header
+        id: body
+        run: |
+          # The header pins readers to the canonical sources of
+          # truth: the CHANGELOG (operator-facing summary) and the
+          # container image (the canonical artifact). The
+          # auto-generated PR list shows up directly underneath
+          # via softprops's `generate_release_notes: true`.
+          tag="${{ steps.tag.outputs.name }}"
+          {
+            echo "## hypercache ${tag}"
+            echo ""
+            echo "**Container image:** \`ghcr.io/${{ github.repository }}/hypercache-server:${tag}\`"
+            echo ""
+            echo "See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${tag}/CHANGELOG.md) for the operator-facing summary."
+            echo ""
+            echo "---"
+          } > /tmp/release-body.md
+
+          echo "path=/tmp/release-body.md" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          body_path: ${{ steps.body.outputs.path }}
+          # Append the auto-generated PR list to the body above.
+          generate_release_notes: true
+          # Pre-release detection: any tag with a `-` (e.g.
+          # `v1.2.3-rc1`, `v1.2.3-beta`) is flagged as pre-release.
+          # Stable `v1.2.3` tags get the green "Latest" badge.
+          prerelease: ${{ contains(steps.tag.outputs.name, '-') }}

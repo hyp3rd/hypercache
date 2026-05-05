@@ -1,0 +1,22 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+---
+# PodDisruptionBudget keeps quorum reachable during voluntary
+# disruptions (node drains, rolling node upgrades, kubectl
+# evict). With replicaCount=5 and replicationFactor=3, the
+# default `minAvailable: 4` keeps every key reachable: at most
+# one pod can be voluntarily down at a time, and any single
+# pod down still leaves a quorum of 2-of-3 owners for every
+# key. Operators on smaller clusters should override
+# minAvailable accordingly.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hypercache.fullname" . }}
+  labels:
+    {{- include "hypercache.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "hypercache.selectorLabels" . | nindent 6 }}
+{{- end }}

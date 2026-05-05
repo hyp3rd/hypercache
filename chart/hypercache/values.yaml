@@ -1,0 +1,166 @@
+---
+# Default values for the hypercache chart.
+# Every key documented here can be overridden via -f or --set.
+
+# replicaCount is the cluster size. 5 is the documented production
+# baseline (matches docker-compose.cluster.yml). Must be at least
+# `cluster.replicationFactor` or writes will fail quorum on every
+# request.
+replicaCount: 5
+
+image:
+  repository: ghcr.io/hyp3rd/hypercache/hypercache-server
+  # tag falls back to .Chart.AppVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+  # imagePullSecrets entries are referenced by name from the
+  # cluster's image-pull configuration.
+  pullSecrets: []
+
+# serviceAccount controls the ServiceAccount the StatefulSet runs
+# under. `create: true` provisions one named after the release;
+# operators with their own RBAC can set `create: false` and supply
+# `name`.
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ports controls the in-pod listener bindings (and matching
+# container ports). The listener addresses are computed by combining
+# `0.0.0.0` with these ports — clients on the same network reach
+# them via the services exposed below.
+ports:
+  api: 8080
+  mgmt: 8081
+  dist: 7946
+
+# cluster bundles the dist-backend tunables. Defaults match the
+# server binary's defaults so a `helm install` produces the same
+# behavior as a bare `docker run`.
+cluster:
+  replicationFactor: 3
+  capacity: 100000
+  heartbeat: 1s
+  indirectProbeK: 2
+  hintTTL: 30s
+  hintReplay: 200ms
+  rebalanceInterval: 250ms
+  logLevel: info
+
+# auth.token controls the bearer-token policy applied to every
+# listener. Three modes:
+#   * empty (default): no auth — fine for trusted networks /
+#     development.
+#   * value: inline string. Materialized as a chart-managed Secret.
+#   * existingSecret + existingSecretKey: pull from an
+#     operator-managed Secret. Use this for production rotation.
+auth:
+  token:
+    value: ""
+    existingSecret: ""
+    existingSecretKey: token
+
+# service controls how clients reach the cluster.
+#   * client: routed via a regular Service for app traffic.
+#   * mgmt: separate Service so admin endpoints can be locked down
+#     independently (typically ClusterIP only, no LB).
+#   * headless: managed automatically (cluster needs stable per-pod
+#     DNS), not exposed to operators.
+service:
+  client:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  mgmt:
+    type: ClusterIP
+    port: 8081
+    annotations: {}
+
+# resources is intentionally conservative. Production deployments
+# should size based on `cluster.capacity` × value size + GC
+# headroom. The defaults give a single-pod working set of ~256 MiB,
+# which is adequate for the 100k-item default capacity at small
+# values.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+# probes hook into the binary's /healthz (client API) and /health
+# (mgmt) endpoints. Liveness on the binary itself, readiness on the
+# dist HTTP /health so the pod stops receiving traffic the moment
+# Drain is called (which flips /health to 503).
+probes:
+  liveness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 2
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 2
+
+# podDisruptionBudget keeps a quorum-safe number of pods up during
+# voluntary disruptions (node drains, rolling updates). With
+# replicaCount=5 and replicationFactor=3, minAvailable=4 keeps
+# every key reachable.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 4
+
+# affinity defaults to soft anti-affinity per node — five pods
+# *prefer* to spread across five nodes but won't refuse to schedule
+# if the cluster is small. Override to `requiredDuringScheduling…`
+# for hard spread on large clusters.
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["hypercache"]
+          topologyKey: kubernetes.io/hostname
+
+# nodeSelector / tolerations / topologySpreadConstraints are passed
+# through verbatim — empty by default so the chart works on any
+# vanilla cluster.
+nodeSelector: {}
+tolerations: []
+topologySpreadConstraints: []
+
+# podAnnotations / podLabels are copied onto every pod. Useful for
+# sidecar injection, scrape configuration, or org-level labels.
+podAnnotations: {}
+podLabels: {}
+
+# securityContext tightens the pod-level posture. The image
+# (gcr.io/distroless/static-debian12:nonroot) already runs as a
+# non-root user; these settings reinforce that contract.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# terminationGracePeriodSeconds gives the binary time to drain
+# in-flight requests (Drain → API stop → Cache.Stop chain) before
+# the kubelet sends SIGKILL. The binary's internal shutdown
+# deadline is 30s; this leaves slack.
+terminationGracePeriodSeconds: 45

@@ -1,0 +1,157 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "hypercache.fullname" . }}
+  labels:
+    {{- include "hypercache.labels" . | nindent 4 }}
+spec:
+  # StatefulSet (vs Deployment) gives us stable per-pod hostnames
+  # — required because each peer's seed list pre-binds the others
+  # by `<podname>.<headless-svc>.<ns>.svc.cluster.local`. A
+  # Deployment's pod names are random suffixes, which would force
+  # us into a runtime peer-discovery loop the dist transport
+  # doesn't have.
+  replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "hypercache.headlessServiceName" . }}
+  podManagementPolicy: Parallel   # all peers can come up together
+  selector:
+    matchLabels:
+      {{- include "hypercache.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hypercache.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "hypercache.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: hypercache
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: api
+              containerPort: {{ .Values.ports.api }}
+              protocol: TCP
+            - name: mgmt
+              containerPort: {{ .Values.ports.mgmt }}
+              protocol: TCP
+            - name: dist
+              containerPort: {{ .Values.ports.dist }}
+              protocol: TCP
+          env:
+            # POD_NAME flows from downward API → NODE_ID + DIST_ADDR.
+            # Same StatefulSet template, different identity per pod.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HYPERCACHE_NODE_ID
+              value: "$(POD_NAME)"
+            - name: HYPERCACHE_API_ADDR
+              value: ":{{ .Values.ports.api }}"
+            - name: HYPERCACHE_MGMT_ADDR
+              value: ":{{ .Values.ports.mgmt }}"
+            - name: HYPERCACHE_DIST_ADDR
+              value: "$(POD_NAME).{{ include "hypercache.headlessServiceName" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.ports.dist }}"
+            # The same seed list goes to every pod — the binary's
+            # parseSeedSpec drops the self-entry by ID match.
+            - name: HYPERCACHE_SEEDS
+              value: "{{ include "hypercache.seedList" . }}"
+            - name: HYPERCACHE_REPLICATION
+              value: "{{ .Values.cluster.replicationFactor }}"
+            - name: HYPERCACHE_CAPACITY
+              value: "{{ .Values.cluster.capacity }}"
+            - name: HYPERCACHE_HEARTBEAT
+              value: "{{ .Values.cluster.heartbeat }}"
+            - name: HYPERCACHE_INDIRECT_PROBE_K
+              value: "{{ .Values.cluster.indirectProbeK }}"
+            - name: HYPERCACHE_HINT_TTL
+              value: "{{ .Values.cluster.hintTTL }}"
+            - name: HYPERCACHE_HINT_REPLAY
+              value: "{{ .Values.cluster.hintReplay }}"
+            - name: HYPERCACHE_REBALANCE_INTERVAL
+              value: "{{ .Values.cluster.rebalanceInterval }}"
+            - name: HYPERCACHE_LOG_LEVEL
+              value: "{{ .Values.cluster.logLevel }}"
+            {{- if or .Values.auth.token.value .Values.auth.token.existingSecret }}
+            - name: HYPERCACHE_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-auth" (include "hypercache.fullname" .)) .Values.auth.token.existingSecret }}
+                  key: {{ .Values.auth.token.existingSecretKey }}
+            {{- end }}
+
+          # Liveness probes the client API's /healthz (the binary
+          # itself is still up). Readiness probes the dist HTTP
+          # /health which flips to 503 on Drain — so a pod removed
+          # from rotation by an operator drain stops receiving new
+          # traffic immediately, regardless of liveness.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: dist
+              {{- if or .Values.auth.token.value .Values.auth.token.existingSecret }}
+              httpHeaders:
+                # /health is auth-wrapped when a token is
+                # configured. The kubelet doesn't have a Secret
+                # ref here, so we trust the dist-token Secret is
+                # mounted; if not configured, no header is sent.
+                - name: Authorization
+                  value: "Bearer $(HYPERCACHE_AUTH_TOKEN)"
+              {{- end }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+
+          # No preStop hook by design: the hypercache-server binary
+          # already handles SIGTERM with the canonical Drain → API
+          # stop → Cache.Stop sequence (capped by the binary's 30s
+          # internal deadline; terminationGracePeriodSeconds above
+          # leaves slack). A POST-only /dist/drain rules out
+          # k8s's GET-only `preStop.httpGet`; relying on SIGTERM
+          # keeps the chart simple and avoids depending on the
+          # k8s ≥ 1.30 preStop sleep action.
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
