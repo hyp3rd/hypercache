@@ -1,0 +1,9 @@
+docker-compose.cluster.yml:curl-auth-header:14
+docker-compose.cluster.yml:curl-auth-header:16
+docker-compose.cluster.yml:curl-auth-header:17
+scripts/tests/10-test-cluster-api.sh:curl-auth-header:6
+scripts/tests/10-test-cluster-api.sh:curl-auth-header:13
+scripts/tests/10-test-cluster-api.sh:curl-auth-header:19
+scripts/tests/10-test-cluster-api.sh:curl-auth-header:26
+scripts/tests/10-test-cluster-api.sh:curl-auth-header:32
+scripts/tests/10-test-cluster-api.sh:curl-auth-header:36
