@@ -44,6 +44,16 @@ jobs:
       - name: Run cross-node smoke
         run: bash scripts/tests/10-test-cluster-api.sh
 
+      - name: Run resilience test (kill + restart a node)
+        # The smoke phase above already validated propagation;
+        # this phase validates that the cluster keeps serving
+        # writes when a node is down and that the resurrected
+        # node converges back. Catches regressions in the
+        # hint-replay / anti-entropy paths under the actual
+        # docker network — a class of bugs in-process tests
+        # cannot reach.
+        run: bash scripts/tests/20-test-cluster-resilience.sh
+
       - name: Dump container logs (on failure)
         if: failure()
         run: |

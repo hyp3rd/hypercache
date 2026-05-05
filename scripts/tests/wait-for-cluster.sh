@@ -52,4 +52,4 @@ for port in $PORTS; do
 	wait_one "$port"
 done
 
-printf 'cluster ready in %ds\n' "$(( $(date +%s) - start_epoch ))"
+printf 'cluster ready in %ds\n' "$(($(date +%s) - start_epoch))"

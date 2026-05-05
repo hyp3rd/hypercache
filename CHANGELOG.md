@@ -8,6 +8,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **End-to-end resilience test** at
+  [scripts/tests/20-test-cluster-resilience.sh](scripts/tests/20-test-cluster-resilience.sh)
+  — kills a docker container mid-run, asserts the surviving 4
+  nodes still serve every previously-written key AND every key
+  written during the outage, then restarts the killed node and
+  asserts it converges on the full state within 60 s. Validates
+  Phase B.2 (hint-replay) and the post-restart anti-entropy
+  paths against the *actual* docker network — a class of bugs
+  in-process tests can't reach. 24 assertions across 6 phases.
+  Wired into both `make test-cluster` (runs after the smoke,
+  exit-code-propagated through the same teardown trap) and the
+  `cluster` CI workflow as a follow-up step.
 - **Cross-process cluster smoke in CI** —
   [.github/workflows/cluster.yml](.github/workflows/cluster.yml) boots
   the 5-node `docker-compose.cluster.yml` stack on every PR/push,
