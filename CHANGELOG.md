@@ -8,6 +8,123 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Cross-process cluster smoke in CI** —
+  [.github/workflows/cluster.yml](.github/workflows/cluster.yml) boots
+  the 5-node `docker-compose.cluster.yml` stack on every PR/push,
+  waits for `/healthz` on every node, then runs the assertion
+  script at
+  [scripts/tests/10-test-cluster-api.sh](scripts/tests/10-test-cluster-api.sh).
+  Container logs are dumped on failure for debuggability without a
+  re-run. This catches the class of bugs that escaped the previous
+  PR (factory dropped DistMemoryOptions, seeds without IDs,
+  json.RawMessage on non-owner GET) — none would have been
+  detected by unit/integration tests because they only exercised
+  in-process behavior.
+- **`make test-cluster` Makefile target** mirrors the CI flow for
+  local development: brings the cluster up, waits, runs the smoke,
+  and tears down on the way out (preserving the smoke's exit code).
+- **`scripts/tests/wait-for-cluster.sh`** is the polling helper that
+  blocks until every node's `/healthz` returns 200, with a default
+  30-second deadline configurable via `TIMEOUT_SECS`. Used by both
+  the Makefile and the CI workflow so the assertion script downstream
+  never races the listener bind.
+- **`scripts/tests/10-test-cluster-api.sh` hardened** from a
+  print-only smoke into a real regression test: 17 explicit
+  assertions across propagation / wire-encoding / cross-node
+  delete, color-coded `OK`/`FAIL` output, exit code reflects
+  total failure count.
+- **`cmd/hypercache-server/main_test.go`** — fast Go unit tests
+  pinning the wire-encoding contracts on `writeValue` /
+  `decodeBase64Bytes`. Covers `[]byte` (writer path), `string`
+  (replica path), `json.RawMessage` (non-owner-GET path), and the
+  base64-heuristic length floors. Runs without docker for tight
+  feedback during development.
+- **Multi-arch container image workflow** —
+  [.github/workflows/image.yml](.github/workflows/image.yml) builds
+  the `hypercache-server` Docker image for `linux/amd64` and
+  `linux/arm64` via buildx + QEMU, publishing to GHCR
+  (`ghcr.io/<owner>/<repo>/hypercache-server`). PR triggers
+  build-only (no registry pollution), `main` pushes publish
+  `:main` and `:sha-<short>`, semver tag pushes (`v*.*.*`)
+  publish `:v1.2.3`, `:1.2.3`, `:1.2`, `:1`, and `:latest`.
+  `:latest` is **deliberately restricted to semver tag pushes** —
+  production deployments pinning `:latest` always get a stable
+  release, never an in-flight `main` commit. GHA cache speeds
+  re-builds when only Go source has changed.
+
+### Fixed
+
+- **Cluster propagation was completely broken.** The
+  `DistMemoryBackendConstructor.Create` factory in `factory.go`
+  silently discarded `cfg.DistMemoryOptions` and called
+  `backend.NewDistMemory(ctx)` with **no arguments**. Every
+  `WithDistNode`, `WithDistSeeds`, `WithDistReplication`, etc. that
+  callers wired through `hypercache.NewConfig` was a silent no-op,
+  leaving every node with a default standalone configuration that
+  only knew itself. The factory now forwards
+  `cfg.DistMemoryOptions...` like every other backend constructor
+  does. This was the production-blocking bug — a Set on one node
+  never reached its peers because the other nodes weren't actually
+  in any node's ring.
+- **Seed addresses without node IDs produced a broken ring.**
+  `initStandaloneMembership` added every seed to membership with an
+  empty `NodeID`, so the consistent-hash ring was built over
+  empty-string owners. `Set` would resolve owners as
+  `["", "", "self"]`, fan-outs to `""` failed with
+  `ErrBackendNotFound`, the writer self-promoted, and the data
+  never reached its peers. The HTTP transport has no node-discovery
+  protocol, so the only way to populate node IDs in the ring is at
+  configuration time. Seeds now accept an optional `id@addr` syntax
+  (`node-2@hypercache-2:7946`) — bare `addr` keeps the legacy
+  empty-ID behavior for in-process tests. Production deployments
+  must use `id@addr`.
+- **`Remove` from a non-primary owner skipped the primary.**
+  `removeImpl` checked `dm.ownsKeyInternal(key)` (true for any
+  ring owner) and ran `applyRemove` locally — but `applyRemove`'s
+  fan-out only covers `owners[1:]` under the assumption the caller
+  is `owners[0]`. When a replica initiated the remove, the primary
+  never got the delete. The Remove path now mirrors Set:
+  non-primary callers forward to the primary, primary applies +
+  fans out. Tombstones now propagate cluster-wide regardless of
+  which node receives the DELETE.
+- **Client API responses were unhelpful.** Set/Remove returned
+  `204 No Content` with empty bodies; errors were raw text via
+  `SendString`. Replaced with structured JSON: PUT/DELETE return
+  `{key, stored|deleted, bytes, node, owners}` so operators can
+  immediately see where the value landed; errors return
+  `{error, code}` with stable code strings (`BAD_REQUEST`,
+  `NOT_FOUND`, `DRAINING`, `INTERNAL`). Added
+  `GET /v1/owners/:key` for client-side ring visibility.
+- **GET response leaked base64 on replicas.** `[]byte` values
+  round-trip through JSON as base64 strings; replica nodes that
+  received a value via the dist HTTP transport stored it as a
+  `string` and returned it raw, so a `PUT world` on node-A
+  resulted in `d29ybGQ=` from `GET` on node-B. The client GET
+  handler now base64-decodes string values when they look like
+  valid byte content, restoring writer-receiver symmetry.
+- **GET on non-owner nodes returned a JSON-quoted base64 string.**
+  The dist HTTP transport's `decodeGetBody` decodes `Item.Value` as
+  `json.RawMessage` to preserve wire-bytes type fidelity. The
+  client GET handler's type switch only matched `[]byte` and
+  `string`, so non-owner GETs (which always go through the
+  forward-fetch path) fell to the `default` branch and re-emitted
+  the value as JSON — producing `"d29ybGQ="` instead of `world`.
+  Added an explicit `json.RawMessage` case that interprets the raw
+  JSON as a string when possible, then base64-decodes if applicable.
+  Verified end-to-end against the 5-node Docker cluster where two
+  of the five nodes are non-owners for any given key.
+
+- **Race in `queueHint` between hint enqueue and hint replay.** Pre-fix,
+  the metric write `dm.metrics.hintedBytes.Store(dm.hintBytes)` happened
+  *after* releasing `hintsMu`, so a concurrent `adjustHintAccounting`
+  call from the replay loop could race the read. Capturing the value
+  under the lock closes the race. Surfaced when migration failures
+  began funneling through `queueHint` (Phase B.2 below) — previously
+  the migration path swallowed errors silently, so the hint enqueue
+  rate from rebalance ticks was much lower.
+
+### Added (earlier in this cycle)
+
 - **Structured logging on the dist backend.** New `WithDistLogger(*slog.Logger)`
   option wires a structured logger into the dist backend's background
   loops (heartbeat, hint replay, rebalance, merkle sync) and operational
@@ -46,6 +163,95 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   against a stopped backend. Library default is a no-op meter, so
   metrics cost nothing unless the caller opts in. Phase A.3 of the
   production-readiness work.
+- **SWIM-style indirect heartbeat probes.** New
+  `WithDistIndirectProbes(k, timeout)` option enables the indirect-
+  probe refutation path: when a direct heartbeat to a peer fails,
+  this node asks `k` random alive peers to probe the target on its
+  behalf, and only marks the target suspect if every relay also
+  fails. Filters caller-side network blips (transient NIC reset,
+  single stuck connection in this node's pool) that would otherwise
+  cause spurious suspect/dead transitions. New transport method
+  `IndirectHealth(ctx, relayNodeID, targetNodeID)` and HTTP endpoint
+  `GET /internal/probe?target=<id>` carry the probe; auth-wrapped
+  identically to the rest of `/internal/*`. New metrics
+  `dist.heartbeat.indirect_probe.success`, `.failure`, `.refuted`
+  expose probe outcomes. `k = 0` (default) preserves the pre-Phase-B
+  behavior. Phase B.1 of the production-readiness work — note that
+  the heartbeat path still carries the `experimental` marker until
+  self-refutation via incarnation-disseminating gossip lands in a
+  later phase.
+- **Migration failures now retry through the hint queue.** When a
+  rebalance forwards a key to its new primary and the transport
+  returns *any* error (not just `ErrBackendNotFound`), the item is
+  enqueued onto the existing hint-replay queue keyed by the new
+  primary, instead of being logged and dropped. The hint-replay
+  loop drains it on its configured schedule until the hint TTL
+  expires. Same broadening applies to the `replicateTo` fan-out on
+  the primary `Set` path — transient HTTP failures (timeout, 5xx,
+  connection reset) no longer silently drop replicas. Phase B.2 of
+  the production-readiness work.
+- **On-wire compression for the dist HTTP transport.** New
+  `DistHTTPLimits.CompressionThreshold` field opts the auto-created
+  HTTP client into gzip-compressing Set request bodies whose
+  serialized payload exceeds the configured byte threshold. The
+  client sets `Content-Encoding: gzip` and the server transparently
+  decompresses (via fiber v3's auto-decoding `Body()`). Threshold
+  `0` (default) preserves the pre-Phase-B wire format byte-for-byte.
+  Operators on bandwidth-constrained links with values above ~1 KiB
+  typically see meaningful reductions; below-threshold values pay
+  no compression cost. Roll out the threshold to all peers before
+  raising it on any peer — a server with compression disabled will
+  reject a gzip body with HTTP 400. Phase B.3 of the
+  production-readiness work.
+- **Drain endpoint for graceful shutdown.** New
+  `DistMemory.Drain(ctx)` method and `POST /dist/drain` HTTP
+  endpoint mark the node for shutdown: `/health` returns 503 so
+  load balancers stop routing, `Set`/`Remove` return
+  `sentinel.ErrDraining`, `Get` continues to serve so in-flight
+  reads complete. New `IsDraining()` accessor for dashboards. New
+  metric `dist.drains` records transitions. Drain is one-way and
+  idempotent. Phase C.1 of the production-readiness work.
+- **Cursor-based key enumeration** replaces the pre-Phase-C
+  testing-only `/internal/keys` endpoint. The endpoint now returns
+  shard-level pages with a `next_cursor` token; clients walk the
+  cursor chain to enumerate the full key set. New `?limit=<n>` query
+  parameter truncates within a shard for clusters with very large
+  shards (response then carries `truncated=true` and the same
+  `next_cursor`). The `DistHTTPTransport.ListKeys` helper now walks
+  pages internally so existing callers (anti-entropy fallback, tests)
+  keep their full-set semantics unchanged. Phase C.2 of the
+  production-readiness work.
+- **Operations runbook** at [docs/operations.md](docs/operations.md)
+  covering split-brain, hint-queue overflow, rebalance under load,
+  replica loss, observability wiring (logger/tracer/meter), drain
+  procedure, and capacity-planning notes. Cross-links each failure
+  mode to the metrics that surface it. Phase C.3 of the
+  production-readiness work.
+- **Production server binary** at
+  [`cmd/hypercache-server`](cmd/hypercache-server). Wraps DistMemory
+  via HyperCache and exposes three HTTP listeners per node: the
+  client REST API (`PUT`/`GET`/`DELETE /v1/cache/:key`),
+  management HTTP (`/health`, `/stats`, `/config`,
+  `/dist/metrics`, `/cluster/*`), and the inter-node dist HTTP.
+  12-factor configuration via `HYPERCACHE_*` environment
+  variables — same binary runs in Docker, k8s, and bare-metal.
+  Graceful shutdown on SIGTERM/SIGINT runs Drain → API stop →
+  HyperCache Stop with a 30 s deadline. JSON-formatted slog
+  logger pre-bound with `node_id`. Multi-stage `Dockerfile` builds
+  a distroless static image (`gcr.io/distroless/static-debian12:nonroot`).
+- **5-node local cluster compose** at
+  [`docker-compose.cluster.yml`](docker-compose.cluster.yml) — five
+  hypercache-server nodes on a shared `hypercache-cluster` Docker
+  network, each knowing the other four as seeds, replication=3.
+  Client APIs exposed on host ports 8081–8085, management HTTP on
+  9081–9085. Includes a smoke-test recipe in the
+  [server README](cmd/hypercache-server/README.md). Phase D of the
+  production-readiness work.
+- **`HyperCache.DistDrain(ctx)`** convenience method in
+  [hypercache_dist.go](hypercache_dist.go) — calls Drain on the
+  underlying DistMemory backend when one is configured, no-op on
+  in-memory / Redis backends. Lets the server binary trigger drain
+  without type-asserting through the unexported backend field.
 
 ## [0.5.0] — 2026-05-05
 

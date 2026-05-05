@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -230,6 +231,20 @@ type DistHTTPLimits struct {
 	// ClientAuth=tls.RequireAndVerifyClientCert. The auto-client uses
 	// the same cert as its client cert via Certificates[0].
 	TLSConfig *tls.Config
+
+	// CompressionThreshold opts the dist HTTP transport into gzip
+	// compression of Set request bodies whose serialized payload size
+	// exceeds this many bytes. The client sets `Content-Encoding:
+	// gzip` and the server transparently decompresses before
+	// unmarshaling. 0 disables compression — matches the pre-Phase-B
+	// wire format byte-for-byte. Operators on bandwidth-constrained
+	// links with large values (>1 KiB) typically see meaningful
+	// reductions; values smaller than the threshold pay no cost.
+	//
+	// Server compatibility: a server with compression disabled will
+	// reject a gzip-encoded body with HTTP 400. Roll out the threshold
+	// to all peers before raising it on any peer.
+	CompressionThreshold int
 }
 
 // withDefaults fills any zero-valued field on l with the package default.
@@ -336,7 +351,9 @@ func (s *distHTTPServer) start(bindCtx context.Context, dm *DistMemory) error {
 	s.registerSet(dm)
 	s.registerGet(dm)
 	s.registerRemove(dm)
-	s.registerHealth()
+	s.registerHealth(dm)
+	s.registerDrain(dm)
+	s.registerProbe(dm)
 	s.registerMerkle(dm)
 
 	return s.listen(bindCtx)
@@ -346,6 +363,11 @@ func (s *distHTTPServer) start(bindCtx context.Context, dm *DistMemory) error {
 // fan-outs to replicas. Uses s.ctx (server-lifecycle) as the backend
 // operation context — see the comment on distHTTPServer.ctx for why we
 // can't use the per-request fiber.Ctx here.
+//
+// Compression note: fiber v3's Body() auto-decompresses based on the
+// inbound `Content-Encoding` header, so this handler does not need
+// explicit gzip handling — it sees the plaintext JSON regardless of
+// whether the client compressed (CompressionThreshold > 0) or not.
 func (s *distHTTPServer) handleSet(fctx fiber.Ctx, dm *DistMemory) error {
 	var req httpSetRequest
 
@@ -427,11 +449,71 @@ func (s *distHTTPServer) registerRemove(dm *DistMemory) {
 	s.app.Delete("/internal/del", handler)
 }
 
-func (s *distHTTPServer) registerHealth() {
+func (s *distHTTPServer) registerHealth(dm *DistMemory) {
 	// Auth-wrapped: when a token is configured, /health requires it too.
 	// Operators who want a public health probe should supply a custom
 	// ServerVerify that exempts the /health path.
-	s.app.Get("/health", s.wrapAuth(func(fctx fiber.Ctx) error { return fctx.SendString("ok") }))
+	//
+	// Drain semantics: when dm.IsDraining() is true the endpoint
+	// returns HTTP 503 with body "draining" so external load balancers
+	// stop routing traffic. The drain check fires before the
+	// always-ok response so a draining node never falsely advertises
+	// readiness.
+	s.app.Get("/health", s.wrapAuth(func(fctx fiber.Ctx) error {
+		if dm.IsDraining() {
+			return fctx.Status(fiber.StatusServiceUnavailable).SendString("draining")
+		}
+
+		return fctx.SendString("ok")
+	}))
+}
+
+// registerDrain wires `POST /dist/drain` — the operator-driven
+// graceful-shutdown trigger. Auth-wrapped because draining is a
+// privileged action: any peer that can call it can stall this node's
+// writes. Returns 200 on the first successful transition; idempotent
+// follow-up calls also return 200 (drain is one-way per Drain doc).
+func (s *distHTTPServer) registerDrain(dm *DistMemory) {
+	s.app.Post("/dist/drain", s.wrapAuth(func(fctx fiber.Ctx) error {
+		err := dm.Drain(s.ctx)
+		if err != nil {
+			return fctx.Status(fiber.StatusInternalServerError).JSON(fiber.Map{constants.ErrorLabel: err.Error()})
+		}
+
+		return fctx.JSON(fiber.Map{"draining": true})
+	}))
+}
+
+// registerProbe wires `/internal/probe?target=<id>` — the indirect-probe
+// relay endpoint used by the SWIM heartbeat path. The relay node calls
+// its own transport's Health(target) and reports the result. 200 = relay
+// reached the target; 502 = relay's probe failed; 404 = target unknown
+// to the relay; 400 = missing/empty target query parameter. Auth-wrapped
+// like the rest of `/internal/*` because indirectly probing arbitrary
+// node IDs through a member is a directory-enumeration vector.
+func (s *distHTTPServer) registerProbe(dm *DistMemory) {
+	s.app.Get("/internal/probe", s.wrapAuth(func(fctx fiber.Ctx) error {
+		target := fctx.Query("target")
+		if target == "" {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "missing target"})
+		}
+
+		transport := dm.loadTransport()
+		if transport == nil {
+			return fctx.SendStatus(fiber.StatusServiceUnavailable)
+		}
+
+		err := transport.Health(s.ctx, target)
+		if err != nil {
+			if errors.Is(err, sentinel.ErrBackendNotFound) {
+				return fctx.SendStatus(fiber.StatusNotFound)
+			}
+
+			return fctx.SendStatus(fiber.StatusBadGateway)
+		}
+
+		return fctx.SendString("ok")
+	}))
 }
 
 func (s *distHTTPServer) registerMerkle(dm *DistMemory) {
@@ -445,22 +527,107 @@ func (s *distHTTPServer) registerMerkle(dm *DistMemory) {
 		})
 	}))
 
-	// naive keys listing for anti-entropy (testing only). Not efficient for large datasets.
 	s.app.Get("/internal/keys", s.wrapAuth(func(fctx fiber.Ctx) error {
-		var keys []string
+		return handleKeys(fctx, dm)
+	}))
+}
 
-		for _, shard := range dm.shards {
-			if shard == nil {
-				continue
-			}
+// handleKeys serves shard-level cursor pagination for the
+// `/internal/keys` endpoint. Pre-Phase-C this returned every key in
+// the cluster in one response — fine for test fixtures, infeasible
+// for any real workload. The cursor is the *next* shard index to
+// read; an absent cursor starts at 0, an empty `next_cursor` in the
+// response signals end-of-iteration.
+//
+// Pagination granularity is per-shard rather than per-key on
+// purpose. ConcurrentMap.All() iterates in unspecified order, so a
+// per-key cursor would either need a stable sort (materializing the
+// full key set defeats the pagination) or session state on the
+// server. Per-shard pagination is bounded by shard size (typically
+// well under a million keys) and matches the natural unit of work.
+//
+// Operators with shards larger than the page-size cap can use the
+// `limit` query parameter to truncate within a shard — the response
+// then carries an unchanged `next_cursor` and a `truncated` flag so
+// the client knows the same shard still has more keys. The simple
+// case (no limit) returns the full shard.
+func handleKeys(fctx fiber.Ctx, dm *DistMemory) error {
+	cursor := 0
 
-			for k := range shard.items.All() {
-				keys = append(keys, k)
-			}
+	if raw := fctx.Query("cursor"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "invalid cursor"})
 		}
 
-		return fctx.JSON(fiber.Map{"keys": keys})
-	}))
+		cursor = parsed
+	}
+
+	limit := 0
+
+	if raw := fctx.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "invalid limit"})
+		}
+
+		limit = parsed
+	}
+
+	if cursor >= len(dm.shards) {
+		return fctx.JSON(fiber.Map{"keys": []string{}, "next_cursor": ""})
+	}
+
+	shard := dm.shards[cursor]
+	if shard == nil { // skip nil shards (defensive)
+		return fctx.JSON(fiber.Map{"keys": []string{}, "next_cursor": strconv.Itoa(cursor + 1)})
+	}
+
+	keys, truncated := collectShardKeys(shard, limit)
+
+	nextCursor := ""
+
+	switch {
+	case truncated:
+		// Same shard still has keys past the limit; client must
+		// re-request with a larger limit (per-shard pagination doesn't
+		// resume mid-shard, which would require session state).
+		nextCursor = strconv.Itoa(cursor)
+
+	case cursor+1 < len(dm.shards):
+		nextCursor = strconv.Itoa(cursor + 1)
+
+	default:
+		// Last shard fully drained — leave nextCursor empty to signal
+		// end-of-iteration to the client.
+	}
+
+	return fctx.JSON(fiber.Map{
+		"keys":        keys,
+		"next_cursor": nextCursor,
+		"truncated":   truncated,
+	})
+}
+
+// collectShardKeys reads up to `limit` keys from shard. limit<=0
+// returns the full shard. The truncated bool reports whether the
+// shard had more keys than `limit` allowed.
+func collectShardKeys(shard *distShard, limit int) ([]string, bool) {
+	out := make([]string, 0, shard.items.Count())
+
+	truncated := false
+
+	for k := range shard.items.All() {
+		if limit > 0 && len(out) >= limit {
+			truncated = true
+
+			break
+		}
+
+		out = append(out, k)
+	}
+
+	return out, truncated
 }
 
 func (s *distHTTPServer) listen(ctx context.Context) error {

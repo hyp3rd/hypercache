@@ -3,11 +3,12 @@ package integration
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"

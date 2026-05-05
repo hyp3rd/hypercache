@@ -27,6 +27,34 @@ build:
 	@echo "Building..."
 	go build -v ./...
 
+start-dev-cluster: stop-dev-cluster
+	@echo "building and lifting a new hypercache stack"
+	@echo
+	COMPOSE_BAKE=true docker compose -f docker-compose.cluster.yml up --build
+
+stop-dev-cluster:
+	@echo "Stopping any previously running stack"
+	@echo
+	docker compose -f docker-compose.cluster.yml down -v --rmi local --remove-orphans
+
+# test-cluster brings up the 5-node docker-compose cluster, waits for
+# every node's /healthz to be 200, runs the cross-node smoke test
+# (PUT/GET/DELETE asserted on every node), and tears the stack down —
+# always, even on assertion failure — so a failing run leaves no
+# stragglers. The shell-script's exit code is propagated so CI can
+# fail the build on any regression of the bugs that escaped Phase D
+# initial review (factory dropped options, seeds without IDs,
+# json.RawMessage on non-owner GET).
+test-cluster: stop-dev-cluster
+	@echo "spinning up cluster + running cross-node smoke"
+	@echo
+	docker compose -f docker-compose.cluster.yml up --build -d
+	@bash scripts/tests/wait-for-cluster.sh
+	@rc=0; bash scripts/tests/10-test-cluster-api.sh || rc=$$?; \
+		echo ""; echo "tearing down cluster (rc=$$rc)"; \
+		docker compose -f docker-compose.cluster.yml down -v --rmi local --remove-orphans >/dev/null 2>&1 || true; \
+		exit $$rc
+
 # ci aggregates the gates required before declaring a task done (see AGENTS.md).
 ci: lint typecheck test-race sec build
 	@echo "All CI gates passed."

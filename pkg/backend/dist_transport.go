@@ -14,6 +14,13 @@ type DistTransport interface {
 	ForwardGet(ctx context.Context, nodeID, key string) (*cache.Item, bool, error)
 	ForwardRemove(ctx context.Context, nodeID, key string, replicate bool) error
 	Health(ctx context.Context, nodeID string) error
+	// IndirectHealth asks `relayNodeID` to probe `targetNodeID` on the
+	// caller's behalf. Used by the SWIM-style indirect-probe path: when
+	// a direct probe to target fails, several relay nodes are asked to
+	// probe target; if any of them succeeds, the target is alive and
+	// the caller's local network was the issue, not the target.
+	// Returns nil when the relay reports the target reachable.
+	IndirectHealth(ctx context.Context, relayNodeID, targetNodeID string) error
 	FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error)
 }
 
@@ -92,6 +99,24 @@ func (t *InProcessTransport) Health(_ context.Context, nodeID string) error {
 	}
 
 	return nil
+}
+
+// IndirectHealth asks the relay backend to probe target. In-process the
+// relay's perspective on target is the same lookup table, so this is
+// equivalent to a direct probe — tests that wire two InProcessTransport
+// instances per cluster will exercise the relay-failure path naturally.
+func (t *InProcessTransport) IndirectHealth(ctx context.Context, relayNodeID, targetNodeID string) error {
+	relay, ok := t.lookup(relayNodeID)
+	if !ok {
+		return sentinel.ErrBackendNotFound
+	}
+
+	rt := relay.loadTransport()
+	if rt == nil {
+		return errNoTransport
+	}
+
+	return rt.Health(ctx, targetNodeID)
 }
 
 // FetchMerkle fetches a remote merkle tree.

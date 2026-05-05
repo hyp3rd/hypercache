@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"hash"
 	"hash/fnv"
@@ -17,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/hyp3rd/ewrap"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -83,6 +83,18 @@ type DistMemory struct {
 
 	// heartbeat sampling (Phase 2)
 	hbSampleSize int // number of random peers to probe each tick (0=probe all)
+
+	// indirectProbeK is the number of relay peers asked to probe a
+	// target when the direct probe fails. SWIM-style filter for
+	// caller-side network blips: the target is only marked suspect if
+	// every relay also fails to reach it. 0 disables — direct probe
+	// alone decides liveness, matching the pre-Phase-B behavior.
+	indirectProbeK int
+
+	// indirectProbeTimeout caps how long the per-relay probe call may
+	// block. Defaults to half the heartbeat interval; tunable via
+	// WithDistIndirectProbes for clusters with high inter-node RTT.
+	indirectProbeTimeout time.Duration
 
 	// consistency / versioning (initial)
 	readConsistency  ConsistencyLevel
@@ -170,6 +182,13 @@ type DistMemory struct {
 
 	// stopped guards Stop() against double-invocation (idempotent shutdown).
 	stopped atomic.Bool
+
+	// draining is set by Drain to mark this node for graceful shutdown:
+	// /health returns 503, Set/Remove reject with sentinel.ErrDraining,
+	// Get continues to serve. One-way — operators restart the process
+	// to clear it. The CAS in Drain ensures the metric increment fires
+	// exactly once per drain transition.
+	draining atomic.Bool
 
 	// tracer is the OpenTelemetry tracer used to create spans on the
 	// public Get/Set/Remove ops and on replication fan-out. Defaults
@@ -566,6 +585,32 @@ func WithDistHeartbeat(interval, suspectAfter, deadAfter time.Duration) DistMemo
 		dm.hbInterval = interval
 		dm.hbSuspectAfter = suspectAfter
 		dm.hbDeadAfter = deadAfter
+	}
+}
+
+// WithDistIndirectProbes enables SWIM-style indirect probing for the
+// heartbeat path. When a direct probe to a peer fails, this node asks
+// `k` random alive peers to probe the target on its behalf; the target
+// is only marked suspect if every relay also fails. Filters
+// caller-side network blips (NIC reset, brief upstream outage, single
+// stuck connection in a pool) that would otherwise cause spurious
+// suspect/dead transitions.
+//
+// `timeout` caps each relay's probe call. Pass 0 to inherit the
+// default (half the configured heartbeat interval).
+//
+// k = 0 disables indirect probing — direct probe alone decides
+// liveness, matching the pre-Phase-B behavior. Recommended k = 3 for
+// production clusters; clusters with fewer than k+1 alive peers scale
+// down automatically (probe whatever's available).
+func WithDistIndirectProbes(k int, timeout time.Duration) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if k < 0 {
+			k = 0
+		}
+
+		dm.indirectProbeK = k
+		dm.indirectProbeTimeout = timeout
 	}
 }
 
@@ -1117,6 +1162,10 @@ type distMetrics struct {
 	replicaGetMiss               atomic.Int64
 	heartbeatSuccess             atomic.Int64
 	heartbeatFailure             atomic.Int64
+	indirectProbeSuccess         atomic.Int64 // indirect probes that succeeded (target reachable via relay)
+	indirectProbeFailure         atomic.Int64 // indirect probes that failed (relay confirmed target unreachable)
+	indirectProbeRefuted         atomic.Int64 // direct probe failed but indirect probe succeeded — target reachable, caller's network was the issue
+	drains                       atomic.Int64 // number of drain transitions observed on this node (one-way, so 0 or 1 in normal use)
 	nodesSuspect                 atomic.Int64 // number of times a node transitioned to suspect
 	nodesDead                    atomic.Int64 // number of times a node transitioned to dead/pruned
 	nodesRemoved                 atomic.Int64
@@ -1160,6 +1209,10 @@ type DistMetrics struct {
 	ReplicaGetMiss               int64
 	HeartbeatSuccess             int64
 	HeartbeatFailure             int64
+	IndirectProbeSuccess         int64
+	IndirectProbeFailure         int64
+	IndirectProbeRefuted         int64
+	Drains                       int64
 	NodesSuspect                 int64
 	NodesDead                    int64
 	NodesRemoved                 int64
@@ -1199,6 +1252,7 @@ type DistMetrics struct {
 }
 
 // Metrics returns a snapshot of distributed metrics.
+// Metrics returns a snapshot of distributed metrics.
 func (dm *DistMemory) Metrics() DistMetrics {
 	lastErr := ""
 	if v := dm.lastAutoSyncError.Load(); v != nil {
@@ -1207,24 +1261,7 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		}
 	}
 
-	var mv uint64
-
-	var alive, suspect, dead int64
-
-	if dm.membership != nil {
-		mv = dm.membership.Version()
-		for _, n := range dm.membership.List() {
-			switch n.State.String() {
-			case "alive":
-				alive++
-			case "suspect":
-				suspect++
-			case "dead":
-				dead++
-			default: // ignore future states
-			}
-		}
-	}
+	memSnap := dm.membershipSnapshot()
 
 	return DistMetrics{
 		ForwardGet:                   dm.metrics.forwardGet.Load(),
@@ -1236,6 +1273,10 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		ReplicaGetMiss:               dm.metrics.replicaGetMiss.Load(),
 		HeartbeatSuccess:             dm.metrics.heartbeatSuccess.Load(),
 		HeartbeatFailure:             dm.metrics.heartbeatFailure.Load(),
+		IndirectProbeSuccess:         dm.metrics.indirectProbeSuccess.Load(),
+		IndirectProbeFailure:         dm.metrics.indirectProbeFailure.Load(),
+		IndirectProbeRefuted:         dm.metrics.indirectProbeRefuted.Load(),
+		Drains:                       dm.metrics.drains.Load(),
 		NodesSuspect:                 dm.metrics.nodesSuspect.Load(),
 		NodesDead:                    dm.metrics.nodesDead.Load(),
 		NodesRemoved:                 dm.metrics.nodesRemoved.Load(),
@@ -1268,10 +1309,10 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		RebalancedReplicaDiff:        dm.metrics.rebalanceReplicaDiff.Load(),
 		RebalanceReplicaDiffThrottle: dm.metrics.rebalanceReplicaDiffThrottle.Load(),
 		RebalancedPrimary:            dm.metrics.rebalancedPrimary.Load(),
-		MembershipVersion:            mv,
-		MembersAlive:                 alive,
-		MembersSuspect:               suspect,
-		MembersDead:                  dead,
+		MembershipVersion:            memSnap.version,
+		MembersAlive:                 memSnap.alive,
+		MembersSuspect:               memSnap.suspect,
+		MembersDead:                  memSnap.dead,
 	}
 }
 
@@ -1382,6 +1423,39 @@ func (dm *DistMemory) Stop(ctx context.Context) error {
 	return nil
 }
 
+// Drain marks this node for graceful shutdown: future Set/Remove
+// return sentinel.ErrDraining, /health reports HTTP 503 so external
+// load balancers stop routing traffic, and the operator should
+// follow up with Stop after Drain has settled. Get continues to
+// serve so in-flight reads complete with consistent data.
+//
+// Drain is one-way and idempotent — the second call is a no-op
+// (returns nil). Operators clear it by restarting the process.
+//
+// Returns nil today; the signature retains an error so future
+// versions can wait for active replication fan-out to flush before
+// returning (Phase B's hint queue makes that meaningful) without a
+// breaking change.
+func (dm *DistMemory) Drain(_ context.Context) error {
+	if !dm.draining.CompareAndSwap(false, true) {
+		return nil // already draining
+	}
+
+	dm.metrics.drains.Add(1)
+
+	dm.logger.Info(
+		"dist node draining",
+		slog.String("addr", dm.nodeAddr),
+	)
+
+	return nil
+}
+
+// IsDraining reports whether Drain has been called on this node.
+// Operator helper for dashboards / readiness probes that want to
+// surface drain state independently of the dist HTTP endpoint.
+func (dm *DistMemory) IsDraining() bool { return dm.draining.Load() }
+
 // --- Sync helper methods (placed after exported methods to satisfy ordering linter) ---
 
 // IsOwner reports whether this node is an owner (primary or replica) for key.
@@ -1423,6 +1497,41 @@ func (dm *DistMemory) RemovePeer(address string) {
 			return
 		}
 	}
+}
+
+// distMembershipSnap is the result of membershipSnapshot — bundled
+// into a struct because returning four scalars hits the per-function
+// result-count lint cap.
+type distMembershipSnap struct {
+	version uint64
+	alive   int64
+	suspect int64
+	dead    int64
+}
+
+// membershipSnapshot returns the current membership version plus the
+// count of alive/suspect/dead members. Extracted from Metrics() to
+// keep that method under the function-length lint cap.
+func (dm *DistMemory) membershipSnapshot() distMembershipSnap {
+	if dm.membership == nil {
+		return distMembershipSnap{}
+	}
+
+	out := distMembershipSnap{version: dm.membership.Version()}
+
+	for _, n := range dm.membership.List() {
+		switch n.State.String() {
+		case "alive":
+			out.alive++
+		case "suspect":
+			out.suspect++
+		case "dead":
+			out.dead++
+		default: // ignore future states
+		}
+	}
+
+	return out
 }
 
 // sortedMerkleEntries returns merkle entries sorted by key.
@@ -2040,18 +2149,24 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) {
 	dm.metrics.rebalancedKeys.Add(1)
 	dm.metrics.rebalancedPrimary.Add(1)
 
-	// Fire-and-forget forwarding: failures are dropped silently today
-	// (Phase B will introduce a retry queue). Logging is the minimum
-	// surface so operators can correlate vanished keys with transport
-	// failures during rolling deploys.
+	// Forward the item to the new primary. On failure, hand the item
+	// to the hint-replay queue keyed by the new primary's node ID:
+	// the replay loop will retry on its configured schedule until the
+	// hint TTL expires. Pre-Phase-B this dropped silently — operators
+	// saw vanished keys after a rebalance tick when the new primary
+	// was briefly unreachable. Note: replay calls ForwardSet with
+	// replicate=false; the new primary's own rebalance/replica-diff
+	// scan re-fans-out to its replicas eventually.
 	migrationErr := transport.ForwardSet(ctx, string(owners[0]), item, true)
 	if migrationErr != nil {
-		dm.logger.Warn(
-			"rebalance migration forward failed",
+		dm.logger.Info(
+			"rebalance migration forward failed; queued for hint replay",
 			slog.String("key", item.Key),
 			slog.String("new_primary", string(owners[0])),
 			slog.Any("err", migrationErr),
 		)
+
+		dm.queueHint(string(owners[0]), item)
 	}
 
 	// Update originalPrimary so we don't recount repeatedly.
@@ -2514,9 +2629,12 @@ func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replica
 			continue
 		}
 
-		if errors.Is(err, sentinel.ErrBackendNotFound) { // queue hint for unreachable replica
-			dm.queueHint(string(oid), item)
-		}
+		// Queue a hint for ANY transport error — pre-Phase-B this was
+		// gated on ErrBackendNotFound only, so transient HTTP failures
+		// (timeout, 5xx, connection reset) silently dropped replicas.
+		// The hint TTL bounds total retry time, so a target that's
+		// permanently gone still drains rather than ballooning.
+		dm.queueHint(string(oid), item)
 	}
 
 	return acks
@@ -2626,10 +2744,15 @@ func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced co
 	queue = append(queue, hintedEntry{item: &cloned, expire: time.Now().Add(dm.hintTTL), size: size})
 	dm.hints[nodeID] = queue
 	dm.adjustHintAccounting(1, size)
+
+	// Snapshot under the lock — pre-Phase-B this read happened after
+	// Unlock and raced with adjustHintAccounting in the replay loop.
+	bytesNow := dm.hintBytes
+
 	dm.hintsMu.Unlock()
 
 	dm.metrics.hintedQueued.Add(1)
-	dm.metrics.hintedBytes.Store(dm.hintBytes)
+	dm.metrics.hintedBytes.Store(bytesNow)
 }
 
 // approxHintSize estimates the size of a hinted item for global caps.
@@ -3098,17 +3221,48 @@ func (dm *DistMemory) initStandaloneMembership() {
 
 	membership.Upsert(dm.localNode)
 
-	for _, seedAddr := range dm.seeds { // add seeds
-		if seedAddr == dm.localNode.Address { // skip self
+	for _, raw := range dm.seeds { // add seeds
+		spec := parseSeedSpec(raw)
+		if spec.addr == dm.localNode.Address { // skip self
 			continue
 		}
 
-		n := cluster.NewNode("", seedAddr)
-		membership.Upsert(n)
+		if spec.id == string(dm.localNode.ID) { // skip self by ID too
+			continue
+		}
+
+		membership.Upsert(cluster.NewNode(spec.id, spec.addr))
 	}
 
 	dm.membership = membership
 	dm.ring = ring
+}
+
+// seedSpec carries a parsed seed entry. Returned as a struct (not two
+// strings) so the same-typed pair doesn't trip the confusing-results
+// linter while staying compatible with the no-named-returns rule.
+type seedSpec struct {
+	id   string
+	addr string
+}
+
+// parseSeedSpec splits a seed entry into id + addr. The accepted
+// shapes are `id@addr` (cross-process clusters where every node
+// must know its peers' IDs to route through the consistent hash
+// ring) and bare `addr` (legacy / in-process tests that rely on
+// heartbeat or gossip to fill the ID later). Everything before the
+// first `@` is the ID; everything after is the address.
+//
+// `id@addr` is what the production server binary uses — without IDs
+// in seeds, the ring lookups return empty owners, every node
+// promotes itself, and writes never propagate across the cluster.
+func parseSeedSpec(raw string) seedSpec {
+	id, addr, found := strings.Cut(raw, "@")
+	if !found {
+		return seedSpec{addr: raw}
+	}
+
+	return seedSpec{id: id, addr: addr}
 }
 
 // heartbeatLoop probes peers and updates membership (best-effort experimental).
@@ -3184,6 +3338,10 @@ func (dm *DistMemory) getImpl(ctx context.Context, key string) (*cache.Item, boo
 // param so it can attach owners.count / acks attributes mid-flight;
 // returns the operation error for the wrapper to record on the span.
 func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.Span) error {
+	if dm.draining.Load() {
+		return sentinel.ErrDraining
+	}
+
 	dm.metrics.writeAttempts.Add(1)
 
 	owners := dm.lookupOwners(item.Key)
@@ -3225,23 +3383,36 @@ func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.
 	return nil
 }
 
-// removeImpl is the business logic for Remove.
+// removeImpl is the business logic for Remove. Mirrors setImpl's
+// primary-routing semantics: only owners[0] runs applyRemove +
+// replica fan-out locally; everyone else (replicas, non-owners)
+// forwards to the primary so the delete reaches every owner.
+//
+// Pre-fix this branched on dm.ownsKeyInternal which returns true for
+// any owner — replica-initiated removes ran applyRemove locally,
+// whose fan-out then skipped owners[0] under the assumption that
+// the caller WAS owners[0]. Net effect: deletes from a replica
+// never reached the primary, and the value lingered until TTL.
 func (dm *DistMemory) removeImpl(ctx context.Context, keys []string) error {
+	if dm.draining.Load() {
+		return sentinel.ErrDraining
+	}
+
 	for _, key := range keys {
-		if dm.ownsKeyInternal(key) { // primary path
+		owners := dm.lookupOwners(key)
+		if len(owners) == 0 {
+			continue
+		}
+
+		if owners[0] == dm.localNode.ID { // primary path
 			dm.applyRemove(ctx, key, true)
 
 			continue
 		}
 
 		transport := dm.loadTransport()
-		if transport == nil { // non-owner without transport
+		if transport == nil { // non-primary without transport
 			return sentinel.ErrNotOwner
-		}
-
-		owners := dm.ring.Lookup(key)
-		if len(owners) == 0 {
-			continue
 		}
 
 		dm.metrics.forwardRemove.Add(1)
@@ -3348,6 +3519,26 @@ var distMetricSpecs = []distMetricSpec{
 		name: "dist.heartbeat.failure", unit: unitProbe, counter: true,
 		desc: "Failed heartbeat probes",
 		get:  func(m DistMetrics) int64 { return m.HeartbeatFailure },
+	},
+	{
+		name: "dist.heartbeat.indirect_probe.success", unit: unitProbe, counter: true,
+		desc: "Indirect probes that succeeded (relay reached target)",
+		get:  func(m DistMetrics) int64 { return m.IndirectProbeSuccess },
+	},
+	{
+		name: "dist.heartbeat.indirect_probe.failure", unit: unitProbe, counter: true,
+		desc: "Indirect probes that failed (relay confirmed target unreachable)",
+		get:  func(m DistMetrics) int64 { return m.IndirectProbeFailure },
+	},
+	{
+		name: "dist.heartbeat.indirect_probe.refuted", unit: unitProbe, counter: true,
+		desc: "Direct probe failed but indirect probe succeeded — caller-side network was the issue",
+		get:  func(m DistMetrics) int64 { return m.IndirectProbeRefuted },
+	},
+	{
+		name: "dist.drains", unit: unitTransition, counter: true,
+		desc: "Drain transitions observed on this node (cumulative; 0 or 1 in normal use)",
+		get:  func(m DistMetrics) int64 { return m.Drains },
 	},
 	{
 		name: "dist.nodes.suspect", unit: unitTransition, counter: true,
@@ -3890,17 +4081,7 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 
 	if err != nil {
 		dm.metrics.heartbeatFailure.Add(1)
-
-		if node.State == cluster.NodeAlive { // escalate
-			dm.membership.Mark(node.ID, cluster.NodeSuspect)
-			dm.metrics.nodesSuspect.Add(1)
-
-			dm.logger.Info(
-				"peer marked suspect (probe failed)",
-				slog.String("peer_id", string(node.ID)),
-				slog.Any("err", err),
-			)
-		}
+		dm.handleProbeFailure(ctx, transport, node, err)
 
 		return
 	}
@@ -3908,4 +4089,131 @@ func (dm *DistMemory) evaluateLiveness(ctx context.Context, now time.Time, node 
 	dm.metrics.heartbeatSuccess.Add(1)
 	// Mark alive (refresh LastSeen, clear suspicion)
 	dm.membership.Mark(node.ID, cluster.NodeAlive)
+}
+
+// handleProbeFailure runs the SWIM indirect-probe refutation path on
+// a direct-probe failure: when indirect probes are enabled and any
+// relay confirms the target is reachable, the direct failure is
+// dismissed as caller-side. Otherwise the target is escalated to
+// suspect. Extracted from evaluateLiveness to keep that function under
+// the function-length lint cap.
+func (dm *DistMemory) handleProbeFailure(ctx context.Context, transport DistTransport, node *cluster.Node, directErr error) {
+	if dm.indirectProbeK > 0 && dm.indirectProbeReachable(ctx, transport, node.ID) {
+		dm.metrics.indirectProbeRefuted.Add(1)
+
+		dm.logger.Info(
+			"peer probe refuted by indirect probe",
+			slog.String("peer_id", string(node.ID)),
+			slog.Any("direct_err", directErr),
+		)
+
+		// Refresh LastSeen — target is alive per the indirect path.
+		dm.membership.Mark(node.ID, cluster.NodeAlive)
+
+		return
+	}
+
+	if node.State != cluster.NodeAlive {
+		return
+	}
+
+	dm.membership.Mark(node.ID, cluster.NodeSuspect)
+	dm.metrics.nodesSuspect.Add(1)
+
+	dm.logger.Info(
+		"peer marked suspect (probe failed)",
+		slog.String("peer_id", string(node.ID)),
+		slog.Any("err", directErr),
+	)
+}
+
+// indirectProbeReachable runs up to indirectProbeK indirect probes
+// against `targetID` via random alive peers. Returns true the moment
+// any relay reports the target reachable — the caller's direct probe
+// is then refuted and the target is treated as alive. Returns false if
+// no relay can confirm reachability (genuinely down, or no relays
+// available).
+//
+// Probes run sequentially with a per-probe timeout to bound the
+// caller's heartbeat tick latency. Sequential is correct here: the
+// first success short-circuits, and a parallel implementation would
+// pay the full timeout on a fully-down target.
+func (dm *DistMemory) indirectProbeReachable(ctx context.Context, transport DistTransport, targetID cluster.NodeID) bool {
+	relays := dm.pickIndirectRelays(targetID, dm.indirectProbeK)
+	if len(relays) == 0 {
+		return false
+	}
+
+	timeout := dm.indirectProbeTimeout
+	if timeout <= 0 {
+		timeout = dm.hbInterval / 2
+	}
+
+	for _, relay := range relays {
+		probeCtx, cancel := context.WithTimeout(ctx, timeout)
+		err := transport.IndirectHealth(probeCtx, string(relay.ID), string(targetID))
+
+		cancel()
+
+		if err == nil {
+			dm.metrics.indirectProbeSuccess.Add(1)
+
+			return true
+		}
+
+		dm.metrics.indirectProbeFailure.Add(1)
+	}
+
+	return false
+}
+
+// pickIndirectRelays returns up to k random alive members other than
+// self and target. When fewer than k qualify, returns whatever is
+// available (no padding). Uses crypto/rand for selection to keep the
+// pre-existing G404-free posture in this file.
+func (dm *DistMemory) pickIndirectRelays(targetID cluster.NodeID, k int) []*cluster.Node {
+	if dm.membership == nil || k <= 0 {
+		return nil
+	}
+
+	const relayPrealloc = 8
+
+	candidates := make([]*cluster.Node, 0, relayPrealloc)
+
+	for _, n := range dm.membership.List() {
+		if n == nil {
+			continue
+		}
+
+		if n.ID == dm.localNode.ID || n.ID == targetID {
+			continue
+		}
+
+		if n.State != cluster.NodeAlive {
+			continue
+		}
+
+		candidates = append(candidates, n)
+	}
+
+	if len(candidates) <= k {
+		return candidates
+	}
+
+	// Fisher–Yates partial shuffle for the first k positions, using
+	// crypto/rand to match the rest of this file's randomness posture.
+	for i := range k {
+		span := len(candidates) - i
+
+		idxBig, err := rand.Int(rand.Reader, big.NewInt(int64(span)))
+		if err != nil {
+			continue
+		}
+
+		swap := i + int(idxBig.Int64())
+
+		candidates[i], candidates[swap] = candidates[swap], candidates[i]
+	}
+
+	return candidates[:k]
 }

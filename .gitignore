@@ -96,6 +96,3 @@ tags
 
 ### Project ###
 .dccache
-cmd/
-bin/
-.github/instructions/instructions.md

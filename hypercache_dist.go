@@ -1,6 +1,8 @@
 package hypercache
 
 import (
+	"context"
+
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
@@ -87,6 +89,24 @@ func (hyperCache *HyperCache[T]) DistRingHashSpots() []string {
 	}
 
 	return nil
+}
+
+// DistDrain marks the underlying distributed backend for graceful
+// shutdown when one is configured: /health flips to 503 on the dist
+// HTTP listener, Set/Remove return sentinel.ErrDraining, Get
+// continues to serve. Returns nil when the backend is not a
+// DistMemory (no-op for in-memory and Redis backends), so callers
+// don't need to type-check before invoking it.
+//
+// One-way and idempotent. Operators clear it by restarting the
+// process after Drain settles and the cache has been Stopped.
+func (hyperCache *HyperCache[T]) DistDrain(ctx context.Context) error {
+	dm, ok := any(hyperCache.backend).(*backend.DistMemory)
+	if !ok {
+		return nil
+	}
+
+	return dm.Drain(ctx)
 }
 
 // DistHeartbeatMetrics returns distributed heartbeat metrics if supported.

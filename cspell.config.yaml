@@ -46,6 +46,7 @@ words:
   - bitnami
   - bodyclose
   - bufbuild
+  - buildx
   - cacheerrors
   - cachev
   - calledback
@@ -69,6 +70,7 @@ words:
   - depguard
   - derr
   - distconfig
+  - distroless
   - EDITMSG
   - elif
   - errcheck
@@ -110,6 +112,7 @@ words:
   - gosec
   - GOTOOLCHAIN
   - govulncheck
+  - healthz
   - histogramcollector
   - HMAC
   - honnef
@@ -132,9 +135,9 @@ words:
   - longbridgeapp
   - maxmemory
   - memprofile
+  - Merkle
   - metricdata
   - metricnoop
-  - Merkle
   - mfinal
   - Mgmt
   - microbenchmark
@@ -150,6 +153,7 @@ words:
   - nolint
   - nolintlint
   - nonamedreturns
+  - nonroot
   - nosec
   - NOVENDOR
   - paralleltest
@@ -186,8 +190,10 @@ words:
   - tparallel
   - tracetest
   - traefik
+  - TTLMs
   - ugorji
   - unmarshals
+  - unpadded
   - unsharded
   - upserted
   - upserts
