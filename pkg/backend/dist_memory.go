@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"hash"
 	"hash/fnv"
@@ -17,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/hyp3rd/ewrap"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -1443,7 +1443,8 @@ func (dm *DistMemory) Drain(_ context.Context) error {
 
 	dm.metrics.drains.Add(1)
 
-	dm.logger.Info("dist node draining",
+	dm.logger.Info(
+		"dist node draining",
 		slog.String("addr", dm.nodeAddr),
 	)
 

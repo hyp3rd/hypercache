@@ -80,7 +80,8 @@ func newKeysCursorNode(t *testing.T) *backend.DistMemory {
 
 	addr := AllocatePort(t)
 
-	bi, err := backend.NewDistMemory(context.Background(),
+	bi, err := backend.NewDistMemory(
+		context.Background(),
 		backend.WithDistNode("keys-A", addr),
 		backend.WithDistReplication(1),
 	)

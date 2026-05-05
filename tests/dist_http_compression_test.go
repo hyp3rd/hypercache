@@ -24,7 +24,7 @@ func valueAsBytes(v any) ([]byte, bool) {
 
 	case string:
 		// Try base64 first — that's how []byte serializes through
-		// encoding/json. Fall back to the raw string bytes for
+		// github.com/goccy/go-json. Fall back to the raw string bytes for
 		// values that were always-string.
 		decoded, err := base64.StdEncoding.DecodeString(x)
 		if err == nil {

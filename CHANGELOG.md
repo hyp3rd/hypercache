@@ -39,6 +39,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (replica path), `json.RawMessage` (non-owner-GET path), and the
   base64-heuristic length floors. Runs without docker for tight
   feedback during development.
+- **Multi-arch container image workflow** —
+  [.github/workflows/image.yml](.github/workflows/image.yml) builds
+  the `hypercache-server` Docker image for `linux/amd64` and
+  `linux/arm64` via buildx + QEMU, publishing to GHCR
+  (`ghcr.io/<owner>/<repo>/hypercache-server`). PR triggers
+  build-only (no registry pollution), `main` pushes publish
+  `:main` and `:sha-<short>`, semver tag pushes (`v*.*.*`)
+  publish `:v1.2.3`, `:1.2.3`, `:1.2`, `:1`, and `:latest`.
+  `:latest` is **deliberately restricted to semver tag pushes** —
+  production deployments pinning `:latest` always get a stable
+  release, never an in-flight `main` commit. GHA cache speeds
+  re-builds when only Go source has changed.
 
 ### Fixed
 

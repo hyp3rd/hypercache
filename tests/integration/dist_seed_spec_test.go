@@ -51,7 +51,8 @@ func buildSeedSpecCluster(t *testing.T) *seedSpecCluster {
 	}
 
 	mkNode := func(id, addr string) *backend.DistMemory {
-		bm, err := backend.NewDistMemory(ctx,
+		bm, err := backend.NewDistMemory(
+			ctx,
 			backend.WithDistNode(id, addr),
 			backend.WithDistSeeds(seedsFor(id)),
 			backend.WithDistReplication(3),

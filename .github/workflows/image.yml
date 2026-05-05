@@ -1,0 +1,97 @@
+---
+name: image
+
+# Build (and on the right refs, publish) the hypercache-server
+# container image. Three trigger shapes:
+#   * pull_request — build only, never push (catches Dockerfile
+#     regressions without polluting the registry).
+#   * push to main — build + push as `:main` and `:sha-<short>`
+#     so consumers can pin to either.
+#   * tag push (v*.*.*) — build + push semver-flavored tags
+#     (`:v1.2.3`, `:1.2.3`, `:1.2`, `:1`, `:latest`) for stable
+#     pinning.
+# Multi-arch linux/amd64 + linux/arm64 via buildx + qemu so
+# operators on Apple Silicon (or k8s nodes on Graviton) get a
+# native binary without emulation.
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+    tags: [ "v*.*.*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/hypercache-server
+
+jobs:
+  build:
+    name: build${{ github.event_name == 'pull_request' && ' (no push)' || ' + push'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Login is gated on non-PR events. Forks running PR workflows
+      # don't have access to GITHUB_TOKEN with packages:write, and
+      # we never push from a PR anyway — so skipping the login step
+      # avoids an avoidable failure on those events.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # docker/metadata-action computes the tag set + OCI labels
+      # from the triggering ref. The semver patterns only match
+      # when the ref is a `v*.*.*` tag; on branch/PR pushes they
+      # produce no tags and the type=ref/type=sha entries take over.
+      # `:latest` is restricted to semver tag pushes — production
+      # operators pinning to `:latest` get the highest stable
+      # release, never an in-flight main commit. The `latest=false`
+      # flavor disables the metadata-action default behavior that
+      # would otherwise tag `:latest` on every default-branch push.
+      - name: Compute tags and labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') }}
+          flavor: |
+            latest=false
+
+      - name: Build${{ github.event_name == 'pull_request' && '' || ' + push' }}
+        uses: docker/build-push-action@v7.1.0
+        with:
+          context: .
+          file: cmd/hypercache-server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GHA cache speeds re-builds when only Go source changed
+          # (the dependency-download layer stays warm).
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

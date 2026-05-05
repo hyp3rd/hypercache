@@ -46,6 +46,7 @@ words:
   - bitnami
   - bodyclose
   - bufbuild
+  - buildx
   - cacheerrors
   - cachev
   - calledback
