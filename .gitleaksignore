@@ -7,3 +7,9 @@ scripts/tests/10-test-cluster-api.sh:curl-auth-header:19
 scripts/tests/10-test-cluster-api.sh:curl-auth-header:26
 scripts/tests/10-test-cluster-api.sh:curl-auth-header:32
 scripts/tests/10-test-cluster-api.sh:curl-auth-header:36
+cmd/hypercache-server/README.md:curl-auth-header:50
+cmd/hypercache-server/README.md:curl-auth-header:55
+cmd/hypercache-server/README.md:curl-auth-header:59
+cmd/hypercache-server/README.md:curl-auth-header:102
+cmd/hypercache-server/README.md:curl-auth-header:108
+cmd/hypercache-server/README.md:curl-auth-header:112
