@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Race in `queueHint` between hint enqueue and hint replay.** Pre-fix,
+  the metric write `dm.metrics.hintedBytes.Store(dm.hintBytes)` happened
+  *after* releasing `hintsMu`, so a concurrent `adjustHintAccounting`
+  call from the replay loop could race the read. Capturing the value
+  under the lock closes the race. Surfaced when migration failures
+  began funneling through `queueHint` (Phase B.2 below) — previously
+  the migration path swallowed errors silently, so the hint enqueue
+  rate from rebalance ticks was much lower.
+
 ### Added
 
 - **Structured logging on the dist backend.** New `WithDistLogger(*slog.Logger)`
@@ -45,6 +56,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Stop` unregisters the callback so the SDK does not invoke it
   against a stopped backend. Library default is a no-op meter, so
   metrics cost nothing unless the caller opts in. Phase A.3 of the
+  production-readiness work.
+- **SWIM-style indirect heartbeat probes.** New
+  `WithDistIndirectProbes(k, timeout)` option enables the indirect-
+  probe refutation path: when a direct heartbeat to a peer fails,
+  this node asks `k` random alive peers to probe the target on its
+  behalf, and only marks the target suspect if every relay also
+  fails. Filters caller-side network blips (transient NIC reset,
+  single stuck connection in this node's pool) that would otherwise
+  cause spurious suspect/dead transitions. New transport method
+  `IndirectHealth(ctx, relayNodeID, targetNodeID)` and HTTP endpoint
+  `GET /internal/probe?target=<id>` carry the probe; auth-wrapped
+  identically to the rest of `/internal/*`. New metrics
+  `dist.heartbeat.indirect_probe.success`, `.failure`, `.refuted`
+  expose probe outcomes. `k = 0` (default) preserves the pre-Phase-B
+  behavior. Phase B.1 of the production-readiness work — note that
+  the heartbeat path still carries the `experimental` marker until
+  self-refutation via incarnation-disseminating gossip lands in a
+  later phase.
+- **Migration failures now retry through the hint queue.** When a
+  rebalance forwards a key to its new primary and the transport
+  returns *any* error (not just `ErrBackendNotFound`), the item is
+  enqueued onto the existing hint-replay queue keyed by the new
+  primary, instead of being logged and dropped. The hint-replay
+  loop drains it on its configured schedule until the hint TTL
+  expires. Same broadening applies to the `replicateTo` fan-out on
+  the primary `Set` path — transient HTTP failures (timeout, 5xx,
+  connection reset) no longer silently drop replicas. Phase B.2 of
+  the production-readiness work.
+- **On-wire compression for the dist HTTP transport.** New
+  `DistHTTPLimits.CompressionThreshold` field opts the auto-created
+  HTTP client into gzip-compressing Set request bodies whose
+  serialized payload exceeds the configured byte threshold. The
+  client sets `Content-Encoding: gzip` and the server transparently
+  decompresses (via fiber v3's auto-decoding `Body()`). Threshold
+  `0` (default) preserves the pre-Phase-B wire format byte-for-byte.
+  Operators on bandwidth-constrained links with values above ~1 KiB
+  typically see meaningful reductions; below-threshold values pay
+  no compression cost. Roll out the threshold to all peers before
+  raising it on any peer — a server with compression disabled will
+  reject a gzip body with HTTP 400. Phase B.3 of the
   production-readiness work.
 
 ## [0.5.0] — 2026-05-05

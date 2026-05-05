@@ -4,6 +4,8 @@ package backend
 
 import (
 	"context"
+
+	"github.com/hyp3rd/hypercache/internal/cluster"
 )
 
 // DisableHTTPForTest stops the internal HTTP server and clears transport (testing helper).
@@ -75,3 +77,16 @@ func (dm *DistMemory) StartHintReplayForTest(ctx context.Context) {
 
 // ReplayHintsForTest triggers a single synchronous replay cycle (testing helper).
 func (dm *DistMemory) ReplayHintsForTest(ctx context.Context) { dm.replayHints(ctx) }
+
+// IndirectProbeReachableForTest exposes the SWIM indirect-probe path
+// to test code: returns true when at least one relay confirms target
+// reachability, false otherwise. The same metrics
+// (dist.heartbeat.indirect_probe.*) increment as in production.
+func (dm *DistMemory) IndirectProbeReachableForTest(ctx context.Context, targetID string) bool {
+	transport := dm.loadTransport()
+	if transport == nil {
+		return false
+	}
+
+	return dm.indirectProbeReachable(ctx, transport, cluster.NodeID(targetID))
+}

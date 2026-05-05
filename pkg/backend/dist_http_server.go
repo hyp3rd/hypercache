@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -230,6 +231,20 @@ type DistHTTPLimits struct {
 	// ClientAuth=tls.RequireAndVerifyClientCert. The auto-client uses
 	// the same cert as its client cert via Certificates[0].
 	TLSConfig *tls.Config
+
+	// CompressionThreshold opts the dist HTTP transport into gzip
+	// compression of Set request bodies whose serialized payload size
+	// exceeds this many bytes. The client sets `Content-Encoding:
+	// gzip` and the server transparently decompresses before
+	// unmarshaling. 0 disables compression — matches the pre-Phase-B
+	// wire format byte-for-byte. Operators on bandwidth-constrained
+	// links with large values (>1 KiB) typically see meaningful
+	// reductions; values smaller than the threshold pay no cost.
+	//
+	// Server compatibility: a server with compression disabled will
+	// reject a gzip-encoded body with HTTP 400. Roll out the threshold
+	// to all peers before raising it on any peer.
+	CompressionThreshold int
 }
 
 // withDefaults fills any zero-valued field on l with the package default.
@@ -337,6 +352,7 @@ func (s *distHTTPServer) start(bindCtx context.Context, dm *DistMemory) error {
 	s.registerGet(dm)
 	s.registerRemove(dm)
 	s.registerHealth()
+	s.registerProbe(dm)
 	s.registerMerkle(dm)
 
 	return s.listen(bindCtx)
@@ -346,6 +362,11 @@ func (s *distHTTPServer) start(bindCtx context.Context, dm *DistMemory) error {
 // fan-outs to replicas. Uses s.ctx (server-lifecycle) as the backend
 // operation context — see the comment on distHTTPServer.ctx for why we
 // can't use the per-request fiber.Ctx here.
+//
+// Compression note: fiber v3's Body() auto-decompresses based on the
+// inbound `Content-Encoding` header, so this handler does not need
+// explicit gzip handling — it sees the plaintext JSON regardless of
+// whether the client compressed (CompressionThreshold > 0) or not.
 func (s *distHTTPServer) handleSet(fctx fiber.Ctx, dm *DistMemory) error {
 	var req httpSetRequest
 
@@ -432,6 +453,38 @@ func (s *distHTTPServer) registerHealth() {
 	// Operators who want a public health probe should supply a custom
 	// ServerVerify that exempts the /health path.
 	s.app.Get("/health", s.wrapAuth(func(fctx fiber.Ctx) error { return fctx.SendString("ok") }))
+}
+
+// registerProbe wires `/internal/probe?target=<id>` — the indirect-probe
+// relay endpoint used by the SWIM heartbeat path. The relay node calls
+// its own transport's Health(target) and reports the result. 200 = relay
+// reached the target; 502 = relay's probe failed; 404 = target unknown
+// to the relay; 400 = missing/empty target query parameter. Auth-wrapped
+// like the rest of `/internal/*` because indirectly probing arbitrary
+// node IDs through a member is a directory-enumeration vector.
+func (s *distHTTPServer) registerProbe(dm *DistMemory) {
+	s.app.Get("/internal/probe", s.wrapAuth(func(fctx fiber.Ctx) error {
+		target := fctx.Query("target")
+		if target == "" {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "missing target"})
+		}
+
+		transport := dm.loadTransport()
+		if transport == nil {
+			return fctx.SendStatus(fiber.StatusServiceUnavailable)
+		}
+
+		err := transport.Health(s.ctx, target)
+		if err != nil {
+			if errors.Is(err, sentinel.ErrBackendNotFound) {
+				return fctx.SendStatus(fiber.StatusNotFound)
+			}
+
+			return fctx.SendStatus(fiber.StatusBadGateway)
+		}
+
+		return fctx.SendString("ok")
+	}))
 }
 
 func (s *distHTTPServer) registerMerkle(dm *DistMemory) {
