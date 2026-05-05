@@ -77,6 +77,11 @@ var (
 	// Operators who genuinely want asymmetric auth must set DistHTTPAuth.AllowAnonymousInbound explicitly.
 	ErrInsecureAuthConfig = ewrap.New("dist HTTP auth: ClientSign without inbound verifier (set Token, ServerVerify, or AllowAnonymousInbound)")
 
+	// ErrDraining is returned by Set/Remove when the dist backend has been Drained — the node is preparing to
+	// shut down, /health is reporting 503, and new writes must be redirected by the caller. Reads still succeed
+	// because the node continues to hold data while in-flight ownership transfers complete.
+	ErrDraining = ewrap.New("dist node is draining")
+
 	// ErrTypeMismatch is returned by the typed cache wrapper when a stored value is not assertable to the wrapper's V parameter.
 	ErrTypeMismatch = ewrap.New("cached value type mismatch")
 

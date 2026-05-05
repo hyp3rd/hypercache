@@ -97,6 +97,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   raising it on any peer — a server with compression disabled will
   reject a gzip body with HTTP 400. Phase B.3 of the
   production-readiness work.
+- **Drain endpoint for graceful shutdown.** New
+  `DistMemory.Drain(ctx)` method and `POST /dist/drain` HTTP
+  endpoint mark the node for shutdown: `/health` returns 503 so
+  load balancers stop routing, `Set`/`Remove` return
+  `sentinel.ErrDraining`, `Get` continues to serve so in-flight
+  reads complete. New `IsDraining()` accessor for dashboards. New
+  metric `dist.drains` records transitions. Drain is one-way and
+  idempotent. Phase C.1 of the production-readiness work.
+- **Cursor-based key enumeration** replaces the pre-Phase-C
+  testing-only `/internal/keys` endpoint. The endpoint now returns
+  shard-level pages with a `next_cursor` token; clients walk the
+  cursor chain to enumerate the full key set. New `?limit=<n>` query
+  parameter truncates within a shard for clusters with very large
+  shards (response then carries `truncated=true` and the same
+  `next_cursor`). The `DistHTTPTransport.ListKeys` helper now walks
+  pages internally so existing callers (anti-entropy fallback, tests)
+  keep their full-set semantics unchanged. Phase C.2 of the
+  production-readiness work.
+- **Operations runbook** at [docs/operations.md](docs/operations.md)
+  covering split-brain, hint-queue overflow, rebalance under load,
+  replica loss, observability wiring (logger/tracer/meter), drain
+  procedure, and capacity-planning notes. Cross-links each failure
+  mode to the metrics that surface it. Phase C.3 of the
+  production-readiness work.
 
 ## [0.5.0] — 2026-05-05
 

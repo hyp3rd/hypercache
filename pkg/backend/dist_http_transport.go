@@ -421,35 +421,88 @@ func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*Me
 	return &MerkleTree{Root: body.Root, LeafHashes: body.LeafHashes, ChunkSize: body.ChunkSize}, nil
 }
 
-// ListKeys returns all keys from a remote node (expensive; used for tests / anti-entropy fallback).
+// ListKeys returns all keys from a remote node (expensive; used for
+// tests / anti-entropy fallback). Walks the cursor-paginated
+// `/internal/keys` endpoint introduced in Phase C.2 — callers
+// continue to receive the full key set unchanged.
 func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]string, error) {
-	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/internal/keys", nil, nil)
+	var (
+		all    []string
+		cursor string
+	)
+
+	const safetyLimit = 1024 // upper bound to prevent infinite loop on a buggy server
+
+	for range safetyLimit {
+		page, err := t.listKeysPage(ctx, nodeID, cursor)
+		if err != nil {
+			return nil, err
+		}
+
+		all = append(all, page.Keys...)
+
+		if page.NextCursor == "" {
+			return all, nil
+		}
+
+		// Truncated pages return next_cursor == current cursor.
+		// Without bumping limit, we'd loop forever — but ListKeys
+		// never sets a limit (it asks for the full shard each time),
+		// so server-side truncation cannot occur on this path.
+		// Defensive: break if cursor doesn't advance.
+		if page.NextCursor == cursor {
+			break
+		}
+
+		cursor = page.NextCursor
+	}
+
+	return all, nil
+}
+
+// listKeysPage is the per-page fetch for ListKeys; broken out so the
+// pagination loop above stays readable.
+func (t *DistHTTPTransport) listKeysPage(ctx context.Context, nodeID, cursor string) (keysPageResp, error) {
+	var query url.Values
+
+	if cursor != "" {
+		query = url.Values{"cursor": []string{cursor}}
+	}
+
+	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/internal/keys", query, nil)
 	if err != nil {
-		return nil, ewrap.Wrap(err, errMsgNewRequest)
+		return keysPageResp{}, ewrap.Wrap(err, errMsgNewRequest)
 	}
 
 	resp, err := t.doTrusted(hreq)
 	if err != nil {
-		return nil, err
+		return keysPageResp{}, err
 	}
 
 	respBody := t.limitedBody(resp)
 	defer drainBody(respBody)
 
 	if resp.StatusCode >= statusThreshold {
-		return nil, ewrap.Newf("list keys status %d", resp.StatusCode)
+		return keysPageResp{}, ewrap.Newf("list keys status %d", resp.StatusCode)
 	}
 
-	var body struct {
-		Keys []string `json:"keys"`
+	var page keysPageResp
+
+	unmarshalErr := readAndUnmarshal(respBody, &page)
+	if unmarshalErr != nil {
+		return keysPageResp{}, unmarshalErr
 	}
 
-	err = readAndUnmarshal(respBody, &body)
-	if err != nil {
-		return nil, err
-	}
+	return page, nil
+}
 
-	return body.Keys, nil
+// keysPageResp matches the JSON shape returned by /internal/keys —
+// kept private to the transport since handleKeys is the source of
+// truth for the wire format.
+type keysPageResp struct {
+	Keys       []string `json:"keys"`
+	NextCursor string   `json:"next_cursor"`
+	Truncated  bool     `json:"truncated"`
 }
 
 // limitedBody wraps resp.Body so reads beyond respBodyLimit return

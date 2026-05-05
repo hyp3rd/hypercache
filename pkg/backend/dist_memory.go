@@ -183,6 +183,13 @@ type DistMemory struct {
 	// stopped guards Stop() against double-invocation (idempotent shutdown).
 	stopped atomic.Bool
 
+	// draining is set by Drain to mark this node for graceful shutdown:
+	// /health returns 503, Set/Remove reject with sentinel.ErrDraining,
+	// Get continues to serve. One-way — operators restart the process
+	// to clear it. The CAS in Drain ensures the metric increment fires
+	// exactly once per drain transition.
+	draining atomic.Bool
+
 	// tracer is the OpenTelemetry tracer used to create spans on the
 	// public Get/Set/Remove ops and on replication fan-out. Defaults
 	// to noop.NewTracerProvider so library code emits no spans unless
@@ -1158,6 +1165,7 @@ type distMetrics struct {
 	indirectProbeSuccess         atomic.Int64 // indirect probes that succeeded (target reachable via relay)
 	indirectProbeFailure         atomic.Int64 // indirect probes that failed (relay confirmed target unreachable)
 	indirectProbeRefuted         atomic.Int64 // direct probe failed but indirect probe succeeded — target reachable, caller's network was the issue
+	drains                       atomic.Int64 // number of drain transitions observed on this node (one-way, so 0 or 1 in normal use)
 	nodesSuspect                 atomic.Int64 // number of times a node transitioned to suspect
 	nodesDead                    atomic.Int64 // number of times a node transitioned to dead/pruned
 	nodesRemoved                 atomic.Int64
@@ -1204,6 +1212,7 @@ type DistMetrics struct {
 	IndirectProbeSuccess         int64
 	IndirectProbeFailure         int64
 	IndirectProbeRefuted         int64
+	Drains                       int64
 	NodesSuspect                 int64
 	NodesDead                    int64
 	NodesRemoved                 int64
@@ -1267,6 +1276,7 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		IndirectProbeSuccess:         dm.metrics.indirectProbeSuccess.Load(),
 		IndirectProbeFailure:         dm.metrics.indirectProbeFailure.Load(),
 		IndirectProbeRefuted:         dm.metrics.indirectProbeRefuted.Load(),
+		Drains:                       dm.metrics.drains.Load(),
 		NodesSuspect:                 dm.metrics.nodesSuspect.Load(),
 		NodesDead:                    dm.metrics.nodesDead.Load(),
 		NodesRemoved:                 dm.metrics.nodesRemoved.Load(),
@@ -1412,6 +1422,38 @@ func (dm *DistMemory) Stop(ctx context.Context) error {
 
 	return nil
 }
+
+// Drain marks this node for graceful shutdown: future Set/Remove
+// return sentinel.ErrDraining, /health reports HTTP 503 so external
+// load balancers stop routing traffic, and the operator should
+// follow up with Stop after Drain has settled. Get continues to
+// serve so in-flight reads complete with consistent data.
+//
+// Drain is one-way and idempotent — the second call is a no-op
+// (returns nil). Operators clear it by restarting the process.
+//
+// Returns nil today; the signature retains an error so future
+// versions can wait for active replication fan-out to flush before
+// returning (Phase B's hint queue makes that meaningful) without a
+// breaking change.
+func (dm *DistMemory) Drain(_ context.Context) error {
+	if !dm.draining.CompareAndSwap(false, true) {
+		return nil // already draining
+	}
+
+	dm.metrics.drains.Add(1)
+
+	dm.logger.Info("dist node draining",
+		slog.String("addr", dm.nodeAddr),
+	)
+
+	return nil
+}
+
+// IsDraining reports whether Drain has been called on this node.
+// Operator helper for dashboards / readiness probes that want to
+// surface drain state independently of the dist HTTP endpoint.
+func (dm *DistMemory) IsDraining() bool { return dm.draining.Load() }
 
 // --- Sync helper methods (placed after exported methods to satisfy ordering linter) ---
 
@@ -3264,6 +3306,10 @@ func (dm *DistMemory) getImpl(ctx context.Context, key string) (*cache.Item, boo
 // param so it can attach owners.count / acks attributes mid-flight;
 // returns the operation error for the wrapper to record on the span.
 func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.Span) error {
+	if dm.draining.Load() {
+		return sentinel.ErrDraining
+	}
+
 	dm.metrics.writeAttempts.Add(1)
 
 	owners := dm.lookupOwners(item.Key)
@@ -3307,6 +3353,10 @@ func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.
 
 // removeImpl is the business logic for Remove.
 func (dm *DistMemory) removeImpl(ctx context.Context, keys []string) error {
+	if dm.draining.Load() {
+		return sentinel.ErrDraining
+	}
+
 	for _, key := range keys {
 		if dm.ownsKeyInternal(key) { // primary path
 			dm.applyRemove(ctx, key, true)
@@ -3443,6 +3493,11 @@ var distMetricSpecs = []distMetricSpec{
 		name: "dist.heartbeat.indirect_probe.refuted", unit: unitProbe, counter: true,
 		desc: "Direct probe failed but indirect probe succeeded — caller-side network was the issue",
 		get:  func(m DistMetrics) int64 { return m.IndirectProbeRefuted },
+	},
+	{
+		name: "dist.drains", unit: unitTransition, counter: true,
+		desc: "Drain transitions observed on this node (cumulative; 0 or 1 in normal use)",
+		get:  func(m DistMetrics) int64 { return m.Drains },
 	},
 	{
 		name: "dist.nodes.suspect", unit: unitTransition, counter: true,

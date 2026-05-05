@@ -351,7 +351,8 @@ func (s *distHTTPServer) start(bindCtx context.Context, dm *DistMemory) error {
 	s.registerSet(dm)
 	s.registerGet(dm)
 	s.registerRemove(dm)
-	s.registerHealth()
+	s.registerHealth(dm)
+	s.registerDrain(dm)
 	s.registerProbe(dm)
 	s.registerMerkle(dm)
 
@@ -448,11 +449,39 @@ func (s *distHTTPServer) registerRemove(dm *DistMemory) {
 	s.app.Delete("/internal/del", handler)
 }
 
-func (s *distHTTPServer) registerHealth() {
+func (s *distHTTPServer) registerHealth(dm *DistMemory) {
 	// Auth-wrapped: when a token is configured, /health requires it too.
 	// Operators who want a public health probe should supply a custom
 	// ServerVerify that exempts the /health path.
-	s.app.Get("/health", s.wrapAuth(func(fctx fiber.Ctx) error { return fctx.SendString("ok") }))
+	//
+	// Drain semantics: when dm.IsDraining() is true the endpoint
+	// returns HTTP 503 with body "draining" so external load balancers
+	// stop routing traffic. The drain check fires before the
+	// always-ok response so a draining node never falsely advertises
+	// readiness.
+	s.app.Get("/health", s.wrapAuth(func(fctx fiber.Ctx) error {
+		if dm.IsDraining() {
+			return fctx.Status(fiber.StatusServiceUnavailable).SendString("draining")
+		}
+
+		return fctx.SendString("ok")
+	}))
+}
+
+// registerDrain wires `POST /dist/drain` — the operator-driven
+// graceful-shutdown trigger. Auth-wrapped because draining is a
+// privileged action: any peer that can call it can stall this node's
+// writes. Returns 200 on the first successful transition; idempotent
+// follow-up calls also return 200 (drain is one-way per Drain doc).
+func (s *distHTTPServer) registerDrain(dm *DistMemory) {
+	s.app.Post("/dist/drain", s.wrapAuth(func(fctx fiber.Ctx) error {
+		err := dm.Drain(s.ctx)
+		if err != nil {
+			return fctx.Status(fiber.StatusInternalServerError).JSON(fiber.Map{constants.ErrorLabel: err.Error()})
+		}
+
+		return fctx.JSON(fiber.Map{"draining": true})
+	}))
 }
 
 // registerProbe wires `/internal/probe?target=<id>` — the indirect-probe
@@ -498,22 +527,107 @@ func (s *distHTTPServer) registerMerkle(dm *DistMemory) {
 		})
 	}))
 
-	// naive keys listing for anti-entropy (testing only). Not efficient for large datasets.
 	s.app.Get("/internal/keys", s.wrapAuth(func(fctx fiber.Ctx) error {
-		var keys []string
+		return handleKeys(fctx, dm)
+	}))
+}
 
-		for _, shard := range dm.shards {
-			if shard == nil {
-				continue
-			}
+// handleKeys serves shard-level cursor pagination for the
+// `/internal/keys` endpoint. Pre-Phase-C this returned every key in
+// the cluster in one response — fine for test fixtures, infeasible
+// for any real workload. The cursor is the *next* shard index to
+// read; an absent cursor starts at 0, an empty `next_cursor` in the
+// response signals end-of-iteration.
+//
+// Pagination granularity is per-shard rather than per-key on
+// purpose. ConcurrentMap.All() iterates in unspecified order, so a
+// per-key cursor would either need a stable sort (materializing the
+// full key set defeats the pagination) or session state on the
+// server. Per-shard pagination is bounded by shard size (typically
+// well under a million keys) and matches the natural unit of work.
+//
+// Operators with shards larger than the page-size cap can use the
+// `limit` query parameter to truncate within a shard — the response
+// then carries an unchanged `next_cursor` and a `truncated` flag so
+// the client knows the same shard still has more keys. The simple
+// case (no limit) returns the full shard.
+func handleKeys(fctx fiber.Ctx, dm *DistMemory) error {
+	cursor := 0
 
-			for k := range shard.items.All() {
-				keys = append(keys, k)
-			}
+	if raw := fctx.Query("cursor"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "invalid cursor"})
 		}
 
-		return fctx.JSON(fiber.Map{"keys": keys})
-	}))
+		cursor = parsed
+	}
+
+	limit := 0
+
+	if raw := fctx.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: "invalid limit"})
+		}
+
+		limit = parsed
+	}
+
+	if cursor >= len(dm.shards) {
+		return fctx.JSON(fiber.Map{"keys": []string{}, "next_cursor": ""})
+	}
+
+	shard := dm.shards[cursor]
+	if shard == nil { // skip nil shards (defensive)
+		return fctx.JSON(fiber.Map{"keys": []string{}, "next_cursor": strconv.Itoa(cursor + 1)})
+	}
+
+	keys, truncated := collectShardKeys(shard, limit)
+
+	nextCursor := ""
+
+	switch {
+	case truncated:
+		// Same shard still has keys past the limit; client must
+		// re-request with a larger limit (per-shard pagination doesn't
+		// resume mid-shard, which would require session state).
+		nextCursor = strconv.Itoa(cursor)
+
+	case cursor+1 < len(dm.shards):
+		nextCursor = strconv.Itoa(cursor + 1)
+
+	default:
+		// Last shard fully drained — leave nextCursor empty to signal
+		// end-of-iteration to the client.
+	}
+
+	return fctx.JSON(fiber.Map{
+		"keys":        keys,
+		"next_cursor": nextCursor,
+		"truncated":   truncated,
+	})
+}
+
+// collectShardKeys reads up to `limit` keys from shard. limit<=0
+// returns the full shard. The truncated bool reports whether the
+// shard had more keys than `limit` allowed.
+func collectShardKeys(shard *distShard, limit int) ([]string, bool) {
+	out := make([]string, 0, shard.items.Count())
+
+	truncated := false
+
+	for k := range shard.items.All() {
+		if limit > 0 && len(out) >= limit {
+			truncated = true
+
+			break
+		}
+
+		out = append(out, k)
+	}
+
+	return out, truncated
 }
 
 func (s *distHTTPServer) listen(ctx context.Context) error {
