@@ -75,7 +75,12 @@ type DistMemory struct {
 	nodeID       string
 	seeds        []string // static seed node addresses
 
-	// heartbeat / failure detection (experimental)
+	// heartbeat / failure detection. Phase E added SWIM
+	// self-refutation (refuteIfSuspected) and HTTP gossip
+	// dissemination, retiring the prior "experimental" marker —
+	// the path now disseminates suspect/dead transitions across
+	// the cluster and lets a falsely-accused node bump its
+	// incarnation to clear suspicion.
 	hbInterval     time.Duration
 	hbSuspectAfter time.Duration
 	hbDeadAfter    time.Duration
@@ -3023,19 +3028,32 @@ func (dm *DistMemory) runGossipTick() {
 	}
 
 	target := candidates[idxBig.Int64()]
-
-	ip, ok := dm.loadTransport().(*InProcessTransport)
-	if !ok {
-		return
-	}
-
-	remote, ok2 := ip.backends[string(target.ID)]
-	if !ok2 {
-		return
-	}
-
+	transport := dm.loadTransport()
 	snapshot := dm.membership.List()
-	remote.acceptGossip(snapshot)
+
+	// In-process fast path: skip the wire and call acceptGossip
+	// directly. Pre-Phase-E this was the ONLY path; the function
+	// bailed for any other transport type, so cross-process
+	// clusters never disseminated membership / never refuted
+	// suspect claims. The fall-through below now uses the
+	// transport's Gossip method, which routes via HTTP for the
+	// auto-created DistHTTPTransport.
+	if ip, ok := transport.(*InProcessTransport); ok {
+		if remote, ok2 := ip.backends[string(target.ID)]; ok2 {
+			remote.acceptGossip(snapshot)
+		}
+
+		return
+	}
+
+	gossipErr := transport.Gossip(dm.lifeCtx, string(target.ID), nodesToGossipMembers(snapshot))
+	if gossipErr != nil {
+		dm.logger.Debug(
+			"gossip push failed",
+			slog.String("peer_id", string(target.ID)),
+			slog.Any("err", gossipErr),
+		)
+	}
 }
 
 func (dm *DistMemory) acceptGossip(nodes []*cluster.Node) {
@@ -3045,6 +3063,8 @@ func (dm *DistMemory) acceptGossip(nodes []*cluster.Node) {
 
 	for _, node := range nodes {
 		if node.ID == dm.localNode.ID {
+			dm.refuteIfSuspected(node)
+
 			continue
 		}
 
@@ -3077,6 +3097,41 @@ func (dm *DistMemory) acceptGossip(nodes []*cluster.Node) {
 			})
 		}
 	}
+}
+
+// refuteIfSuspected handles the SWIM self-refute path: when a peer
+// gossips that THIS node is Suspect or Dead at incarnation N, bump
+// our local incarnation to N+1 and re-upsert ourselves as Alive.
+// Higher-incarnation-wins propagation in `acceptGossip` ensures the
+// next gossip tick disseminates the refutation cluster-wide.
+//
+// Pre-fix this path was a no-op (`continue` on local-ID match) — a
+// node that fell briefly behind heartbeat would be marked Suspect by
+// peers and could not undo it through gossip; only a fresh probe
+// would clear suspicion. Self-refute closes the loop required for
+// the heartbeat marker to drop its `experimental` qualifier.
+func (dm *DistMemory) refuteIfSuspected(claim *cluster.Node) {
+	if claim == nil || dm.localNode == nil {
+		return
+	}
+
+	if claim.State == cluster.NodeAlive {
+		return // peer agrees we're alive — nothing to refute
+	}
+
+	// Only refute when the peer's claim is at >= our incarnation;
+	// older claims are stale and ignored.
+	if claim.Incarnation < dm.localNode.Incarnation {
+		return
+	}
+
+	dm.membership.Mark(dm.localNode.ID, cluster.NodeAlive)
+
+	dm.logger.Info(
+		"self-refuted suspect/dead claim from peer",
+		slog.Uint64("claim_incarnation", claim.Incarnation),
+		slog.String("claim_state", claim.State.String()),
+	)
 }
 
 // chooseNewer picks the item with higher version; on version tie uses lexicographically smaller Origin as winner.
@@ -3265,7 +3320,10 @@ func parseSeedSpec(raw string) seedSpec {
 	return seedSpec{id: id, addr: addr}
 }
 
-// heartbeatLoop probes peers and updates membership (best-effort experimental).
+// heartbeatLoop probes peers and updates membership. SWIM-style
+// indirect probes (Phase B.1) and self-refutation via gossip
+// (Phase E) are wired into the surrounding helpers — this loop
+// only schedules the per-tick work.
 func (dm *DistMemory) heartbeatLoop(ctx context.Context, stopCh <-chan struct{}) { // reduced cognitive complexity via helpers
 	ticker := time.NewTicker(dm.hbInterval)
 	defer ticker.Stop()

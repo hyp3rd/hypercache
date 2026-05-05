@@ -380,6 +380,47 @@ func (t *DistHTTPTransport) IndirectHealth(ctx context.Context, relayNodeID, tar
 	return nil
 }
 
+// Gossip pushes a member-list snapshot to the target's
+// `/internal/gossip` endpoint. The receiver merges via
+// higher-incarnation-wins and may self-refute if the snapshot
+// claims it's suspect — see acceptGossip + refuteIfSuspected.
+//
+// The body is a JSON array of GossipMember; the wire shape is
+// stable (separate type from cluster.Node) so the cluster
+// package can add internal fields without breaking peers running
+// older binaries.
+func (t *DistHTTPTransport) Gossip(ctx context.Context, targetNodeID string, members []GossipMember) error {
+	payload, err := json.Marshal(members)
+	if err != nil {
+		return ewrap.Wrap(err, "marshal gossip payload")
+	}
+
+	hreq, err := t.newNodeRequest(ctx, http.MethodPost, targetNodeID, "/internal/gossip",
+		nil, bytes.NewReader(payload))
+	if err != nil {
+		return ewrap.Wrap(err, errMsgNewRequest)
+	}
+
+	hreq.Header.Set("Content-Type", "application/json")
+
+	resp, err := t.doTrusted(hreq)
+	if err != nil {
+		return err
+	}
+
+	defer drainBody(t.limitedBody(resp))
+
+	if resp.StatusCode == http.StatusNotFound {
+		return sentinel.ErrBackendNotFound
+	}
+
+	if resp.StatusCode >= statusThreshold {
+		return ewrap.Newf("gossip status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
 // FetchMerkle retrieves a Merkle tree snapshot from a remote node.
 func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error) {
 	if t == nil {

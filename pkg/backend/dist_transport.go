@@ -3,7 +3,9 @@ package backend
 import (
 	"context"
 	"sync"
+	"time"
 
+	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
@@ -21,7 +23,85 @@ type DistTransport interface {
 	// the caller's local network was the issue, not the target.
 	// Returns nil when the relay reports the target reachable.
 	IndirectHealth(ctx context.Context, relayNodeID, targetNodeID string) error
+	// Gossip pushes the caller's full member-list snapshot to
+	// `targetNodeID`. The receiver merges it via higher-incarnation-
+	// wins and self-refutes if the snapshot claims it is suspect.
+	// Used by the cross-process gossip path; in-process clusters
+	// short-circuit to a direct method call instead.
+	Gossip(ctx context.Context, targetNodeID string, members []GossipMember) error
 	FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error)
+}
+
+// GossipMember is the wire-friendly snapshot of a cluster.Node used
+// by the Gossip transport method. Stays a separate struct from
+// cluster.Node so the wire schema doesn't drift when the cluster
+// package adds internal fields.
+type GossipMember struct {
+	ID          string `json:"id"`
+	Address     string `json:"address"`
+	State       string `json:"state"`
+	Incarnation uint64 `json:"incarnation"`
+}
+
+// nodesToGossipMembers projects a cluster.Node snapshot down to the
+// wire shape. Nil entries are dropped — they shouldn't appear in
+// practice but the projection is defensive.
+func nodesToGossipMembers(nodes []*cluster.Node) []GossipMember {
+	out := make([]GossipMember, 0, len(nodes))
+
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+
+		out = append(out, GossipMember{
+			ID:          string(n.ID),
+			Address:     n.Address,
+			State:       n.State.String(),
+			Incarnation: n.Incarnation,
+		})
+	}
+
+	return out
+}
+
+// gossipMembersToNodes inflates a wire-shape snapshot back into
+// cluster.Node values for handoff to acceptGossip. Unknown state
+// strings fall back to NodeAlive — the receiver's
+// higher-incarnation-wins logic still applies, and a stuck-suspect
+// claim from a peer running an older state vocabulary degrades
+// gracefully to alive-at-this-incarnation.
+func gossipMembersToNodes(members []GossipMember) []*cluster.Node {
+	out := make([]*cluster.Node, 0, len(members))
+
+	for _, m := range members {
+		out = append(out, &cluster.Node{
+			ID:          cluster.NodeID(m.ID),
+			Address:     m.Address,
+			State:       parseGossipState(m.State),
+			Incarnation: m.Incarnation,
+			LastSeen:    time.Now(),
+		})
+	}
+
+	return out
+}
+
+// parseGossipState maps the wire state string back to the
+// internal NodeState enum. "alive" and unknown values both
+// resolve to NodeAlive (defensive — see gossipMembersToNodes);
+// the explicit "alive" branch is omitted to satisfy the
+// identical-switch-branches lint while keeping the same
+// semantic.
+func parseGossipState(s string) cluster.NodeState {
+	switch s {
+	case "suspect":
+		return cluster.NodeSuspect
+	case "dead":
+		return cluster.NodeDead
+	default:
+		return cluster.NodeAlive
+	}
 }
 
 // InProcessTransport implements DistTransport for multiple DistMemory instances in the same process.
@@ -117,6 +197,22 @@ func (t *InProcessTransport) IndirectHealth(ctx context.Context, relayNodeID, ta
 	}
 
 	return rt.Health(ctx, targetNodeID)
+}
+
+// Gossip delivers the snapshot directly to the target backend's
+// acceptGossip — this is the in-process equivalent of the HTTP
+// `/internal/gossip` endpoint, with the type translation done
+// inline so the rest of the SWIM machinery can stay agnostic to
+// transport choice.
+func (t *InProcessTransport) Gossip(_ context.Context, targetNodeID string, members []GossipMember) error {
+	target, ok := t.lookup(targetNodeID)
+	if !ok {
+		return sentinel.ErrBackendNotFound
+	}
+
+	target.acceptGossip(gossipMembersToNodes(members))
+
+	return nil
 }
 
 // FetchMerkle fetches a remote merkle tree.

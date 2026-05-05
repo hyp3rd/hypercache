@@ -8,6 +8,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **SWIM self-refutation + cross-process gossip dissemination.**
+  Closes the last `experimental` marker on the heartbeat path.
+  Three pieces:
+   - **`acceptGossip` self-refute** — incoming entries that
+     reference the local node as Suspect or Dead at incarnation
+     ≥ ours now bump the local incarnation and re-mark Alive.
+     Higher-incarnation-wins propagation in the same function
+     disseminates the refutation cluster-wide, so a falsely-
+     suspected node can clear suspicion through gossip alone
+     (pre-fix the only path was a fresh probe).
+   - **HTTP gossip wire** — new `Gossip(ctx, targetID, members)`
+     method on `DistTransport`, new
+     `POST /internal/gossip` server endpoint (auth-wrapped),
+     new `GossipMember` wire DTO. `runGossipTick` now falls
+     through to the HTTP path when the transport isn't an
+     `InProcessTransport`, so cross-process clusters disseminate
+     membership state — pre-Phase-E this was an in-process-only
+     no-op.
+   - The `experimental` qualifier is removed from
+     `heartbeatLoop`'s comment + the heartbeat-section field
+     doc; SWIM-style indirect probes (Phase B.1) and
+     self-refutation (this round) together provide the SWIM
+     properties the marker was tracking.
+  Regression coverage at
+  [tests/integration/dist_swim_refute_test.go](tests/integration/dist_swim_refute_test.go):
+  `TestDistSWIM_HTTPGossipExchange` exercises the wire (A pushes
+  membership to B over HTTP; B's view converges),
+  `TestDistSWIM_SelfRefute` drives a forged "you are suspect"
+  gossip into a node's `/internal/gossip` and asserts the local
+  incarnation bumps + state returns to Alive.
 - **End-to-end resilience test** at
   [scripts/tests/20-test-cluster-resilience.sh](scripts/tests/20-test-cluster-resilience.sh)
   — kills a docker container mid-run, asserts the surviving 4

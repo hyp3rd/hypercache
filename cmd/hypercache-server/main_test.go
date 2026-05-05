@@ -1,13 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-json"
 	fiber "github.com/gofiber/fiber/v3"
 )
 

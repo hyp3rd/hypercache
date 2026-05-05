@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -31,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/goccy/go-json"
 	fiber "github.com/gofiber/fiber/v3"
 
 	"github.com/hyp3rd/hypercache"
