@@ -14,8 +14,6 @@ rule "MD029", style => "one"
 # shape, and still catches genuine duplicates within the same section.
 rule "MD024", :allow_different_nesting => true, :siblings_only => true
 
-# exclude_rule "MD024"
-
 # MkDocs pages start with YAML frontmatter (---\ntitle: ...\n---), so
 # the first line cannot be a top-level heading. MD041 fights that
 # convention; the alternative would be losing per-page metadata.
