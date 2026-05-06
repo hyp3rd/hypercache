@@ -1,0 +1,1928 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Distributed in-memory cache for Go — sharded, replicated, observable.">
+      
+      
+        <meta name="author" content="hyp3rd">
+      
+      
+        <link rel="canonical" href="https://hyp3rd.github.io/hypercache/changelog/">
+      
+      
+        <link rel="prev" href="../distributed/">
+      
+      
+        <link rel="next" href="../rfcs/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Changelog - HyperCache</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#unreleased" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="HyperCache" class="md-header__button md-logo" aria-label="HyperCache" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3C7.58 3 4 4.79 4 7s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4M4 9v3c0 2.21 3.58 4 8 4s8-1.79 8-4V9c0 2.21-3.58 4-8 4s-8-1.79-8-4m0 5v3c0 2.21 3.58 4 8 4s8-1.79 8-4v-3c0 2.21-3.58 4-8 4s-8-1.79-8-4"></path></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HyperCache
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/hyp3rd/hypercache" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    hyp3rd/hypercache
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../quickstart/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../operations/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../distributed/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="HyperCache" class="md-nav__button md-logo" aria-label="HyperCache" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3C7.58 3 4 4.79 4 7s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4M4 9v3c0 2.21 3.58 4 8 4s8-1.79 8-4V9c0 2.21-3.58 4-8 4s-8-1.79-8-4m0 5v3c0 2.21 3.58 4 8 4s8-1.79 8-4v-3c0 2.21-3.58 4-8 4s-8-1.79-8-4"></path></svg>
+
+    </a>
+    HyperCache
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/hyp3rd/hypercache" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    hyp3rd/hypercache
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2">
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cluster/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5-Node Cluster
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../helm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes (Helm)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3">
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Server Binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4">
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Backend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+          
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked="">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../rfcs/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Unreleased]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[Unreleased]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added-earlier-in-this-cycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added (earlier in this cycle)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-2026-05-05" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.5.0] — 2026-05-05
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.5.0] — 2026-05-05">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#043-2026-05-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.4.3] — 2026-05-04
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.4.3] — 2026-05-04">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#breaking-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Breaking changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Internal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#removed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Removed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Unreleased]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[Unreleased]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added-earlier-in-this-cycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added (earlier in this cycle)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-2026-05-05" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.5.0] — 2026-05-05
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.5.0] — 2026-05-05">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#043-2026-05-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.4.3] — 2026-05-04
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.4.3] — 2026-05-04">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#breaking-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Breaking changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Internal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#removed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Removed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/hyp3rd/hypercache/edit/main/docs/changelog.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"></path></svg>
+    </a>
+  
+  
+
+
+  <h1>Changelog</h1>
+
+<p>All notable changes to HyperCache are recorded here. The format follows
+<a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>, and the project
+adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
+<h2 id="unreleased">[Unreleased]<a class="headerlink" href="#unreleased" title="Anchor link to this section">¶</a></h2>
+<h3 id="added">Added<a class="headerlink" href="#added" title="Anchor link to this section">¶</a></h3>
+<ul>
+<li><strong>Documentation site on GitHub Pages</strong>, built with MkDocs Material
+  and published automatically on every push to <code>main</code>. Eight
+  navigated pages — landing, quickstart, 5-node cluster tutorial,
+  Helm chart guide, server-binary reference, distributed-backend
+  architecture, operations runbook, RFC index — plus the
+  CHANGELOG and the <code>cmd/hypercache-server/README.md</code> pulled in
+  via the include-markdown plugin so they don't drift. A
+  build-time hook at <a href="../_mkdocs/hooks.py"><code>_mkdocs/hooks.py</code></a>
+  rewrites repo-relative source-code references (<code>../pkg/foo.go</code>)
+  into canonical GitHub URLs so the same markdown renders
+  correctly both on github.com and on the rendered Pages site.
+  Workflow at
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/.github/workflows/docs.yml"><code>.github/workflows/docs.yml</code></a>
+  builds with <code>--strict</code> on every PR (catches broken docs-internal
+  links on submission) and deploys via <code>actions/deploy-pages@v4</code>
+  on main pushes. The README now links to the rendered site.
+  Polishing pass on the existing markdown surface: relaxed
+  <code>mdl</code> rules that fight MkDocs/frontmatter idioms (MD041
+  for YAML frontmatter pages, MD010 for Go's tab-in-code-blocks
+  convention, MD033/MD032 for Material's grid-cards HTML).</li>
+<li><strong>Richer client API — metadata inspection, JSON envelopes, batch
+  operations.</strong> Three additions to the
+  <code>cmd/hypercache-server</code> HTTP surface:</li>
+<li><code>HEAD /v1/cache/:key</code> returns the value's metadata in
+     <code>X-Cache-*</code> response headers (Version, Origin, Last-Updated,
+     TTL-Ms, Expires-At, Owners, Node) with no body — fast
+     existence + TTL inspection without paying the value-transfer
+     cost. 200 if present, 404 if not.</li>
+<li><code>GET /v1/cache/:key</code> now honors <code>Accept: application/json</code>
+     and returns an <code>itemEnvelope</code> with the same metadata as
+     HEAD plus the base64-encoded value. The bare-<code>curl</code> default
+     remains raw bytes via <code>application/octet-stream</code> — current
+     clients are unaffected.</li>
+<li><code>POST /v1/cache/batch/{get,put,delete}</code> enable bulk operations
+     in a single round-trip. Each request carries an array; the
+     response carries one result entry per item with per-item
+     status, owners, and error reporting. <code>batch-put</code> items
+     accept either UTF-8 strings (default) or base64-encoded byte
+     payloads via <code>value_encoding: "base64"</code>. Per-item errors are
+     surfaced in <code>error</code> + <code>code</code> fields without failing the
+     whole batch.
+  Six unit tests at
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/cmd/hypercache-server/handlers_test.go">cmd/hypercache-server/handlers_test.go</a>
+  pin the contracts: HEAD present/missing, Accept-JSON envelope
+  shape, default-raw round-trip, mixed-encoding batch-put,
+  batch-get found/missing, batch-delete cycle.</li>
+<li><strong>SWIM self-refutation + cross-process gossip dissemination.</strong>
+  Closes the last <code>experimental</code> marker on the heartbeat path.
+  Three pieces:</li>
+<li><strong><code>acceptGossip</code> self-refute</strong> — incoming entries that
+     reference the local node as Suspect or Dead at incarnation
+     ≥ ours now bump the local incarnation and re-mark Alive.
+     Higher-incarnation-wins propagation in the same function
+     disseminates the refutation cluster-wide, so a falsely-
+     suspected node can clear suspicion through gossip alone
+     (pre-fix the only path was a fresh probe).</li>
+<li><strong>HTTP gossip wire</strong> — new <code>Gossip(ctx, targetID, members)</code>
+     method on <code>DistTransport</code>, new
+     <code>POST /internal/gossip</code> server endpoint (auth-wrapped),
+     new <code>GossipMember</code> wire DTO. <code>runGossipTick</code> now falls
+     through to the HTTP path when the transport isn't an
+     <code>InProcessTransport</code>, so cross-process clusters disseminate
+     membership state — pre-Phase-E this was an in-process-only
+     no-op.</li>
+<li>The <code>experimental</code> qualifier is removed from
+     <code>heartbeatLoop</code>'s comment + the heartbeat-section field
+     doc; SWIM-style indirect probes (Phase B.1) and
+     self-refutation (this round) together provide the SWIM
+     properties the marker was tracking.
+  Regression coverage at
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/tests/integration/dist_swim_refute_test.go">tests/integration/dist_swim_refute_test.go</a>:
+  <code>TestDistSWIM_HTTPGossipExchange</code> exercises the wire (A pushes
+  membership to B over HTTP; B's view converges),
+  <code>TestDistSWIM_SelfRefute</code> drives a forged "you are suspect"
+  gossip into a node's <code>/internal/gossip</code> and asserts the local
+  incarnation bumps + state returns to Alive.</li>
+<li><strong>End-to-end resilience test</strong> at
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/scripts/tests/20-test-cluster-resilience.sh">scripts/tests/20-test-cluster-resilience.sh</a>
+  — kills a docker container mid-run, asserts the surviving 4
+  nodes still serve every previously-written key AND every key
+  written during the outage, then restarts the killed node and
+  asserts it converges on the full state within 60 s. Validates
+  Phase B.2 (hint-replay) and the post-restart anti-entropy
+  paths against the <em>actual</em> docker network — a class of bugs
+  in-process tests can't reach. 24 assertions across 6 phases.
+  Wired into both <code>make test-cluster</code> (runs after the smoke,
+  exit-code-propagated through the same teardown trap) and the
+  <code>cluster</code> CI workflow as a follow-up step.</li>
+<li><strong>Cross-process cluster smoke in CI</strong> —
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/.github/workflows/cluster.yml">.github/workflows/cluster.yml</a> boots
+  the 5-node <code>docker-compose.cluster.yml</code> stack on every PR/push,
+  waits for <code>/healthz</code> on every node, then runs the assertion
+  script at
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/scripts/tests/10-test-cluster-api.sh">scripts/tests/10-test-cluster-api.sh</a>.
+  Container logs are dumped on failure for debuggability without a
+  re-run. This catches the class of bugs that escaped the previous
+  PR (factory dropped DistMemoryOptions, seeds without IDs,
+  json.RawMessage on non-owner GET) — none would have been
+  detected by unit/integration tests because they only exercised
+  in-process behavior.</li>
+<li><strong><code>make test-cluster</code> Makefile target</strong> mirrors the CI flow for
+  local development: brings the cluster up, waits, runs the smoke,
+  and tears down on the way out (preserving the smoke's exit code).</li>
+<li><strong><code>scripts/tests/wait-for-cluster.sh</code></strong> is the polling helper that
+  blocks until every node's <code>/healthz</code> returns 200, with a default
+  30-second deadline configurable via <code>TIMEOUT_SECS</code>. Used by both
+  the Makefile and the CI workflow so the assertion script downstream
+  never races the listener bind.</li>
+<li><strong><code>scripts/tests/10-test-cluster-api.sh</code> hardened</strong> from a
+  print-only smoke into a real regression test: 17 explicit
+  assertions across propagation / wire-encoding / cross-node
+  delete, color-coded <code>OK</code>/<code>FAIL</code> output, exit code reflects
+  total failure count.</li>
+<li><strong><code>cmd/hypercache-server/main_test.go</code></strong> — fast Go unit tests
+  pinning the wire-encoding contracts on <code>writeValue</code> /
+  <code>decodeBase64Bytes</code>. Covers <code>[]byte</code> (writer path), <code>string</code>
+  (replica path), <code>json.RawMessage</code> (non-owner-GET path), and the
+  base64-heuristic length floors. Runs without docker for tight
+  feedback during development.</li>
+<li><strong>GitHub Release automation</strong> —
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/.github/workflows/release.yml">.github/workflows/release.yml</a>
+  triggers on <code>v*.*.*</code> tag pushes and creates the GitHub Release
+  page via <code>softprops/action-gh-release@v2</code>. The release body
+  pins readers to the matching container image tag in GHCR and
+  the CHANGELOG.md at that ref; PR-since-previous-tag notes are
+  appended automatically. Pre-release tags (<code>v1.2.3-rc1</code>,
+  <code>v1.2.3-beta</code>) are flagged via the <code>prerelease</code> field;
+  <code>workflow_dispatch</code> lets operators (re-)create a release for
+  an existing tag without re-tagging.</li>
+<li><strong>Helm chart for k8s deployment</strong> at
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/chart/hypercache">chart/hypercache/</a>. Renders into a
+  StatefulSet (stable per-pod hostnames so the <code>id@addr</code> seed
+  list resolves deterministically), a headless Service for peer
+  DNS, separate client and management Services, an optional
+  chart-managed Secret for the auth token (or external Secret
+  reference for production rotation), a PodDisruptionBudget
+  (default <code>minAvailable: 4</code>), pod anti-affinity, and a
+  hardened pod security context (non-root, read-only rootfs,
+  all caps dropped). The ServiceAccount + Service + StatefulSet
+  composition matches what <code>helm install</code> emits via <code>helm lint</code>
+  and <code>helm template</code> against any kube-version. Configure cluster
+  size, replication factor, capacity, heartbeat, hint TTL,
+  rebalance interval, and resources via standard Helm values —
+  see <a href="https://github.com/hyp3rd/hypercache/blob/main/chart/hypercache/values.yaml">chart/hypercache/values.yaml</a>
+  for the full surface.</li>
+<li><strong>Pre-commit excludes Helm templates</strong> from <code>check-yaml</code> and
+  <code>yamllint</code>. Both validators choke on Go-template <code>{{ ... }}</code>
+  syntax inside the chart manifests; <code>helm lint</code> is the right
+  validator for those, and CI runs that separately.</li>
+<li><strong>Multi-arch container image workflow</strong> —
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/.github/workflows/image.yml">.github/workflows/image.yml</a> builds
+  the <code>hypercache-server</code> Docker image for <code>linux/amd64</code> and
+  <code>linux/arm64</code> via buildx + QEMU, publishing to GHCR
+  (<code>ghcr.io/&lt;owner&gt;/&lt;repo&gt;/hypercache-server</code>). PR triggers
+  build-only (no registry pollution), <code>main</code> pushes publish
+  <code>:main</code> and <code>:sha-&lt;short&gt;</code>, semver tag pushes (<code>v*.*.*</code>)
+  publish <code>:v1.2.3</code>, <code>:1.2.3</code>, <code>:1.2</code>, <code>:1</code>, and <code>:latest</code>.
+  <code>:latest</code> is <strong>deliberately restricted to semver tag pushes</strong> —
+  production deployments pinning <code>:latest</code> always get a stable
+  release, never an in-flight <code>main</code> commit. GHA cache speeds
+  re-builds when only Go source has changed.</li>
+</ul>
+<h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Anchor link to this section">¶</a></h3>
+<ul>
+<li><strong>Cluster propagation was completely broken.</strong> The
+  <code>DistMemoryBackendConstructor.Create</code> factory in <code>factory.go</code>
+  silently discarded <code>cfg.DistMemoryOptions</code> and called
+  <code>backend.NewDistMemory(ctx)</code> with <strong>no arguments</strong>. Every
+  <code>WithDistNode</code>, <code>WithDistSeeds</code>, <code>WithDistReplication</code>, etc. that
+  callers wired through <code>hypercache.NewConfig</code> was a silent no-op,
+  leaving every node with a default standalone configuration that
+  only knew itself. The factory now forwards
+  <code>cfg.DistMemoryOptions...</code> like every other backend constructor
+  does. This was the production-blocking bug — a Set on one node
+  never reached its peers because the other nodes weren't actually
+  in any node's ring.</li>
+<li><strong>Seed addresses without node IDs produced a broken ring.</strong>
+  <code>initStandaloneMembership</code> added every seed to membership with an
+  empty <code>NodeID</code>, so the consistent-hash ring was built over
+  empty-string owners. <code>Set</code> would resolve owners as
+  <code>["", "", "self"]</code>, fan-outs to <code>""</code> failed with
+  <code>ErrBackendNotFound</code>, the writer self-promoted, and the data
+  never reached its peers. The HTTP transport has no node-discovery
+  protocol, so the only way to populate node IDs in the ring is at
+  configuration time. Seeds now accept an optional <code>id@addr</code> syntax
+  (<code>node-2@hypercache-2:7946</code>) — bare <code>addr</code> keeps the legacy
+  empty-ID behavior for in-process tests. Production deployments
+  must use <code>id@addr</code>.</li>
+<li><strong><code>Remove</code> from a non-primary owner skipped the primary.</strong>
+  <code>removeImpl</code> checked <code>dm.ownsKeyInternal(key)</code> (true for any
+  ring owner) and ran <code>applyRemove</code> locally — but <code>applyRemove</code>'s
+  fan-out only covers <code>owners[1:]</code> under the assumption the caller
+  is <code>owners[0]</code>. When a replica initiated the remove, the primary
+  never got the delete. The Remove path now mirrors Set:
+  non-primary callers forward to the primary, primary applies +
+  fans out. Tombstones now propagate cluster-wide regardless of
+  which node receives the DELETE.</li>
+<li><strong>Client API responses were unhelpful.</strong> Set/Remove returned
+  <code>204 No Content</code> with empty bodies; errors were raw text via
+  <code>SendString</code>. Replaced with structured JSON: PUT/DELETE return
+  <code>{key, stored|deleted, bytes, node, owners}</code> so operators can
+  immediately see where the value landed; errors return
+  <code>{error, code}</code> with stable code strings (<code>BAD_REQUEST</code>,
+  <code>NOT_FOUND</code>, <code>DRAINING</code>, <code>INTERNAL</code>). Added
+  <code>GET /v1/owners/:key</code> for client-side ring visibility.</li>
+<li><strong>GET response leaked base64 on replicas.</strong> <code>[]byte</code> values
+  round-trip through JSON as base64 strings; replica nodes that
+  received a value via the dist HTTP transport stored it as a
+  <code>string</code> and returned it raw, so a <code>PUT world</code> on node-A
+  resulted in <code>d29ybGQ=</code> from <code>GET</code> on node-B. The client GET
+  handler now base64-decodes string values when they look like
+  valid byte content, restoring writer-receiver symmetry.</li>
+<li>
+<p><strong>GET on non-owner nodes returned a JSON-quoted base64 string.</strong>
+  The dist HTTP transport's <code>decodeGetBody</code> decodes <code>Item.Value</code> as
+  <code>json.RawMessage</code> to preserve wire-bytes type fidelity. The
+  client GET handler's type switch only matched <code>[]byte</code> and
+  <code>string</code>, so non-owner GETs (which always go through the
+  forward-fetch path) fell to the <code>default</code> branch and re-emitted
+  the value as JSON — producing <code>"d29ybGQ="</code> instead of <code>world</code>.
+  Added an explicit <code>json.RawMessage</code> case that interprets the raw
+  JSON as a string when possible, then base64-decodes if applicable.
+  Verified end-to-end against the 5-node Docker cluster where two
+  of the five nodes are non-owners for any given key.</p>
+</li>
+<li>
+<p><strong>Race in <code>queueHint</code> between hint enqueue and hint replay.</strong> Pre-fix,
+  the metric write <code>dm.metrics.hintedBytes.Store(dm.hintBytes)</code> happened
+  <em>after</em> releasing <code>hintsMu</code>, so a concurrent <code>adjustHintAccounting</code>
+  call from the replay loop could race the read. Capturing the value
+  under the lock closes the race. Surfaced when migration failures
+  began funneling through <code>queueHint</code> (Phase B.2 below) — previously
+  the migration path swallowed errors silently, so the hint enqueue
+  rate from rebalance ticks was much lower.</p>
+</li>
+</ul>
+<h3 id="added-earlier-in-this-cycle">Added (earlier in this cycle)<a class="headerlink" href="#added-earlier-in-this-cycle" title="Anchor link to this section">¶</a></h3>
+<ul>
+<li><strong>Structured logging on the dist backend.</strong> New <code>WithDistLogger(*slog.Logger)</code>
+  option wires a structured logger into the dist backend's background
+  loops (heartbeat, hint replay, rebalance, merkle sync) and operational
+  error surfaces (HTTP listener bind failures, serve-goroutine exits,
+  failed migrations during rebalance, dropped hints, peer state
+  transitions). Library default is silent — <code>WithDistLogger</code> not called
+  installs a <code>slog.DiscardHandler</code> so the dist backend never writes to
+  stderr unless the caller opts in. Every record is pre-bound with
+  <code>component=dist_memory</code> and <code>node_id=&lt;id&gt;</code> attributes for grep/filter.
+  Phase A.1 of the production-readiness work.</li>
+<li><strong>OpenTelemetry tracing on the dist backend.</strong> New
+  <code>WithDistTracerProvider(trace.TracerProvider)</code> option opens spans on
+  every public <code>Get</code> / <code>Set</code> / <code>Remove</code>, with child spans
+  (<code>dist.replicate.set</code> / <code>dist.replicate.remove</code>) per peer during
+  fan-out. Span attributes include <code>cache.key.length</code>,
+  <code>dist.consistency</code>, <code>dist.owners.count</code>, <code>dist.acks</code>, <code>cache.hit</code>,
+  and <code>peer.id</code>. Cache key <em>values</em> are intentionally never recorded
+  on spans — keys can be PII (user IDs, session tokens). Library
+  default is a no-op tracer (<code>noop.NewTracerProvider</code>), so spans cost
+  nothing unless the caller opts in. New <code>ConsistencyLevel.String()</code>
+  method renders consistency levels human-readably for log/span attrs.
+  Phase A.2 of the production-readiness work.</li>
+<li><strong>OpenTelemetry metrics on the dist backend.</strong> New
+  <code>WithDistMeterProvider(metric.MeterProvider)</code> option registers an
+  observable instrument for every field on <code>DistMetrics</code> — counters
+  for cumulative totals (<code>dist.write.attempts</code>, <code>dist.forward.*</code>,
+  <code>dist.hinted.*</code>, <code>dist.merkle.syncs</code>, <code>dist.rebalance.*</code>, etc.),
+  gauges for current state (<code>dist.members.alive</code>,
+  <code>dist.tombstones.active</code>, <code>dist.hinted.bytes</code>, last-operation
+  latencies in nanoseconds, etc.). A single registered callback
+  observes all instruments from one <code>Metrics()</code> snapshot per
+  collection cycle, so there is no per-operation overhead beyond the
+  existing atomic counters. Names use the <code>dist.</code> prefix so a
+  Prometheus exporter renders them under a single subsystem.
+  <code>Stop</code> unregisters the callback so the SDK does not invoke it
+  against a stopped backend. Library default is a no-op meter, so
+  metrics cost nothing unless the caller opts in. Phase A.3 of the
+  production-readiness work.</li>
+<li><strong>SWIM-style indirect heartbeat probes.</strong> New
+  <code>WithDistIndirectProbes(k, timeout)</code> option enables the indirect-
+  probe refutation path: when a direct heartbeat to a peer fails,
+  this node asks <code>k</code> random alive peers to probe the target on its
+  behalf, and only marks the target suspect if every relay also
+  fails. Filters caller-side network blips (transient NIC reset,
+  single stuck connection in this node's pool) that would otherwise
+  cause spurious suspect/dead transitions. New transport method
+  <code>IndirectHealth(ctx, relayNodeID, targetNodeID)</code> and HTTP endpoint
+  <code>GET /internal/probe?target=&lt;id&gt;</code> carry the probe; auth-wrapped
+  identically to the rest of <code>/internal/*</code>. New metrics
+  <code>dist.heartbeat.indirect_probe.success</code>, <code>.failure</code>, <code>.refuted</code>
+  expose probe outcomes. <code>k = 0</code> (default) preserves the pre-Phase-B
+  behavior. Phase B.1 of the production-readiness work — note that
+  the heartbeat path still carries the <code>experimental</code> marker until
+  self-refutation via incarnation-disseminating gossip lands in a
+  later phase.</li>
+<li><strong>Migration failures now retry through the hint queue.</strong> When a
+  rebalance forwards a key to its new primary and the transport
+  returns <em>any</em> error (not just <code>ErrBackendNotFound</code>), the item is
+  enqueued onto the existing hint-replay queue keyed by the new
+  primary, instead of being logged and dropped. The hint-replay
+  loop drains it on its configured schedule until the hint TTL
+  expires. Same broadening applies to the <code>replicateTo</code> fan-out on
+  the primary <code>Set</code> path — transient HTTP failures (timeout, 5xx,
+  connection reset) no longer silently drop replicas. Phase B.2 of
+  the production-readiness work.</li>
+<li><strong>On-wire compression for the dist HTTP transport.</strong> New
+  <code>DistHTTPLimits.CompressionThreshold</code> field opts the auto-created
+  HTTP client into gzip-compressing Set request bodies whose
+  serialized payload exceeds the configured byte threshold. The
+  client sets <code>Content-Encoding: gzip</code> and the server transparently
+  decompresses (via fiber v3's auto-decoding <code>Body()</code>). Threshold
+  <code>0</code> (default) preserves the pre-Phase-B wire format byte-for-byte.
+  Operators on bandwidth-constrained links with values above ~1 KiB
+  typically see meaningful reductions; below-threshold values pay
+  no compression cost. Roll out the threshold to all peers before
+  raising it on any peer — a server with compression disabled will
+  reject a gzip body with HTTP 400. Phase B.3 of the
+  production-readiness work.</li>
+<li><strong>Drain endpoint for graceful shutdown.</strong> New
+  <code>DistMemory.Drain(ctx)</code> method and <code>POST /dist/drain</code> HTTP
+  endpoint mark the node for shutdown: <code>/health</code> returns 503 so
+  load balancers stop routing, <code>Set</code>/<code>Remove</code> return
+  <code>sentinel.ErrDraining</code>, <code>Get</code> continues to serve so in-flight
+  reads complete. New <code>IsDraining()</code> accessor for dashboards. New
+  metric <code>dist.drains</code> records transitions. Drain is one-way and
+  idempotent. Phase C.1 of the production-readiness work.</li>
+<li><strong>Cursor-based key enumeration</strong> replaces the pre-Phase-C
+  testing-only <code>/internal/keys</code> endpoint. The endpoint now returns
+  shard-level pages with a <code>next_cursor</code> token; clients walk the
+  cursor chain to enumerate the full key set. New <code>?limit=&lt;n&gt;</code> query
+  parameter truncates within a shard for clusters with very large
+  shards (response then carries <code>truncated=true</code> and the same
+  <code>next_cursor</code>). The <code>DistHTTPTransport.ListKeys</code> helper now walks
+  pages internally so existing callers (anti-entropy fallback, tests)
+  keep their full-set semantics unchanged. Phase C.2 of the
+  production-readiness work.</li>
+<li><strong>Operations runbook</strong> at <a href="../operations/">docs/operations.md</a>
+  covering split-brain, hint-queue overflow, rebalance under load,
+  replica loss, observability wiring (logger/tracer/meter), drain
+  procedure, and capacity-planning notes. Cross-links each failure
+  mode to the metrics that surface it. Phase C.3 of the
+  production-readiness work.</li>
+<li><strong>Production server binary</strong> at
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/cmd/hypercache-server"><code>cmd/hypercache-server</code></a>. Wraps DistMemory
+  via HyperCache and exposes three HTTP listeners per node: the
+  client REST API (<code>PUT</code>/<code>GET</code>/<code>DELETE /v1/cache/:key</code>),
+  management HTTP (<code>/health</code>, <code>/stats</code>, <code>/config</code>,
+  <code>/dist/metrics</code>, <code>/cluster/*</code>), and the inter-node dist HTTP.
+  12-factor configuration via <code>HYPERCACHE_*</code> environment
+  variables — same binary runs in Docker, k8s, and bare-metal.
+  Graceful shutdown on SIGTERM/SIGINT runs Drain → API stop →
+  HyperCache Stop with a 30 s deadline. JSON-formatted slog
+  logger pre-bound with <code>node_id</code>. Multi-stage <code>Dockerfile</code> builds
+  a distroless static image (<code>gcr.io/distroless/static-debian12:nonroot</code>).</li>
+<li><strong>5-node local cluster compose</strong> at
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/docker-compose.cluster.yml"><code>docker-compose.cluster.yml</code></a> — five
+  hypercache-server nodes on a shared <code>hypercache-cluster</code> Docker
+  network, each knowing the other four as seeds, replication=3.
+  Client APIs exposed on host ports 8081–8085, management HTTP on
+  9081–9085. Includes a smoke-test recipe in the
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/cmd/hypercache-server/README.md">server README</a>. Phase D of the
+  production-readiness work.</li>
+<li><strong><code>HyperCache.DistDrain(ctx)</code></strong> convenience method in
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/hypercache_dist.go">hypercache_dist.go</a> — calls Drain on the
+  underlying DistMemory backend when one is configured, no-op on
+  in-memory / Redis backends. Lets the server binary trigger drain
+  without type-asserting through the unexported backend field.</li>
+</ul>
+<h2 id="050-2026-05-05">[0.5.0] — 2026-05-05<a class="headerlink" href="#050-2026-05-05" title="Anchor link to this section">¶</a></h2>
+<h3 id="security">Security<a class="headerlink" href="#security" title="Anchor link to this section">¶</a></h3>
+<ul>
+<li><strong>Fixed silent inbound auth bypass when <code>DistHTTPAuth.ClientSign</code> was
+  set without a matching inbound verifier.</strong> Previously, a config of
+  <code>DistHTTPAuth{ClientSign: hmacSign}</code> flipped the internal <code>configured</code>
+  predicate to true (causing the auto-client to sign outbound traffic),
+  but <code>verify()</code> had no inbound material and silently allowed every
+  request — so an operator wiring half of an HMAC scheme could end up
+  with signed-out / open-in nodes that looked authenticated. The
+  internal predicate is now split into <code>inboundConfigured()</code> /
+  outbound-path checks, and <code>NewDistMemory</code> rejects this shape at
+  construction with <code>sentinel.ErrInsecureAuthConfig</code>. Operators who
+  legitimately want signed-out / open-in deployments (e.g. inbound is
+  gated by an L4 firewall or service mesh below this server) must opt
+  in via the new <code>DistHTTPAuth.AllowAnonymousInbound</code> field. All other
+  configurations (<code>Token</code>-only, <code>Token+ServerVerify</code>, <code>Token+ClientSign</code>,
+  <code>ServerVerify</code>-only) are unaffected. Reported by the post-tag
+  security review; addressed before any v0.5.0 public announcement.</li>
+</ul>
+<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Anchor link to this section">¶</a></h3>
+<ul>
+<li><code>DistHTTPAuth.AllowAnonymousInbound</code> — explicit opt-in for asymmetric
+  signed-out / open-in configurations.</li>
+<li><code>sentinel.ErrInsecureAuthConfig</code> — surfaced from <code>NewDistMemory</code> when
+  the auth policy would silently disable inbound enforcement.</li>
+</ul>
+<h2 id="043-2026-05-04">[0.4.3] — 2026-05-04<a class="headerlink" href="#043-2026-05-04" title="Anchor link to this section">¶</a></h2>
+<p>A modernization release. The headline themes:</p>
+<ul>
+<li>Eviction is now sharded by default for concurrency-friendly throughput.</li>
+<li>The distributed-memory backend (<code>DistMemory</code>) gained body limits, TLS,
+  bearer-token auth, lifecycle-context cancellation, and surfaced
+  listener errors.</li>
+<li>A typed wrapper (<code>Typed[T, V]</code>) is available for compile-time
+  type-safe access without the caller-side type assertions of the
+  untyped API.</li>
+<li>The legacy <code>pkg/cache</code> v1 store and the <code>longbridgeapp/assert</code> test
+  dependency are gone.</li>
+</ul>
+<p>The full course-correction plan (Phase 0 baseline → Phase 6 file split,
+plus Phase 5a–5e DistMemory hardening) is in commit history. The two
+RFCs that informed the design decisions live under <a href="rfcs/">docs/rfcs/</a>.</p>
+<h3 id="breaking-changes">Breaking changes<a class="headerlink" href="#breaking-changes" title="Anchor link to this section">¶</a></h3>
+<ul>
+<li><strong><code>pkg/cache</code> v1 removed.</strong> All callers must use <code>pkg/cache/v2</code>.</li>
+<li><strong><code>longbridgeapp/assert</code> test dependency removed.</strong> Tests now use
+  <code>stretchr/testify/require</code>. Internal test code only — no impact on
+  library consumers, but downstream contributors authoring tests
+  against this codebase must use <code>require</code>.</li>
+<li><strong><code>sentinel.ErrMgmtHTTPShutdownTimeout</code> removed.</strong>
+  <code>ManagementHTTPServer.Shutdown</code> now calls <code>app.ShutdownWithContext</code>
+  and returns the underlying ctx error directly. Callers comparing
+  against the removed sentinel must switch to <code>errors.Is(err,
+  context.DeadlineExceeded)</code> or equivalent.</li>
+<li><strong>Sharded eviction is default-on (32 shards).</strong> Items no longer
+  evict in strict global LRU/LFU order — the algorithm operates
+  independently within each shard. Total capacity is honored within
+  ±32 (one slot of slack per shard). Use <code>WithEvictionShardCount(1)</code>
+  to restore strict-global ordering at the cost of single-mutex
+  contention.</li>
+<li><strong><code>hypercache.go</code> decomposed into 6 files</strong> (<code>hypercache.go</code>,
+  <code>hypercache_io.go</code>, <code>hypercache_eviction.go</code>,
+  <code>hypercache_expiration.go</code>, <code>hypercache_dist.go</code>,
+  <code>hypercache_construct.go</code>). No public API change; third-party
+  patches against line numbers in the prior single-file layout will
+  not apply.</li>
+<li><strong><code>ManagementHTTPServer</code> constructor order fix.</strong>
+  <code>WithMgmtReadTimeout</code> and <code>WithMgmtWriteTimeout</code> previously mutated
+  struct fields <em>after</em> <code>fiber.New</code> had locked in the defaults — the
+  options were silent no-ops. Construction order is now correct, so
+  any code relying on the silent no-op (e.g., setting absurd values
+  knowing they would be ignored) will see those values take effect.</li>
+</ul>
+<h3 id="performance">Performance<a class="headerlink" href="#performance" title="Anchor link to this section">¶</a></h3>
+<p>Measurements on Apple M4 Pro, <code>go test -bench</code>, <code>count=5</code>, benchstat.</p>
+<ul>
+<li><strong>Per-shard atomic <code>Count</code>.</strong> <code>BenchmarkConcurrentMap_Count</code>:
+  53 → ~10 ns/op. <code>_CountParallel</code>: 1181 → ~13 ns/op. Eliminates the
+  lock-storm that previously serialized on a single mutex during
+  eviction-loop count checks.</li>
+<li><strong>Sharded eviction algorithm</strong> (<code>pkg/eviction/sharded.go</code>).
+  Replaces the global eviction-algorithm mutex with 32 per-shard
+  mutexes routed by the same hash <code>ConcurrentMap</code> uses, so a key's
+  data shard and eviction shard align (cache-locality on Set).</li>
+<li><strong><code>iter.Seq2</code> migration</strong> replacing channel-based <code>IterBuffered</code>.
+  <code>BenchmarkConcurrentMap_All</code> (renamed from <code>_IterBuffered</code>):
+  757µs → 26.5µs/op (-96.51%). Bytes/op: 1.73 MiB → 0 B/op.
+  Allocs/op: 230 → 0. Eliminated 32 goroutines + 32 channels per
+  iteration.</li>
+<li><strong>xxhash consolidation</strong> (<code>pkg/cache/v2/hash.go</code>). Replaced inlined
+  FNV-1a with <code>xxhash.Sum64String</code> folded to 32 bits.
+  <code>BenchmarkConcurrentMap_GetShard</code>: 10.07 → 3.46 ns/op (-65.63%).</li>
+<li><strong>Sharded item-aware eviction was tried and rejected</strong> per
+  <a href="../rfcs/0001-backend-owned-eviction/">RFC 0001</a>. The
+  hypothesis (duplicate-map overhead is the bottleneck) was
+  falsified — sharded contention dominates. Code removed; lessons
+  preserved in the RFC for future contributors.</li>
+</ul>
+<h3 id="features">Features<a class="headerlink" href="#features" title="Anchor link to this section">¶</a></h3>
+<ul>
+<li><strong><code>hypercache.Typed[T, V]</code> wrapper</strong> for compile-time type-safe
+  cache access. Wraps an existing <code>HyperCache[T]</code>; multiple <code>Typed</code>
+  views can share one underlying cache over disjoint keyspaces.
+  Includes <code>Set</code>, <code>Get</code>, <code>GetTyped</code> (explicit <code>ErrTypeMismatch</code>),
+  <code>GetWithInfo</code>, <code>GetOrSet</code>, <code>GetMultiple</code>, <code>Remove</code>, <code>Clear</code>. See
+  <a href="https://github.com/hyp3rd/hypercache/blob/main/hypercache_typed.go">hypercache_typed.go</a> and
+  <a href="../rfcs/0002-generic-item-typing/">RFC 0002 Phase 1</a>. Phase 2
+  (deep <code>Item[V]</code> generics) is v3 territory, conditional on adoption
+  signal.</li>
+<li><strong><code>WithDistHTTPLimits(DistHTTPLimits)</code> option</strong> for the dist
+  transport: server <code>BodyLimit</code> / <code>ReadTimeout</code> / <code>WriteTimeout</code> /
+  <code>IdleTimeout</code> / <code>Concurrency</code>, plus client <code>ResponseLimit</code> /
+  <code>ClientTimeout</code>. Defaults: 16 MiB request/response body cap, 5 s
+  read/write/client timeout, 60 s idle, fiber's 256 KiB concurrency
+  cap. Partial overrides honored — zero fields inherit defaults.</li>
+<li><strong><code>WithDistHTTPAuth(DistHTTPAuth)</code> option</strong> for bearer-token auth on
+  <code>/internal/*</code> and <code>/health</code> (<code>Token</code> for the common case;
+  <code>ServerVerify</code>/<code>ClientSign</code> hooks for JWT, mTLS-derived identity,
+  HMAC, etc.). Constant-time token compare on the server side. The
+  auto-created HTTP client signs every outgoing request with the
+  same token. Mismatched-token peers are rejected with HTTP 401
+  (<code>sentinel.ErrUnauthorized</code>).</li>
+<li><strong>TLS support</strong> via <code>DistHTTPLimits.TLSConfig</code>. The server wraps
+  its listener with <code>tls.NewListener</code>; the auto-created HTTP client
+  attaches the same <code>*tls.Config</code> to its <code>Transport.TLSClientConfig</code>
+  with ALPN forced to <code>http/1.1</code> (fiber/fasthttp doesn't speak h2).
+  Same <code>*tls.Config</code> configures both sides — operators applying it
+  consistently across the cluster get encrypted intra-cluster
+  traffic out of the box. Plaintext peers handshake-fail.</li>
+<li><strong>Dist server lifecycle context</strong> — <code>DistMemory.LifecycleContext()</code>
+  exposes a context derived from the constructor's that is canceled
+  on <code>Stop()</code>. Replaces the prior pattern where handlers captured
+  the constructor's <code>context.Background()</code> and never observed
+  cancellation. In-flight handlers and replica forwards see <code>Done()</code>
+  the moment <code>Stop</code> is called.</li>
+<li><strong><code>LastServeError()</code> accessor</strong> on both <code>distHTTPServer</code> and
+  <code>ManagementHTTPServer</code>. Replaces the prior <code>_ = serveErr</code> pattern
+  that silently swallowed listener-loop crashes — operators can now
+  surface the failure to logs/alerts.</li>
+<li><strong><code>Stop()</code> goroutine-leak fix.</strong> Both <code>distHTTPServer.stop</code> and
+  <code>ManagementHTTPServer.Shutdown</code> now call
+  <code>app.ShutdownWithContext(ctx)</code> directly instead of wrapping
+  <code>app.Shutdown()</code> in a goroutine and racing it against ctx done
+  (which leaked the goroutine when ctx fired first).</li>
+<li><strong>New sentinels:</strong> <code>sentinel.ErrTypeMismatch</code>,
+  <code>sentinel.ErrUnauthorized</code>.</li>
+</ul>
+<h3 id="internal">Internal<a class="headerlink" href="#internal" title="Anchor link to this section">¶</a></h3>
+<p>Worth surfacing for contributors:</p>
+<ul>
+<li><strong>v2 module layout</strong> is the file split listed under "Breaking
+  changes" above — readability win, no API change.</li>
+<li><strong>Test helpers</strong> introduced under <code>tests/</code>:
+  <code>tests/dist_cluster_helper.go::SetupInProcessCluster[RF]</code>,
+  <code>tests/merkle_node_helper.go</code>,
+  <code>pkg/backend/dist_memory_test_helpers.go::EnableHTTPForTest</code>
+  (build tag <code>test</code>).</li>
+<li><strong>Lint discipline:</strong> 35 <code>nolint</code> directives total across the repo,
+  each with a one-line justification. golangci-lint v2.12.1 runs
+  clean with <code>--build-tags test</code>.</li>
+</ul>
+<h3 id="removed">Removed<a class="headerlink" href="#removed" title="Anchor link to this section">¶</a></h3>
+<ul>
+<li><code>pkg/cache</code> v1 (see "Breaking changes").</li>
+<li><code>longbridgeapp/assert</code> test dependency (see "Breaking changes").</li>
+<li><code>sentinel.ErrMgmtHTTPShutdownTimeout</code> (see "Breaking changes").</li>
+<li>Experimental <code>WithItemAwareEviction</code> option / <code>IAlgorithmItemAware</code>
+  interface / <code>LRUItemAware</code> / <code>ShardedItemAware</code> types — landed
+  briefly during the RFC 0001 spike, then torn out per the RFC's
+  own discipline when the perf gate failed. The
+  <a href="../rfcs/0001-backend-owned-eviction/">RFC document</a> preserves
+  the measurement and the lessons.</li>
+</ul>
+<p>Unreleased: <a href="https://github.com/hyp3rd/hypercache/compare/v0.5.0...HEAD">https://github.com/hyp3rd/hypercache/compare/v0.5.0...HEAD</a>
+Released: <a href="https://github.com/hyp3rd/hypercache/releases/tag/v0.5.0">0.5.0</a></p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/hyp3rd/hypercache" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
