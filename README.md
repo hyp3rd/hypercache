@@ -1,6 +1,8 @@
 # HyperCache
 
-[![Go](https://github.com/hyp3rd/hypercache/actions/workflows/go.yml/badge.svg)][build-link] [![CodeQL](https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml/badge.svg)][codeql-link]
+[![Go](https://github.com/hyp3rd/hypercache/actions/workflows/go.yml/badge.svg)][build-link] [![CodeQL](https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml/badge.svg)][codeql-link] [![Docs](https://img.shields.io/badge/docs-github--pages-blue)](https://hyp3rd.github.io/hypercache/)
+
+> **📖 Full documentation**: <https://hyp3rd.github.io/hypercache/>
 
 ## Synopsis
 

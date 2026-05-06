@@ -1,0 +1,117 @@
+---
+# MkDocs configuration for the GitHub Pages docs site.
+# Build:    mkdocs build --strict
+# Preview:  mkdocs serve
+# Deploy:   pushed automatically by .github/workflows/docs.yml on main.
+
+site_name: HyperCache
+site_description: Distributed in-memory cache for Go — sharded, replicated, observable.
+site_author: hyp3rd
+site_url: https://hyp3rd.github.io/hypercache/
+
+repo_name: hyp3rd/hypercache
+repo_url: https://github.com/hyp3rd/hypercache
+edit_uri: edit/main/docs/
+
+# Strict mode in CI catches broken links / missing pages on PR. Local
+# `mkdocs serve` ignores this so authoring stays low-friction.
+strict: false
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/database
+
+plugins:
+  - search
+  - include-markdown
+  - glightbox
+
+# Build-time hooks. _hooks.py rewrites repo-relative links to source
+# files (e.g. `../pkg/foo.go`) into absolute GitHub URLs so the same
+# markdown renders correctly both on github.com and on the rendered
+# Pages site.
+hooks:
+  - _mkdocs/hooks.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: Anchor link to this section
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.keys
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/hyp3rd/hypercache
+  generator: false
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quickstart: quickstart.md
+      - 5-Node Cluster: cluster.md
+      - Kubernetes (Helm): helm.md
+  - Operations:
+      - Runbook: operations.md
+      - Server Binary: server.md
+  - Architecture:
+      - Distributed Backend: distributed.md
+  - Reference:
+      - Changelog: changelog.md
+      - RFCs: rfcs/index.md

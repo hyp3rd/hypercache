@@ -8,6 +8,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Documentation site on GitHub Pages**, built with MkDocs Material
+  and published automatically on every push to `main`. Eight
+  navigated pages — landing, quickstart, 5-node cluster tutorial,
+  Helm chart guide, server-binary reference, distributed-backend
+  architecture, operations runbook, RFC index — plus the
+  CHANGELOG and the `cmd/hypercache-server/README.md` pulled in
+  via the include-markdown plugin so they don't drift. A
+  build-time hook at [`_mkdocs/hooks.py`](_mkdocs/hooks.py)
+  rewrites repo-relative source-code references (`../pkg/foo.go`)
+  into canonical GitHub URLs so the same markdown renders
+  correctly both on github.com and on the rendered Pages site.
+  Workflow at
+  [`.github/workflows/docs.yml`](.github/workflows/docs.yml)
+  builds with `--strict` on every PR (catches broken docs-internal
+  links on submission) and deploys via `actions/deploy-pages@v4`
+  on main pushes. The README now links to the rendered site.
+  Polishing pass on the existing markdown surface: relaxed
+  `mdl` rules that fight MkDocs/frontmatter idioms (MD041
+  for YAML frontmatter pages, MD010 for Go's tab-in-code-blocks
+  convention, MD033/MD032 for Material's grid-cards HTML).
+- **Richer client API — metadata inspection, JSON envelopes, batch
+  operations.** Three additions to the
+  `cmd/hypercache-server` HTTP surface:
+   - `HEAD /v1/cache/:key` returns the value's metadata in
+     `X-Cache-*` response headers (Version, Origin, Last-Updated,
+     TTL-Ms, Expires-At, Owners, Node) with no body — fast
+     existence + TTL inspection without paying the value-transfer
+     cost. 200 if present, 404 if not.
+   - `GET /v1/cache/:key` now honors `Accept: application/json`
+     and returns an `itemEnvelope` with the same metadata as
+     HEAD plus the base64-encoded value. The bare-`curl` default
+     remains raw bytes via `application/octet-stream` — current
+     clients are unaffected.
+   - `POST /v1/cache/batch/{get,put,delete}` enable bulk operations
+     in a single round-trip. Each request carries an array; the
+     response carries one result entry per item with per-item
+     status, owners, and error reporting. `batch-put` items
+     accept either UTF-8 strings (default) or base64-encoded byte
+     payloads via `value_encoding: "base64"`. Per-item errors are
+     surfaced in `error` + `code` fields without failing the
+     whole batch.
+  Six unit tests at
+  [cmd/hypercache-server/handlers_test.go](cmd/hypercache-server/handlers_test.go)
+  pin the contracts: HEAD present/missing, Accept-JSON envelope
+  shape, default-raw round-trip, mixed-encoding batch-put,
+  batch-get found/missing, batch-delete cycle.
 - **SWIM self-refutation + cross-process gossip dissemination.**
   Closes the last `experimental` marker on the heartbeat path.
   Three pieces:

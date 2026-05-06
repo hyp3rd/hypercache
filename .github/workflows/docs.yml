@@ -1,0 +1,92 @@
+---
+name: docs
+
+# Build and deploy the MkDocs site to GitHub Pages.
+#   * pull_request — build only (validates the docs render
+#     without publishing).
+#   * push to main — build + deploy to gh-pages.
+#   * workflow_dispatch — same as push (lets operators
+#     re-publish without a docs change).
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "CHANGELOG.md"
+      - "cmd/hypercache-server/README.md"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "CHANGELOG.md"
+      - "cmd/hypercache-server/README.md"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+# Pages deployments require these permissions; the build-only
+# branch (PR) doesn't actually use the deploy steps so the
+# extra permissions are harmless.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A single in-flight deploy at a time. Newer pushes cancel
+# older ones to avoid an out-of-order publish.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # docs/ may reference files via relative paths
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          # `actions/setup-python` uses this file's hash as the
+          # pip-cache key. docs/requirements.txt pins the MkDocs
+          # + plugin versions so cache hits are reproducible and
+          # the runner can find a key file at all.
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install MkDocs + plugins
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r docs/requirements.txt
+
+      - name: Build site (strict)
+        # Strict in CI catches broken links / missing pages on PR;
+        # `mkdocs serve` locally relaxes this for fast iteration.
+        run: mkdocs build --strict
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./site
+
+  deploy:
+    name: deploy
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
