@@ -18,10 +18,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,6 +41,7 @@ import (
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
+	"github.com/hyp3rd/hypercache/pkg/httpauth"
 )
 
 // Defaults applied when the corresponding env var is unset. Centralized
@@ -71,7 +75,10 @@ type envConfig struct {
 	Seeds        []string
 	Replication  int
 	Capacity     int
-	AuthToken    string
+	AuthPolicy   httpauth.Policy
+	APITLSCert   string
+	APITLSKey    string
+	APITLSCA     string
 	LogLevel     slog.Level
 	HintTTL      time.Duration
 	HintReplay   time.Duration
@@ -81,9 +88,22 @@ type envConfig struct {
 }
 
 // loadConfig pulls every knob from the environment and applies sane
-// defaults. Returns the parsed config and any non-fatal warnings the
-// caller should log after the logger is wired.
-func loadConfig() envConfig {
+// defaults. The error return covers auth-policy load failures —
+// either the operator set HYPERCACHE_AUTH_CONFIG to a missing/
+// malformed file or set both HYPERCACHE_AUTH_CONFIG and
+// HYPERCACHE_AUTH_TOKEN. The binary exits non-zero rather than
+// silently fall through to open mode (fail-closed by design;
+// documented in CHANGELOG as a behavioral change vs pre-v2 where
+// any token/config error mapped to permissive open mode).
+//
+// Other knobs use silent fallbacks to defaults — they are tunables,
+// not security boundaries.
+func loadConfig() (envConfig, error) {
+	policy, err := httpauth.LoadFromEnv()
+	if err != nil {
+		return envConfig{}, fmt.Errorf("load auth policy: %w", err)
+	}
+
 	cfg := envConfig{
 		NodeID:       envOr("HYPERCACHE_NODE_ID", hostnameOrDefault()),
 		APIAddr:      envOr("HYPERCACHE_API_ADDR", ":8080"),
@@ -92,7 +112,10 @@ func loadConfig() envConfig {
 		Seeds:        splitCSV(os.Getenv("HYPERCACHE_SEEDS")),
 		Replication:  envInt("HYPERCACHE_REPLICATION", defaultReplication),
 		Capacity:     envInt("HYPERCACHE_CAPACITY", defaultCapacity),
-		AuthToken:    os.Getenv("HYPERCACHE_AUTH_TOKEN"),
+		AuthPolicy:   policy,
+		APITLSCert:   os.Getenv("HYPERCACHE_API_TLS_CERT"),
+		APITLSKey:    os.Getenv("HYPERCACHE_API_TLS_KEY"),
+		APITLSCA:     os.Getenv("HYPERCACHE_API_TLS_CLIENT_CA"),
 		LogLevel:     parseLogLevel(envOr("HYPERCACHE_LOG_LEVEL", "info")),
 		HintTTL:      envDuration("HYPERCACHE_HINT_TTL", defaultHintTTL),
 		HintReplay:   envDuration("HYPERCACHE_HINT_REPLAY", defaultHintReplay),
@@ -101,7 +124,7 @@ func loadConfig() envConfig {
 		RebalanceInt: envDuration("HYPERCACHE_REBALANCE_INTERVAL", defaultRebalance),
 	}
 
-	return cfg
+	return cfg, nil
 }
 
 // envOr returns os.Getenv(key) or fallback when unset/empty.
@@ -218,10 +241,16 @@ func buildHyperCache(ctx context.Context, cfg envConfig, logger *slog.Logger) (*
 		backend.WithDistLogger(logger),
 	}
 
-	if cfg.AuthToken != "" {
+	// Dist transport auth is intentionally separate from the
+	// client API's multi-token policy: the cluster is one trust
+	// domain (every node holds the same peer token), so reading
+	// HYPERCACHE_AUTH_TOKEN directly here keeps the dist symmetry
+	// invariant when operators set HYPERCACHE_AUTH_CONFIG for the
+	// client API but still want peer auth on the wire.
+	if peerToken := os.Getenv(httpauth.EnvAuthToken); peerToken != "" {
 		hcCfg.DistMemoryOptions = append(
 			hcCfg.DistMemoryOptions,
-			backend.WithDistHTTPAuth(backend.DistHTTPAuth{Token: cfg.AuthToken}),
+			backend.WithDistHTTPAuth(backend.DistHTTPAuth{Token: peerToken}),
 		)
 	}
 
@@ -264,11 +293,83 @@ const (
 	codeInternal   = "INTERNAL"
 )
 
+// TLS-config sentinel errors returned by buildAPITLSConfig. Wrapped
+// via fmt.Errorf at construction time so callers see the field
+// name + path; matched via errors.Is for control-flow.
+var (
+	errAPITLSPartial   = errors.New("HYPERCACHE_API_TLS_CERT and HYPERCACHE_API_TLS_KEY must both be set")
+	errAPITLSNoPEMInCA = errors.New("HYPERCACHE_API_TLS_CLIENT_CA: no PEM certificates parsed from file")
+)
+
+// registerClientRoutes wires every client-API route onto the
+// provided fiber app. Extracted from runClientAPI so tests
+// (handlers_test.go, auth_test.go, openapi_test.go) drive the same
+// wiring without spinning up a real listener — and so the drift
+// test can introspect routes from the *exact* production
+// registration rather than a hand-maintained mirror.
+//
+// Routes are scope-tagged: read endpoints (GET/HEAD/owners-lookup,
+// batch-get) require ScopeRead; mutating endpoints (PUT/DELETE,
+// batch-put/delete) require ScopeWrite. /healthz and
+// /v1/openapi.yaml are deliberately scope-less so liveness probes
+// and spec-discovery work without credentials.
+//
+// When the policy is unconfigured (zero Policy with AllowAnonymous
+// false), every protected route 401s — fail-closed by design. The
+// hypercache-server binary's loadConfig handles the legacy
+// "neither env var set" path by flipping AllowAnonymous on with a
+// startup warning, so the zero-config dev posture still works.
+func registerClientRoutes(app *fiber.App, policy httpauth.Policy, nodeCtx *nodeContext) {
+	read := policy.Middleware(httpauth.ScopeRead)
+	write := policy.Middleware(httpauth.ScopeWrite)
+
+	app.Get("/healthz", func(c fiber.Ctx) error { return c.SendString("ok") })
+
+	// Self-describing — clients can discover the API surface
+	// without out-of-band docs. The spec is embedded at build
+	// time from cmd/hypercache-server/openapi.yaml so it stays
+	// in lockstep with whatever the binary was built against.
+	app.Get("/v1/openapi.yaml", func(c fiber.Ctx) error {
+		c.Set(fiber.HeaderContentType, "application/yaml")
+
+		return c.Send(openapiSpec)
+	})
+
+	app.Put("/v1/cache/:key", write, func(c fiber.Ctx) error { return handlePut(c, nodeCtx) })
+	app.Get("/v1/cache/:key", read, func(c fiber.Ctx) error { return handleGet(c, nodeCtx) })
+	app.Head("/v1/cache/:key", read, func(c fiber.Ctx) error { return handleHead(c, nodeCtx) })
+	app.Delete("/v1/cache/:key", write, func(c fiber.Ctx) error { return handleDelete(c, nodeCtx) })
+	app.Get("/v1/owners/:key", read, func(c fiber.Ctx) error { return handleOwners(c, nodeCtx) })
+
+	app.Post("/v1/cache/batch/get", read, func(c fiber.Ctx) error { return handleBatchGet(c, nodeCtx) })
+	app.Post("/v1/cache/batch/put", write, func(c fiber.Ctx) error { return handleBatchPut(c, nodeCtx) })
+	app.Post("/v1/cache/batch/delete", write, func(c fiber.Ctx) error { return handleBatchDelete(c, nodeCtx) })
+}
+
 // runClientAPI builds and starts the client REST API. Returns the
-// fiber app so main can shut it down on signal. Handlers are
-// auth-wrapped when the env carries an HYPERCACHE_AUTH_TOKEN, mirroring
-// the dist + management HTTP auth posture.
-func runClientAPI(addr, nodeID string, hc *hypercache.HyperCache[backend.DistMemory], authToken string, logger *slog.Logger) *fiber.App {
+// fiber app so main can shut it down on signal. The provided
+// httpauth.Policy gates every protected route — see
+// registerClientRoutes for the per-route scope mapping.
+//
+// TLS posture (controlled via cfg, mirroring dist's pattern):
+//
+//   - cfg.APITLSCert + cfg.APITLSKey both set → standard TLS.
+//   - Adding cfg.APITLSCA → mTLS with RequireAndVerifyClientCert.
+//     The verified peer cert's Subject CN is what
+//     httpauth.Policy.CertIdentities matches against.
+//   - Either field empty → plaintext on cfg.APIAddr (preserves
+//     today's default behavior; dev mode and ingress-terminated TLS
+//     setups keep working).
+//
+// Listener-construction errors fail fast (the goroutine wouldn't
+// have surfaced them anyway via app.Listener); operators see the
+// failure at startup rather than silently bound on the wrong
+// protocol.
+func runClientAPI(
+	cfg envConfig,
+	hc *hypercache.HyperCache[backend.DistMemory],
+	logger *slog.Logger,
+) (*fiber.App, error) {
 	app := fiber.New(fiber.Config{
 		AppName:      "hypercache-server",
 		ReadTimeout:  clientAPIReadTimeout,
@@ -276,29 +377,95 @@ func runClientAPI(addr, nodeID string, hc *hypercache.HyperCache[backend.DistMem
 		IdleTimeout:  clientAPIIdleTimeout,
 	})
 
-	auth := bearerAuth(authToken)
-	nodeCtx := &nodeContext{hc: hc, nodeID: nodeID}
+	registerClientRoutes(app, cfg.AuthPolicy, &nodeContext{hc: hc, nodeID: cfg.NodeID})
 
-	app.Get("/healthz", func(c fiber.Ctx) error { return c.SendString("ok") })
+	tlsCfg, err := buildAPITLSConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build client API TLS config: %w", err)
+	}
 
-	app.Put("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handlePut(c, nodeCtx) }))
-	app.Get("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleGet(c, nodeCtx) }))
-	app.Head("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleHead(c, nodeCtx) }))
-	app.Delete("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleDelete(c, nodeCtx) }))
-	app.Get("/v1/owners/:key", auth(func(c fiber.Ctx) error { return handleOwners(c, nodeCtx) }))
+	if tlsCfg == nil {
+		go runPlaintextListener(app, cfg.APIAddr, logger)
 
-	app.Post("/v1/cache/batch/get", auth(func(c fiber.Ctx) error { return handleBatchGet(c, nodeCtx) }))
-	app.Post("/v1/cache/batch/put", auth(func(c fiber.Ctx) error { return handleBatchPut(c, nodeCtx) }))
-	app.Post("/v1/cache/batch/delete", auth(func(c fiber.Ctx) error { return handleBatchDelete(c, nodeCtx) }))
+		return app, nil
+	}
 
-	go func() {
-		err := app.Listen(addr)
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("client API listener exited", slog.Any("err", err))
-		}
-	}()
+	ln, err := tls.Listen("tcp", cfg.APIAddr, tlsCfg)
+	if err != nil {
+		return nil, fmt.Errorf("client API tls listen %s: %w", cfg.APIAddr, err)
+	}
 
-	return app
+	go runWrappedListener(app, ln, logger)
+
+	return app, nil
+}
+
+// runPlaintextListener serves on the bare addr — the standard
+// non-TLS path that shipped pre-v2.
+func runPlaintextListener(app *fiber.App, addr string, logger *slog.Logger) {
+	err := app.Listen(addr)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("client API listener exited", slog.Any("err", err))
+	}
+}
+
+// runWrappedListener serves on a pre-built net.Listener (used by
+// the TLS path so the tls.Config — including ClientAuth and
+// ClientCAs — is fully under our control).
+func runWrappedListener(app *fiber.App, ln net.Listener, logger *slog.Logger) {
+	err := app.Listener(ln)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("client API listener exited", slog.Any("err", err))
+	}
+}
+
+// buildAPITLSConfig assembles the *tls.Config the API listener
+// should use, or nil for the plaintext default. CERT+KEY are the
+// minimum for TLS; adding CA upgrades to mTLS with
+// RequireAndVerifyClientCert (the only mode that gives the auth
+// middleware a verified peer cert to map to a CertIdentity).
+//
+// Returns an error when CERT or KEY is set but the other is missing
+// — that shape is operator-misconfiguration, not "TLS off." Don't
+// silently fall through to plaintext when the operator clearly
+// asked for TLS but typo'd one of the paths.
+func buildAPITLSConfig(cfg envConfig) (*tls.Config, error) {
+	if cfg.APITLSCert == "" && cfg.APITLSKey == "" {
+		return nil, nil //nolint:nilnil // documented "no TLS" sentinel
+	}
+
+	if cfg.APITLSCert == "" || cfg.APITLSKey == "" {
+		return nil, errAPITLSPartial
+	}
+
+	cert, err := tls.LoadX509KeyPair(cfg.APITLSCert, cfg.APITLSKey)
+	if err != nil {
+		return nil, fmt.Errorf("load TLS keypair: %w", err)
+	}
+
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	if cfg.APITLSCA == "" {
+		return tlsCfg, nil
+	}
+
+	caPEM, err := os.ReadFile(cfg.APITLSCA)
+	if err != nil {
+		return nil, fmt.Errorf("read client CA bundle %s: %w", cfg.APITLSCA, err)
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("%w: %s", errAPITLSNoPEMInCA, cfg.APITLSCA)
+	}
+
+	tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+	tlsCfg.ClientCAs = pool
+
+	return tlsCfg, nil
 }
 
 // jsonErr writes the canonical errorResponse with the given status
@@ -996,41 +1163,42 @@ func handleOwners(c fiber.Ctx, nodeCtx *nodeContext) error {
 	})
 }
 
-// bearerAuth returns a middleware that requires `Authorization: Bearer
-// <token>` when token is non-empty; otherwise it's a passthrough.
-// Mirrors the same posture as DistHTTPAuth — applied to the client
-// API for symmetry.
-func bearerAuth(token string) func(fiber.Handler) fiber.Handler {
-	if token == "" {
-		return func(h fiber.Handler) fiber.Handler { return h }
-	}
-
-	want := "Bearer " + token
-
-	return func(h fiber.Handler) fiber.Handler {
-		return func(c fiber.Ctx) error {
-			got := c.Get("Authorization")
-			if got != want {
-				return c.SendStatus(fiber.StatusUnauthorized)
-			}
-
-			return h(c)
-		}
-	}
-}
-
 func main() { os.Exit(run()) }
 
 // run is the testable main body — separated so deferred cleanup
 // (context cancel, future cleanups) executes before process exit.
 // Returns 0 on clean shutdown, 1 on construction failure.
 func run() int {
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		// Fall back to a minimal stderr logger because cfg.LogLevel
+		// is not yet populated. Auth-policy load errors are
+		// fail-closed: missing/malformed HYPERCACHE_AUTH_CONFIG
+		// must not silently degrade to open mode.
+		fmt.Fprintf(os.Stderr, "hypercache-server: %v\n", err)
+
+		return 1
+	}
 
 	baseLogger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	logger := baseLogger.With(slog.String("node_id", cfg.NodeID))
 
 	slog.SetDefault(logger)
+
+	// Preserve the pre-v2 zero-config dev posture: when neither
+	// HYPERCACHE_AUTH_CONFIG nor HYPERCACHE_AUTH_TOKEN is set, the
+	// loader returns the zero Policy, and we explicitly opt into
+	// AllowAnonymous mode here with a loud warning. Without this,
+	// every protected route would 401 — every existing
+	// `docker run hypercache` would break on upgrade.
+	if !cfg.AuthPolicy.IsConfigured() {
+		logger.Warn(
+			"hypercache-server running with no client API auth configured; set " +
+				httpauth.EnvAuthConfig + " or " + httpauth.EnvAuthToken + " for production",
+		)
+
+		cfg.AuthPolicy.AllowAnonymous = true
+	}
 
 	logger.Info(
 		"hypercache-server starting",
@@ -1039,6 +1207,8 @@ func run() int {
 		slog.String("dist_addr", cfg.DistAddr),
 		slog.Any("seeds", cfg.Seeds),
 		slog.Int("replication", cfg.Replication),
+		slog.Int("auth_token_identities", len(cfg.AuthPolicy.Tokens)),
+		slog.Int("auth_cert_identities", len(cfg.AuthPolicy.CertIdentities)),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1051,7 +1221,14 @@ func run() int {
 		return 1
 	}
 
-	apiApp := runClientAPI(cfg.APIAddr, cfg.NodeID, hc, cfg.AuthToken, logger)
+	apiApp, err := runClientAPI(cfg, hc, logger)
+	if err != nil {
+		logger.Error("client API construction failed", slog.Any("err", err))
+
+		_ = hc.Stop(ctx)
+
+		return 1
+	}
 
 	awaitShutdown(ctx, hc, apiApp, logger)
 

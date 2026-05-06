@@ -56,6 +56,10 @@ plugins:
   - search
   - include-markdown
   - glightbox
+  # Renders embedded OpenAPI specs via `!!swagger ...!!` markers.
+  # `docs/api.md` uses this to render the binary's embedded spec
+  # (injected into the docs build by `_mkdocs/hooks.py:on_files`).
+  - swagger-ui-tag
 
 # Build-time hooks. _hooks.py rewrites repo-relative links to source
 # files (e.g. `../pkg/foo.go`) into absolute GitHub URLs so the same
@@ -113,5 +117,6 @@ nav:
   - Architecture:
       - Distributed Backend: distributed.md
   - Reference:
+      - API Reference: api.md
       - Changelog: changelog.md
       - RFCs: rfcs/index.md

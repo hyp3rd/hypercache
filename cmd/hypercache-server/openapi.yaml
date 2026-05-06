@@ -1,0 +1,633 @@
+openapi: 3.1.0
+info:
+  title: HyperCache HTTP API
+  version: 1.0.0
+  summary: Distributed in-memory cache — client REST API.
+  description: |
+    The hypercache-server binary exposes this REST API for application
+    traffic. Three other listeners run alongside it (peer-to-peer dist
+    HTTP for replication, management HTTP for admin/observability) but
+    they are not part of this contract.
+
+    **Auth.** When the server is started with `HYPERCACHE_AUTH_TOKEN`
+    set, every endpoint requires `Authorization: Bearer <token>`.
+    Without that env var, auth is open.
+
+    **Wire encoding.** Single-key `GET` returns raw bytes
+    (`application/octet-stream`) by default for binary fidelity. Send
+    `Accept: application/json` to receive an `ItemEnvelope` with
+    metadata + base64 value. Batch endpoints always emit the
+    base64-encoded form for binary safety.
+
+    **Errors.** Every 4xx/5xx response carries the `ErrorResponse`
+    shape with stable `code` strings (`BAD_REQUEST`, `NOT_FOUND`,
+    `DRAINING`, `INTERNAL`, `UNAUTHORIZED`).
+  license:
+    name: LicenseRef-Hyperd
+    url: https://github.com/hyp3rd/hypercache/blob/main/LICENSE
+  contact:
+    name: hyp3rd
+    url: https://github.com/hyp3rd/hypercache
+
+servers:
+  - url: http://localhost:8080
+    description: Default local binding (HYPERCACHE_API_ADDR).
+  - url: https://{host}:{port}
+    description: TLS-fronted production deployment.
+    variables:
+      host:
+        default: localhost
+        description: Public hostname or load-balancer DNS.
+      port:
+        default: "443"
+        description: TLS port (typically 443 behind an LB).
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: cache
+    description: Single-key Set/Get/Delete and metadata inspection.
+  - name: batch
+    description: Bulk operations — Set/Get/Delete many keys per call.
+  - name: cluster
+    description: Ring ownership inspection for client-side debugging.
+  - name: meta
+    description: Liveness probe, OpenAPI self-description.
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      tags: [ meta ]
+      summary: Liveness probe.
+      description: |
+        Returns `200 ok` when the binary is running. Auth-free
+        regardless of `HYPERCACHE_AUTH_TOKEN` so external probes
+        (k8s, LBs) can reach it without credentials.
+      security: []
+      responses:
+        "200":
+          description: Server is up.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+
+  /v1/openapi.yaml:
+    get:
+      operationId: getOpenAPISpec
+      tags: [ meta ]
+      summary: This OpenAPI specification.
+      description: |
+        Returns the embedded spec document so clients can discover
+        the API surface programmatically. Same content as the file
+        in this repo at `cmd/hypercache-server/openapi.yaml`.
+      security: []
+      responses:
+        "200":
+          description: OpenAPI 3.1 YAML.
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /v1/cache/{key}:
+    parameters:
+      - $ref: "#/components/parameters/PathKey"
+
+    put:
+      operationId: putCacheItem
+      tags: [ cache ]
+      summary: Store a value.
+      description: |
+        Body is the raw value (any bytes; JSON, text, binary). The
+        cache stores it as `[]byte`. Use the `ttl` query parameter
+        for time-bounded entries.
+      parameters:
+        - $ref: "#/components/parameters/QueryTTL"
+      requestBody:
+        required: true
+        description: Raw value bytes.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+          application/json:
+            schema: {}
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PutResponse"
+              examples:
+                stored:
+                  value:
+                    key: greeting
+                    stored: true
+                    ttl_ms: 300000
+                    bytes: 5
+                    node: node-1
+                    owners: [ node-1, node-2, node-3 ]
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/Draining" }
+
+    get:
+      operationId: getCacheItem
+      tags: [ cache ]
+      summary: Retrieve a value.
+      description: |
+        Default: raw value bytes (`application/octet-stream`) for
+        binary fidelity. Send `Accept: application/json` to get an
+        `ItemEnvelope` with TTL, version, owners, and a base64 value.
+      responses:
+        "200":
+          description: Found.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+              examples:
+                rawBytes:
+                  summary: Default (raw bytes)
+                  value: world
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemEnvelope"
+              examples:
+                envelope:
+                  value:
+                    key: greeting
+                    value: d29ybGQ=
+                    value_encoding: base64
+                    ttl_ms: 28412
+                    expires_at: "2026-05-06T10:30:00Z"
+                    version: 1
+                    origin: node-1
+                    last_updated: "2026-05-06T10:00:00Z"
+                    node: node-1
+                    owners: [ node-1, node-2, node-3 ]
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    head:
+      operationId: headCacheItem
+      tags: [ cache ]
+      summary: Inspect metadata without fetching the value.
+      description: |
+        Returns the same metadata as the `Accept: application/json`
+        GET, but in `X-Cache-*` response headers and with no body.
+        Cheap for cache-revalidation flows that just need to know
+        whether the key is current.
+      responses:
+        "200":
+          description: Found.
+          headers:
+            X-Cache-Version: { schema: { type: integer } }
+            X-Cache-Origin: { schema: { type: string } }
+            X-Cache-Last-Updated: { schema: { type: string, format: date-time } }
+            X-Cache-Ttl-Ms: { schema: { type: integer } }
+            X-Cache-Expires-At: { schema: { type: string, format: date-time } }
+            X-Cache-Owners: { schema: { type: string, description: "Comma-separated owner IDs." } }
+            X-Cache-Node: { schema: { type: string } }
+        "400":
+          description: Missing key in path.
+        "401":
+          description: Unauthorized.
+        "404":
+          description: Not found.
+
+    delete:
+      operationId: deleteCacheItem
+      tags: [ cache ]
+      summary: Remove a value.
+      description: |
+        Idempotent — deleting a missing key returns 200 with
+        `deleted: true`. The `owners` list reflects the ring-owners
+        that should have held the key, useful for follow-up
+        verification.
+      responses:
+        "200":
+          description: Deleted (or never existed).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/Draining" }
+
+  /v1/owners/{key}:
+    parameters:
+      - $ref: "#/components/parameters/PathKey"
+    get:
+      operationId: getKeyOwners
+      tags: [ cluster ]
+      summary: Resolve ring owners for a key.
+      description: |
+        Pure visibility — returns the consistent-hash owners for the
+        given key without touching cache state. Works even when the
+        key has never been written.
+      responses:
+        "200":
+          description: Owner set (deterministic from membership).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnersResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/cache/batch/get:
+    post:
+      operationId: batchGet
+      tags: [ batch ]
+      summary: Bulk fetch.
+      description: |
+        Each requested key is looked up independently — a missing key
+        produces `{found: false}` without failing the whole batch.
+        Found entries carry the same shape as a single-key
+        `Accept: application/json` GET.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchGetRequest"
+      responses:
+        "200":
+          description: Per-key results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchGetResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/cache/batch/put:
+    post:
+      operationId: batchPut
+      tags: [ batch ]
+      summary: Bulk store.
+      description: |
+        Each item's `value_encoding` selects how the wire `value`
+        string is interpreted: `base64` decodes bytes-first;
+        anything else (default) treats the string as UTF-8 text and
+        stores the raw bytes. Per-item errors are surfaced —
+        a single failure doesn't void the whole batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchPutRequest"
+      responses:
+        "200":
+          description: Per-key results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchPutResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/Draining" }
+
+  /v1/cache/batch/delete:
+    post:
+      operationId: batchDelete
+      tags: [ batch ]
+      summary: Bulk delete.
+      description: |
+        Same per-item semantics as bulk-put. Idempotent — keys that
+        never existed return `deleted: true`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchDeleteRequest"
+      responses:
+        "200":
+          description: Per-key results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchDeleteResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/Draining" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-token
+      description: |
+        When `HYPERCACHE_AUTH_TOKEN` is set on the server, every
+        request must carry `Authorization: Bearer <token>`. Tokens
+        are opaque strings (constant-time compared on the server).
+
+  parameters:
+    PathKey:
+      name: key
+      in: path
+      required: true
+      description: Cache key (URL-safe).
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+
+    QueryTTL:
+      name: ttl
+      in: query
+      required: false
+      description: |
+        Optional time-to-live as a Go duration string (`30s`, `5m`,
+        `2h30m`). Empty / absent stores without expiration.
+      schema:
+        type: string
+        pattern: "^[0-9]+(\\\\.[0-9]+)?(ns|us|µs|ms|s|m|h)+$"
+
+  responses:
+    BadRequest:
+      description: Malformed request (missing key, invalid TTL, bad JSON, …).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            badRequest:
+              value:
+                error: "invalid ttl: time: invalid duration \"junk\""
+                code: BAD_REQUEST
+
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            unauthorized:
+              value:
+                error: unauthorized
+                code: UNAUTHORIZED
+
+    NotFound:
+      description: Key not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            notFound:
+              value:
+                error: key not found
+                code: NOT_FOUND
+
+    Draining:
+      description: |
+        Node is draining (Drain has been called or `/dist/drain`
+        was POSTed). Clients should redirect writes to a peer.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            draining:
+              value:
+                error: node is draining; redirect to a peer
+                code: DRAINING
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [ error, code ]
+      properties:
+        error:
+          type: string
+          description: Human-readable message.
+        code:
+          type: string
+          enum: [ BAD_REQUEST, NOT_FOUND, DRAINING, INTERNAL, UNAUTHORIZED ]
+          description: Stable machine-readable code.
+
+    PutResponse:
+      type: object
+      required: [ key, stored, bytes, node, owners ]
+      properties:
+        key: { type: string }
+        stored: { type: boolean }
+        ttl_ms:
+          type: integer
+          format: int64
+          description: TTL in milliseconds (omitted when no TTL was set).
+        bytes:
+          type: integer
+          format: int32
+          description: Stored value size in bytes.
+        node:
+          type: string
+          description: ID of the node that handled the request.
+        owners:
+          type: array
+          description: Ring owners for the key — primary first.
+          items: { type: string }
+
+    DeleteResponse:
+      type: object
+      required: [ key, deleted, node, owners ]
+      properties:
+        key: { type: string }
+        deleted: { type: boolean }
+        node: { type: string }
+        owners:
+          type: array
+          items: { type: string }
+
+    OwnersResponse:
+      type: object
+      required: [ key, owners, node ]
+      properties:
+        key: { type: string }
+        owners:
+          type: array
+          description: Ring owners — primary first, replicas after.
+          items: { type: string }
+        node: { type: string }
+
+    ItemEnvelope:
+      type: object
+      required: [ key, value, value_encoding, version, node, owners ]
+      properties:
+        key: { type: string }
+        value:
+          type: string
+          description: Always base64-encoded bytes for binary safety.
+        value_encoding:
+          type: string
+          enum: [ base64 ]
+        ttl_ms:
+          type: integer
+          format: int64
+        expires_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+          description: Monotonic per-key version assigned by the dist backend.
+        origin:
+          type: string
+          description: ID of the node that originally wrote this version.
+        last_updated:
+          type: string
+          format: date-time
+        node: { type: string }
+        owners:
+          type: array
+          items: { type: string }
+
+    BatchGetRequest:
+      type: object
+      required: [ keys ]
+      properties:
+        keys:
+          type: array
+          items: { type: string }
+          minItems: 0
+
+    BatchGetResult:
+      type: object
+      required: [ key, found ]
+      properties:
+        key: { type: string }
+        found: { type: boolean }
+        value: { type: string, description: Base64 (only when found). }
+        value_encoding:
+          type: string
+          enum: [ base64 ]
+        ttl_ms:
+          type: integer
+          format: int64
+        expires_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+        origin: { type: string }
+        last_updated:
+          type: string
+          format: date-time
+        owners:
+          type: array
+          items: { type: string }
+
+    BatchGetResponse:
+      type: object
+      required: [ results, node ]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/BatchGetResult" }
+        node: { type: string }
+
+    BatchPutItem:
+      type: object
+      required: [ key, value ]
+      properties:
+        key: { type: string }
+        value:
+          type: string
+          description: |
+            UTF-8 text by default, or base64-encoded bytes when
+            `value_encoding` is `base64`.
+        value_encoding:
+          type: string
+          enum: [ string, base64 ]
+          default: string
+        ttl_ms:
+          type: integer
+          format: int64
+
+    BatchPutRequest:
+      type: object
+      required: [ items ]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/BatchPutItem" }
+          minItems: 0
+
+    BatchPutResult:
+      type: object
+      required: [ key, stored ]
+      properties:
+        key: { type: string }
+        stored: { type: boolean }
+        bytes:
+          type: integer
+          format: int32
+        owners:
+          type: array
+          items: { type: string }
+        error:
+          type: string
+          description: Per-item error message (only when stored=false).
+        code:
+          type: string
+          enum: [ BAD_REQUEST, DRAINING, INTERNAL ]
+
+    BatchPutResponse:
+      type: object
+      required: [ results, node ]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/BatchPutResult" }
+        node: { type: string }
+
+    BatchDeleteRequest:
+      type: object
+      required: [ keys ]
+      properties:
+        keys:
+          type: array
+          items: { type: string }
+          minItems: 0
+
+    BatchDeleteResult:
+      type: object
+      required: [ key, deleted ]
+      properties:
+        key: { type: string }
+        deleted: { type: boolean }
+        owners:
+          type: array
+          items: { type: string }
+        error: { type: string }
+        code:
+          type: string
+          enum: [ BAD_REQUEST, DRAINING, INTERNAL ]
+
+    BatchDeleteResponse:
+      type: object
+      required: [ results, node ]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/BatchDeleteResult" }
+        node: { type: string }

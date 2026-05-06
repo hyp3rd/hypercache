@@ -14,3 +14,4 @@ ignore: |
   cspell.config.yaml
   FUNDING.yml
   codeql.yml
+  cmd/hypercache-server/openapi.yaml

@@ -8,6 +8,110 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Client API auth v2: multi-token, scoped, mTLS-capable.** New
+  [`pkg/httpauth/`](pkg/httpauth/) package with `Policy`,
+  `TokenIdentity`, `CertIdentity`, `Scope` types and a
+  scope-enforcing fiber middleware. Replaces the single-token
+  bearerAuth helper in `cmd/hypercache-server/main.go`. Three
+  credential classes resolved in priority order (bearer → mTLS
+  cert → ServerVerify hook), with constant-time multi-token
+  compare that visits every configured token even on early match
+  to prevent token-cardinality timing leaks. Per-route scope
+  enforcement: `GET`/`HEAD`/owners-lookup/`batch-get` require
+  `ScopeRead`; `PUT`/`DELETE`/`batch-put`/`batch-delete` require
+  `ScopeWrite`. Anonymous identity (with `AllowAnonymous: true`)
+  receives all scopes — used by the binary to preserve the
+  zero-config dev posture.
+- **YAML auth config + legacy env-var coexistence.**
+  `HYPERCACHE_AUTH_CONFIG=/etc/hypercache/auth.yaml` (new) loads
+  a multi-token policy with per-identity scopes:
+
+  ```yaml
+  tokens:
+    - id: app-prod
+      token: "<secret>"
+      scopes: [read, write]
+    - id: ops
+      token: "<secret>"
+      scopes: [admin]
+  cert_identities:
+    - subject_cn: app.internal
+      scopes: [read]
+  allow_anonymous: false
+  ```
+
+  The legacy `HYPERCACHE_AUTH_TOKEN` keeps working byte-identical:
+  one synthesized identity with all three scopes. The two env
+  vars are NOT mutually exclusive — `HYPERCACHE_AUTH_CONFIG`
+  governs the client API, `HYPERCACHE_AUTH_TOKEN` continues to
+  drive the dist transport's symmetric peer auth (single trust
+  domain). Both can be set in the same deployment without
+  conflict. Missing or malformed config files exit the binary
+  non-zero rather than fall through to permissive open mode —
+  fail-closed by design.
+- **mTLS on the client API.** New env vars
+  `HYPERCACHE_API_TLS_CERT`, `HYPERCACHE_API_TLS_KEY`, and
+  `HYPERCACHE_API_TLS_CLIENT_CA` wrap the listener with
+  `tls.NewListener`. With CA set, `RequireAndVerifyClientCert`
+  is enabled and the verified peer cert's Subject CN is matched
+  against the policy's `CertIdentities` to resolve the calling
+  identity. Plaintext, standard-TLS, and mTLS shapes all share
+  one listener path. End-to-end coverage at
+  [cmd/hypercache-server/mtls_e2e_test.go](cmd/hypercache-server/mtls_e2e_test.go)
+  drives a real handshake against an in-process CA / server-cert
+  / client-cert chain and asserts CN-to-identity resolution
+  works in both directions (matching CN → 200, non-matching
+  CN → 401).
+
+### Security
+
+- **Constant-time bearer-token compare on the client API.** Replaced
+  the plaintext `got != want` check at
+  [cmd/hypercache-server/main.go](cmd/hypercache-server/main.go) with
+  `crypto/subtle.ConstantTimeCompare` to defeat timing side-channels.
+  A naive string compare returns as soon as the first differing byte
+  is found, leaking per-byte equality of `HYPERCACHE_AUTH_TOKEN` to a
+  remote attacker who can measure response time. The fix mirrors the
+  dist transport's existing constant-time check at
+  [pkg/backend/dist_http_server.go:144-152](pkg/backend/dist_http_server.go#L144-L152).
+  No public API change; the env-var contract and "empty token →
+  open mode" back-compatible behavior are unchanged. New auth-test suite
+  at [cmd/hypercache-server/auth_test.go](cmd/hypercache-server/auth_test.go)
+  pins the contract: missing/wrong/malformed/lowercase/wrong-length
+  bearer headers all return 401, public meta routes (`/healthz`,
+  `/v1/openapi.yaml`) stay reachable without credentials, every
+  protected route fires the wrapper. The new `newAuthedServer`
+  helper drives `registerClientRoutes` directly so future wiring
+  regressions are caught (the existing `handlers_test.go::newTestServer`
+  deliberately bypasses auth for handler-correctness coverage).
+
+### Added
+
+- **OpenAPI 3.1 specification + drift-detection.** The
+  `hypercache-server` binary now embeds its own contract via
+  [`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml)
+  (`//go:embed`) and serves it at `GET /v1/openapi.yaml` — every
+  running node is self-describing. The spec covers all nine client
+  routes (single-key PUT/GET/HEAD/DELETE, owners lookup, three
+  batch operations, plus the `/healthz` and `/v1/openapi.yaml`
+  meta endpoints), with reusable `ErrorResponse`, `ItemEnvelope`,
+  and batch-operation schemas, the `bearerAuth` security scheme,
+  and `operationId` on every operation for codegen-friendliness.
+  A drift detector at
+  [cmd/hypercache-server/openapi_test.go](cmd/hypercache-server/openapi_test.go)
+  drives `registerClientRoutes` directly and asserts every
+  fiber-registered route has a matching path in the spec — and
+  vice-versa — so the contract cannot silently fall out of sync
+  with the binary. Two CI workflows back this up at
+  [.github/workflows/openapi.yml](.github/workflows/openapi.yml):
+  `redocly lint` validates the schema against the OpenAPI 3.1
+  meta-spec, and the Go drift test runs on every change to
+  `main.go` or the spec. The docs site renders the same spec
+  inline at the new
+  [API Reference](docs/api.md) page via the
+  `mkdocs-swagger-ui-tag` plugin — a single source of truth for
+  the binary, the docs, and any client codegen that points at a
+  live cluster.
 - **Documentation site on GitHub Pages**, built with MkDocs Material
   and published automatically on every push to `main`. Eight
   navigated pages — landing, quickstart, 5-node cluster tutorial,
@@ -31,24 +135,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Richer client API — metadata inspection, JSON envelopes, batch
   operations.** Three additions to the
   `cmd/hypercache-server` HTTP surface:
-   - `HEAD /v1/cache/:key` returns the value's metadata in
-     `X-Cache-*` response headers (Version, Origin, Last-Updated,
-     TTL-Ms, Expires-At, Owners, Node) with no body — fast
-     existence + TTL inspection without paying the value-transfer
-     cost. 200 if present, 404 if not.
-   - `GET /v1/cache/:key` now honors `Accept: application/json`
-     and returns an `itemEnvelope` with the same metadata as
-     HEAD plus the base64-encoded value. The bare-`curl` default
-     remains raw bytes via `application/octet-stream` — current
-     clients are unaffected.
-   - `POST /v1/cache/batch/{get,put,delete}` enable bulk operations
-     in a single round-trip. Each request carries an array; the
-     response carries one result entry per item with per-item
-     status, owners, and error reporting. `batch-put` items
-     accept either UTF-8 strings (default) or base64-encoded byte
-     payloads via `value_encoding: "base64"`. Per-item errors are
-     surfaced in `error` + `code` fields without failing the
-     whole batch.
+      - `HEAD /v1/cache/:key` returns the value's metadata in
+        `X-Cache-*` response headers (Version, Origin, Last-Updated,
+        TTL-Ms, Expires-At, Owners, Node) with no body — fast
+        existence + TTL inspection without paying the value-transfer
+        cost. 200 if present, 404 if not.
+      - `GET /v1/cache/:key` now honors `Accept: application/json`
+        and returns an `itemEnvelope` with the same metadata as
+        HEAD plus the base64-encoded value. The bare-`curl` default
+        remains raw bytes via `application/octet-stream` — current
+        clients are unaffected.
+      - `POST /v1/cache/batch/{get,put,delete}` enable bulk operations
+        in a single round-trip. Each request carries an array; the
+        response carries one result entry per item with per-item
+        status, owners, and error reporting. `batch-put` items
+        accept either UTF-8 strings (default) or base64-encoded byte
+        payloads via `value_encoding: "base64"`. Per-item errors are
+        surfaced in `error` + `code` fields without failing the
+        whole batch.
   Six unit tests at
   [cmd/hypercache-server/handlers_test.go](cmd/hypercache-server/handlers_test.go)
   pin the contracts: HEAD present/missing, Accept-JSON envelope
@@ -57,26 +161,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **SWIM self-refutation + cross-process gossip dissemination.**
   Closes the last `experimental` marker on the heartbeat path.
   Three pieces:
-   - **`acceptGossip` self-refute** — incoming entries that
-     reference the local node as Suspect or Dead at incarnation
-     ≥ ours now bump the local incarnation and re-mark Alive.
-     Higher-incarnation-wins propagation in the same function
-     disseminates the refutation cluster-wide, so a falsely-
-     suspected node can clear suspicion through gossip alone
-     (pre-fix the only path was a fresh probe).
-   - **HTTP gossip wire** — new `Gossip(ctx, targetID, members)`
-     method on `DistTransport`, new
-     `POST /internal/gossip` server endpoint (auth-wrapped),
-     new `GossipMember` wire DTO. `runGossipTick` now falls
-     through to the HTTP path when the transport isn't an
-     `InProcessTransport`, so cross-process clusters disseminate
-     membership state — pre-Phase-E this was an in-process-only
-     no-op.
-   - The `experimental` qualifier is removed from
-     `heartbeatLoop`'s comment + the heartbeat-section field
-     doc; SWIM-style indirect probes (Phase B.1) and
-     self-refutation (this round) together provide the SWIM
-     properties the marker was tracking.
+      - **`acceptGossip` self-refute** — incoming entries that
+        reference the local node as Suspect or Dead at incarnation
+        ≥ ours now bump the local incarnation and re-mark Alive.
+        Higher-incarnation-wins propagation in the same function
+        disseminates the refutation cluster-wide, so a falsely-
+        suspected node can clear suspicion through gossip alone
+        (pre-fix the only path was a fresh probe).
+      - **HTTP gossip wire** — new `Gossip(ctx, targetID, members)`
+        method on `DistTransport`, new
+        `POST /internal/gossip` server endpoint (auth-wrapped),
+        new `GossipMember` wire DTO. `runGossipTick` now falls
+        through to the HTTP path when the transport isn't an
+        `InProcessTransport`, so cross-process clusters disseminate
+        membership state — pre-Phase-E this was an in-process-only
+        no-op.
+      - The `experimental` qualifier is removed from
+        `heartbeatLoop`'s comment + the heartbeat-section field
+        doc; SWIM-style indirect probes (Phase B.1) and
+        self-refutation (this round) together provide the SWIM
+        properties the marker was tracking.
   Regression coverage at
   [tests/integration/dist_swim_refute_test.go](tests/integration/dist_swim_refute_test.go):
   `TestDistSWIM_HTTPGossipExchange` exercises the wire (A pushes

@@ -35,6 +35,8 @@ dictionaries: []
 words:
   - acks
   - ALPN
+  - APITLS
+  - APITLSCA
   - assertable
   - autosync
   - backpressure
@@ -58,6 +60,7 @@ words:
   - cmap
   - Cmder
   - codacy
+  - codegen
   - codemod
   - containedctx
   - contextcheck
@@ -69,6 +72,7 @@ words:
   - dels
   - depguard
   - derr
+  - disambiguator
   - distconfig
   - distroless
   - EDITMSG
@@ -81,23 +85,23 @@ words:
   - exhaustruct
   - Fanout
   - fasthttp
-  - fontawesome
-  - frontmatter
   - fatals
   - fctx
   - ferr
   - FLUSHALL
   - FLUSHDB
+  - fontawesome
   - forcetypeassert
   - Fprintf
   - Fprintln
   - freqs
+  - frontmatter
   - funlen
   - geomean
-  - glightbox
   - gerr
   - gitversion
   - GITVERSION
+  - glightbox
   - goarch
   - gocache
   - goccy
@@ -118,11 +122,13 @@ words:
   - healthz
   - histogramcollector
   - HMAC
-  - hostnames
   - honnef
+  - hostnames
   - hreq
+  - httpauth
   - HTTPTLS
   - hypercache
+  - Hyperd
   - idxs
   - Iface
   - ineff
@@ -133,9 +139,10 @@ words:
   - ireturn
   - Itemm
   - keyf
+  - keypair
   - lamport
-  - linenums
   - LFUDA
+  - linenums
   - localmodule
   - logrus
   - longbridgeapp
@@ -155,6 +162,7 @@ words:
   - mvdan
   - nestif
   - Newf
+  - nilnil
   - nindent
   - noctx
   - noinlineerr
@@ -164,6 +172,7 @@ words:
   - nonroot
   - nosec
   - NOVENDOR
+  - oapi
   - paralleltest
   - Pipeliner
   - pluggability
@@ -173,11 +182,12 @@ words:
   - productionization
   - protoc
   - pushd
-  - pygments
   - pyenv
+  - pygments
   - pymdownx
   - recvcheck
   - rediscluster
+  - Redocly
   - repls
   - Repls
   - rerr
@@ -192,28 +202,30 @@ words:
   - skeys
   - SLRU
   - softprops
-  - staticcheck
   - statefulset
+  - staticcheck
   - stdlib
   - stretchr
-  - svcname
   - strfnv
+  - stringly
   - strs
   - subtest
   - subtests
   - superfences
   - sval
+  - svcname
+  - tasklist
   - thelper
   - toplevel
   - tparallel
-  - tasklist
   - tracetest
   - traefik
-  - twemoji
   - trunc
-  - tunables
   - TTLMs
+  - tunables
+  - twemoji
   - ugorji
+  - unconfigured
   - unmarshals
   - unpadded
   - unsharded
