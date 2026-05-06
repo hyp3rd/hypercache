@@ -354,6 +354,7 @@ func (s *distHTTPServer) start(bindCtx context.Context, dm *DistMemory) error {
 	s.registerHealth(dm)
 	s.registerDrain(dm)
 	s.registerProbe(dm)
+	s.registerGossip(dm)
 	s.registerMerkle(dm)
 
 	return s.listen(bindCtx)
@@ -513,6 +514,30 @@ func (s *distHTTPServer) registerProbe(dm *DistMemory) {
 		}
 
 		return fctx.SendString("ok")
+	}))
+}
+
+// registerGossip wires `POST /internal/gossip` — the SWIM
+// membership-dissemination endpoint. The body is a JSON array of
+// GossipMember snapshots; the receiver's acceptGossip merges them
+// via higher-incarnation-wins and self-refutes if any entry
+// claims this node is suspect or dead.
+//
+// Auth-wrapped like the rest of `/internal/*` because gossip can
+// inject membership state — an unauthenticated peer could mark
+// real nodes as dead by spoofing a high-incarnation snapshot.
+func (s *distHTTPServer) registerGossip(dm *DistMemory) {
+	s.app.Post("/internal/gossip", s.wrapAuth(func(fctx fiber.Ctx) error {
+		var members []GossipMember
+
+		err := json.Unmarshal(fctx.Body(), &members)
+		if err != nil {
+			return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: err.Error()})
+		}
+
+		dm.acceptGossip(gossipMembersToNodes(members))
+
+		return fctx.SendStatus(fiber.StatusOK)
 	}))
 }
 

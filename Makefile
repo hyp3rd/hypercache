@@ -46,11 +46,15 @@ stop-dev-cluster:
 # initial review (factory dropped options, seeds without IDs,
 # json.RawMessage on non-owner GET).
 test-cluster: stop-dev-cluster
-	@echo "spinning up cluster + running cross-node smoke"
+	@echo "spinning up cluster + running cross-node smoke + resilience"
 	@echo
 	docker compose -f docker-compose.cluster.yml up --build -d
 	@bash scripts/tests/wait-for-cluster.sh
 	@rc=0; bash scripts/tests/10-test-cluster-api.sh || rc=$$?; \
+		if [ $$rc -eq 0 ]; then \
+			echo ""; echo "smoke ok — running resilience phase"; echo ""; \
+			bash scripts/tests/20-test-cluster-resilience.sh || rc=$$?; \
+		fi; \
 		echo ""; echo "tearing down cluster (rc=$$rc)"; \
 		docker compose -f docker-compose.cluster.yml down -v --rmi local --remove-orphans >/dev/null 2>&1 || true; \
 		exit $$rc
