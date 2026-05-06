@@ -8,6 +8,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **OpenAPI 3.1 specification + drift-detection.** The
+  `hypercache-server` binary now embeds its own contract via
+  [`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml)
+  (`//go:embed`) and serves it at `GET /v1/openapi.yaml` — every
+  running node is self-describing. The spec covers all nine client
+  routes (single-key PUT/GET/HEAD/DELETE, owners lookup, three
+  batch operations, plus the `/healthz` and `/v1/openapi.yaml`
+  meta endpoints), with reusable `ErrorResponse`, `ItemEnvelope`,
+  and batch-operation schemas, the `bearerAuth` security scheme,
+  and `operationId` on every operation for codegen-friendliness.
+  A drift detector at
+  [cmd/hypercache-server/openapi_test.go](cmd/hypercache-server/openapi_test.go)
+  drives `registerClientRoutes` directly and asserts every
+  fiber-registered route has a matching path in the spec — and
+  vice-versa — so the contract cannot silently fall out of sync
+  with the binary. Two CI workflows back this up at
+  [.github/workflows/openapi.yml](.github/workflows/openapi.yml):
+  `redocly lint` validates the schema against the OpenAPI 3.1
+  meta-spec, and the Go drift test runs on every change to
+  `main.go` or the spec. The docs site renders the same spec
+  inline at the new
+  [API Reference](docs/api.md) page via the
+  `mkdocs-swagger-ui-tag` plugin — a single source of truth for
+  the binary, the docs, and any client codegen that points at a
+  live cluster.
 - **Documentation site on GitHub Pages**, built with MkDocs Material
   and published automatically on every push to `main`. Eight
   navigated pages — landing, quickstart, 5-node cluster tutorial,

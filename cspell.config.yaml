@@ -58,6 +58,7 @@ words:
   - cmap
   - Cmder
   - codacy
+  - codegen
   - codemod
   - containedctx
   - contextcheck
@@ -81,23 +82,23 @@ words:
   - exhaustruct
   - Fanout
   - fasthttp
-  - fontawesome
-  - frontmatter
   - fatals
   - fctx
   - ferr
   - FLUSHALL
   - FLUSHDB
+  - fontawesome
   - forcetypeassert
   - Fprintf
   - Fprintln
   - freqs
+  - frontmatter
   - funlen
   - geomean
-  - glightbox
   - gerr
   - gitversion
   - GITVERSION
+  - glightbox
   - goarch
   - gocache
   - goccy
@@ -118,11 +119,12 @@ words:
   - healthz
   - histogramcollector
   - HMAC
-  - hostnames
   - honnef
+  - hostnames
   - hreq
   - HTTPTLS
   - hypercache
+  - Hyperd
   - idxs
   - Iface
   - ineff
@@ -134,8 +136,8 @@ words:
   - Itemm
   - keyf
   - lamport
-  - linenums
   - LFUDA
+  - linenums
   - localmodule
   - logrus
   - longbridgeapp
@@ -164,6 +166,7 @@ words:
   - nonroot
   - nosec
   - NOVENDOR
+  - oapi
   - paralleltest
   - Pipeliner
   - pluggability
@@ -173,11 +176,12 @@ words:
   - productionization
   - protoc
   - pushd
-  - pygments
   - pyenv
+  - pygments
   - pymdownx
   - recvcheck
   - rediscluster
+  - Redocly
   - repls
   - Repls
   - rerr
@@ -192,27 +196,27 @@ words:
   - skeys
   - SLRU
   - softprops
-  - staticcheck
   - statefulset
+  - staticcheck
   - stdlib
   - stretchr
-  - svcname
   - strfnv
   - strs
   - subtest
   - subtests
   - superfences
   - sval
+  - svcname
+  - tasklist
   - thelper
   - toplevel
   - tparallel
-  - tasklist
   - tracetest
   - traefik
-  - twemoji
   - trunc
-  - tunables
   - TTLMs
+  - tunables
+  - twemoji
   - ugorji
   - unmarshals
   - unpadded

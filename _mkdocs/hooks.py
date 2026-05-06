@@ -1,22 +1,33 @@
 """MkDocs hooks for the HyperCache site.
 
-Rewrites repo-relative links to source files (`../pkg/foo.go`,
-`../../hypercache.go`, etc.) into canonical GitHub URLs, so the same
-markdown source renders correctly both on github.com and on the
-GitHub Pages MkDocs build.
+Two responsibilities:
 
-Without this, the operations runbook and the RFCs reference dozens
-of source files via paths like `../pkg/backend/dist_memory.go`.
-GitHub renders those as in-repo links; MkDocs's strict mode flags
-them as broken because `pkg/` is not part of the documentation
-tree. Rewriting them at build time keeps the source markdown
-GitHub-friendly while letting strict mode actually enforce
-docs-internal correctness.
+1. Rewrites repo-relative links to source files (`../pkg/foo.go`,
+   `../../hypercache.go`, etc.) into canonical GitHub URLs, so the
+   same markdown source renders correctly both on github.com and on
+   the GitHub Pages MkDocs build. Without this, the operations
+   runbook and the RFCs reference dozens of source files via paths
+   like `../pkg/backend/dist_memory.go`. GitHub renders those as
+   in-repo links; MkDocs's strict mode flags them as broken
+   because `pkg/` is not part of the documentation tree. Rewriting
+   them at build time keeps the source markdown GitHub-friendly
+   while letting strict mode actually enforce docs-internal
+   correctness.
+
+2. Injects `cmd/hypercache-server/openapi.yaml` into the docs build
+   as `api/openapi.yaml`, so the Swagger UI page on the docs site
+   renders the same spec the binary embeds. The spec lives next to
+   the binary (Go's `embed` cannot traverse `..`) but the docs
+   build needs it on its virtual filesystem — an `on_files` hook
+   adds it without requiring a duplicate file checked into `docs/`.
 """
 
 import os
 import re
+from pathlib import Path
 from typing import Any
+
+from mkdocs.structure.files import File
 
 GITHUB_REPO_BASE = "https://github.com/hyp3rd/hypercache/blob/main"
 
@@ -106,6 +117,48 @@ def _resolve_to_repo_root(page_src_path: str, target: str) -> str:
         docs_anchored = docs_anchored[3:]
 
     return docs_anchored
+
+
+# Path of the canonical OpenAPI spec the server binary embeds.
+# Resolved relative to the repo root (one above `_mkdocs/`), so
+# this works whether MkDocs is invoked from the repo root or from
+# inside `docs/`.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_OPENAPI_SOURCE = _REPO_ROOT / "cmd" / "hypercache-server" / "openapi.yaml"
+
+# Where the spec appears on the rendered site — Swagger UI on
+# `docs/api.md` references this URL.
+_OPENAPI_DOCS_PATH = "api/openapi.yaml"
+
+
+def on_files(files: Any, config: Any, **kwargs: Any) -> Any:
+    """Inject the embedded OpenAPI spec as a docs-site asset.
+
+    Without this, `docs/api.md`'s Swagger UI tag would reference a
+    file that does not exist in the docs tree (the spec lives
+    under `cmd/hypercache-server/`). Adding it as a virtual File
+    keeps a single source of truth — the binary's embedded spec
+    is what the docs site renders.
+    """
+    if not _OPENAPI_SOURCE.exists():
+        # Defensive: if the spec was renamed/moved, fail loud
+        # rather than silently render a stale asset.
+        raise FileNotFoundError(
+            f"OpenAPI spec not found at {_OPENAPI_SOURCE}; update "
+            f"_mkdocs/hooks.py:_OPENAPI_SOURCE if it moved."
+        )
+
+    files.append(
+        File(
+            path=_OPENAPI_SOURCE.name,
+            src_dir=str(_OPENAPI_SOURCE.parent),
+            dest_dir=config["site_dir"],
+            use_directory_urls=False,
+            dest_uri=_OPENAPI_DOCS_PATH,
+        )
+    )
+
+    return files
 
 
 def on_page_markdown(markdown: str, page: Any, **kwargs: Any) -> str:

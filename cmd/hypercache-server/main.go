@@ -264,6 +264,38 @@ const (
 	codeInternal   = "INTERNAL"
 )
 
+// registerClientRoutes wires every client-API route onto the
+// provided fiber app. Extracted from runClientAPI so tests
+// (handlers_test.go, openapi_test.go) drive the same wiring
+// without spinning up a real listener — and so the drift test
+// can introspect routes from the *exact* production registration
+// rather than a hand-maintained mirror.
+func registerClientRoutes(app *fiber.App, authToken string, nodeCtx *nodeContext) {
+	auth := bearerAuth(authToken)
+
+	app.Get("/healthz", func(c fiber.Ctx) error { return c.SendString("ok") })
+
+	// Self-describing — clients can discover the API surface
+	// without out-of-band docs. The spec is embedded at build
+	// time from cmd/hypercache-server/openapi.yaml so it stays
+	// in lockstep with whatever the binary was built against.
+	app.Get("/v1/openapi.yaml", func(c fiber.Ctx) error {
+		c.Set(fiber.HeaderContentType, "application/yaml")
+
+		return c.Send(openapiSpec)
+	})
+
+	app.Put("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handlePut(c, nodeCtx) }))
+	app.Get("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleGet(c, nodeCtx) }))
+	app.Head("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleHead(c, nodeCtx) }))
+	app.Delete("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleDelete(c, nodeCtx) }))
+	app.Get("/v1/owners/:key", auth(func(c fiber.Ctx) error { return handleOwners(c, nodeCtx) }))
+
+	app.Post("/v1/cache/batch/get", auth(func(c fiber.Ctx) error { return handleBatchGet(c, nodeCtx) }))
+	app.Post("/v1/cache/batch/put", auth(func(c fiber.Ctx) error { return handleBatchPut(c, nodeCtx) }))
+	app.Post("/v1/cache/batch/delete", auth(func(c fiber.Ctx) error { return handleBatchDelete(c, nodeCtx) }))
+}
+
 // runClientAPI builds and starts the client REST API. Returns the
 // fiber app so main can shut it down on signal. Handlers are
 // auth-wrapped when the env carries an HYPERCACHE_AUTH_TOKEN, mirroring
@@ -276,20 +308,7 @@ func runClientAPI(addr, nodeID string, hc *hypercache.HyperCache[backend.DistMem
 		IdleTimeout:  clientAPIIdleTimeout,
 	})
 
-	auth := bearerAuth(authToken)
-	nodeCtx := &nodeContext{hc: hc, nodeID: nodeID}
-
-	app.Get("/healthz", func(c fiber.Ctx) error { return c.SendString("ok") })
-
-	app.Put("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handlePut(c, nodeCtx) }))
-	app.Get("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleGet(c, nodeCtx) }))
-	app.Head("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleHead(c, nodeCtx) }))
-	app.Delete("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleDelete(c, nodeCtx) }))
-	app.Get("/v1/owners/:key", auth(func(c fiber.Ctx) error { return handleOwners(c, nodeCtx) }))
-
-	app.Post("/v1/cache/batch/get", auth(func(c fiber.Ctx) error { return handleBatchGet(c, nodeCtx) }))
-	app.Post("/v1/cache/batch/put", auth(func(c fiber.Ctx) error { return handleBatchPut(c, nodeCtx) }))
-	app.Post("/v1/cache/batch/delete", auth(func(c fiber.Ctx) error { return handleBatchDelete(c, nodeCtx) }))
+	registerClientRoutes(app, authToken, &nodeContext{hc: hc, nodeID: nodeID})
 
 	go func() {
 		err := app.Listen(addr)

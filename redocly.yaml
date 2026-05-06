@@ -1,0 +1,26 @@
+---
+# Redocly CLI configuration. Tells `redocly lint` what rules to
+# enforce against `cmd/hypercache-server/openapi.yaml`.
+#
+# Two rules are intentionally disabled below; everything else
+# stays on the `recommended` baseline (which is mostly schema-
+# correctness checks plus codegen-friendliness hints).
+
+extends:
+  - recommended
+
+rules:
+  # Allow `http://localhost:8080` as a `servers[].url`. The default
+  # `recommended` ruleset flags any placeholder-looking URL
+  # (including localhost) so consumers don't accidentally publish
+  # a spec that points at example.com. We document localhost on
+  # purpose — it is the actual default binding for the binary —
+  # so the warning is noise here.
+  no-server-example.com: off
+
+  # `/healthz` and `/v1/openapi.yaml` legitimately have no 4xx
+  # response shape: the former is auth-free and accepts no input,
+  # the latter just emits a static document. Forcing a synthetic
+  # 4xx onto them would document behavior the binary doesn't
+  # actually have.
+  operation-4xx-response: off

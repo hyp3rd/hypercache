@@ -1,0 +1,88 @@
+---
+name: openapi
+
+# Validate the embedded OpenAPI specification on every change.
+# Two checks run:
+#   * redocly lint — schema-level validation against the OpenAPI 3.1
+#     meta-spec (broken refs, missing required fields, malformed
+#     types, etc.).
+#   * Go drift test — asserts every fiber route registered in
+#     `cmd/hypercache-server/main.go` has a matching path in
+#     `cmd/hypercache-server/openapi.yaml` (and vice-versa).
+#
+# Together they prevent the spec from silently drifting from the
+# binary — neither one alone catches both classes of breakage.
+
+on:
+  pull_request:
+    paths:
+      - "cmd/hypercache-server/openapi.yaml"
+      - "cmd/hypercache-server/openapi.go"
+      - "cmd/hypercache-server/openapi_test.go"
+      - "cmd/hypercache-server/main.go"
+      - ".github/workflows/openapi.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "cmd/hypercache-server/openapi.yaml"
+      - "cmd/hypercache-server/openapi.go"
+      - "cmd/hypercache-server/openapi_test.go"
+      - "cmd/hypercache-server/main.go"
+      - ".github/workflows/openapi.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  spec-lint:
+    name: redocly lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      # Pin a known-good redocly major. Patch updates are picked up
+      # automatically on next run; major bumps are explicit so a
+      # breaking change in the linter can't silently fail the build.
+      - name: redocly lint
+        run: npx --yes @redocly/cli@1 lint cmd/hypercache-server/openapi.yaml
+
+  drift-test:
+    name: code↔spec drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Load project settings
+        id: settings
+        run: |
+          set -a
+          source .project-settings.env
+          set +a
+          echo "go_version=${GO_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "${{ steps.settings.outputs.go_version }}"
+          check-latest: true
+
+      - name: Cache Go modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ steps.settings.outputs.go_version }}-${{
+            hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ steps.settings.outputs.go_version }}-
+
+      - name: Drift test
+        run: go test -run TestOpenAPISpecMatchesRoutes ./cmd/hypercache-server/ -count=1
