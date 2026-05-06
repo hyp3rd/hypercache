@@ -7,6 +7,8 @@ import (
 
 	fiber "github.com/gofiber/fiber/v3"
 	"gopkg.in/yaml.v3"
+
+	"github.com/hyp3rd/hypercache/pkg/httpauth"
 )
 
 // TestOpenAPISpecMatchesRoutes is the drift detector. It registers
@@ -56,7 +58,10 @@ func registeredCodeRoutes(t *testing.T) map[string]struct{} {
 	t.Helper()
 
 	app := fiber.New()
-	registerClientRoutes(app, "", &nodeContext{nodeID: "drift-test"})
+	// Drift test only cares about route paths, not auth — the zero
+	// Policy 401s every protected route, but app.GetRoutes() reads
+	// the registration table without driving requests.
+	registerClientRoutes(app, httpauth.Policy{}, &nodeContext{nodeID: "drift-test"})
 
 	declared := declaredMethodsForPath()
 	out := map[string]struct{}{}

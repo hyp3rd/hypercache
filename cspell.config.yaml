@@ -35,6 +35,8 @@ dictionaries: []
 words:
   - acks
   - ALPN
+  - APITLS
+  - APITLSCA
   - assertable
   - autosync
   - backpressure
@@ -70,6 +72,7 @@ words:
   - dels
   - depguard
   - derr
+  - disambiguator
   - distconfig
   - distroless
   - EDITMSG
@@ -122,6 +125,7 @@ words:
   - honnef
   - hostnames
   - hreq
+  - httpauth
   - HTTPTLS
   - hypercache
   - Hyperd
@@ -135,6 +139,7 @@ words:
   - ireturn
   - Itemm
   - keyf
+  - keypair
   - lamport
   - LFUDA
   - linenums
@@ -157,6 +162,7 @@ words:
   - mvdan
   - nestif
   - Newf
+  - nilnil
   - nindent
   - noctx
   - noinlineerr
@@ -201,6 +207,7 @@ words:
   - stdlib
   - stretchr
   - strfnv
+  - stringly
   - strs
   - subtest
   - subtests
@@ -218,6 +225,7 @@ words:
   - tunables
   - twemoji
   - ugorji
+  - unconfigured
   - unmarshals
   - unpadded
   - unsharded

@@ -100,10 +100,31 @@ Configuration knobs:
 - No persistent storage or WAL.
 - No network partitions / latency injection (future chaos tooling).
 - No tracing spans for distributed operations.
-- Security (TLS/mTLS, auth) absent.
 - Compression unsupported.
 - Migration & repair actions are fire-and-forget (no retry backoff queues).
 - Migration retry queue absent.
+
+## Security
+
+The `hypercache-server` binary supports three auth surfaces and TLS
+on every listener:
+
+- **Client API** (port 8080): bearer-token + mTLS via the
+  [`pkg/httpauth/`](https://github.com/hyp3rd/hypercache/blob/main/pkg/httpauth)
+  package. Multi-token configs with per-identity scopes
+  (Read/Write/Admin) load from `HYPERCACHE_AUTH_CONFIG` (YAML);
+  the legacy `HYPERCACHE_AUTH_TOKEN` env var still works as a
+  one-token shortcut. mTLS is enabled with
+  `HYPERCACHE_API_TLS_CERT`/`KEY`/`CLIENT_CA`; the verified peer
+  cert's Subject CN maps to a configured `CertIdentity`.
+- **Dist transport** (port 7946): symmetric peer auth via
+  `DistHTTPAuth{Token, ServerVerify, ClientSign}` with
+  constant-time compare. Reads `HYPERCACHE_AUTH_TOKEN` for the
+  shared peer token. TLS via `DistHTTPLimits.TLSConfig`.
+- **Management HTTP** (port 8081): operator-supplied auth via
+  `WithMgmtAuth(func(fiber.Ctx) error)` — unauthenticated by
+  default. Unifying it with `pkg/httpauth/` is deferred to a
+  future round.
 
 ## Near-Term Roadmap Deltas
 

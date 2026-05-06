@@ -6,6 +6,63 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Client API auth v2: multi-token, scoped, mTLS-capable.** New
+  [`pkg/httpauth/`](pkg/httpauth/) package with `Policy`,
+  `TokenIdentity`, `CertIdentity`, `Scope` types and a
+  scope-enforcing fiber middleware. Replaces the single-token
+  bearerAuth helper in `cmd/hypercache-server/main.go`. Three
+  credential classes resolved in priority order (bearer → mTLS
+  cert → ServerVerify hook), with constant-time multi-token
+  compare that visits every configured token even on early match
+  to prevent token-cardinality timing leaks. Per-route scope
+  enforcement: `GET`/`HEAD`/owners-lookup/`batch-get` require
+  `ScopeRead`; `PUT`/`DELETE`/`batch-put`/`batch-delete` require
+  `ScopeWrite`. Anonymous identity (with `AllowAnonymous: true`)
+  receives all scopes — used by the binary to preserve the
+  zero-config dev posture.
+- **YAML auth config + legacy env-var coexistence.**
+  `HYPERCACHE_AUTH_CONFIG=/etc/hypercache/auth.yaml` (new) loads
+  a multi-token policy with per-identity scopes:
+
+  ```yaml
+  tokens:
+    - id: app-prod
+      token: "<secret>"
+      scopes: [read, write]
+    - id: ops
+      token: "<secret>"
+      scopes: [admin]
+  cert_identities:
+    - subject_cn: app.internal
+      scopes: [read]
+  allow_anonymous: false
+  ```
+
+  The legacy `HYPERCACHE_AUTH_TOKEN` keeps working byte-identical:
+  one synthesized identity with all three scopes. The two env
+  vars are NOT mutually exclusive — `HYPERCACHE_AUTH_CONFIG`
+  governs the client API, `HYPERCACHE_AUTH_TOKEN` continues to
+  drive the dist transport's symmetric peer auth (single trust
+  domain). Both can be set in the same deployment without
+  conflict. Missing or malformed config files exit the binary
+  non-zero rather than fall through to permissive open mode —
+  fail-closed by design.
+- **mTLS on the client API.** New env vars
+  `HYPERCACHE_API_TLS_CERT`, `HYPERCACHE_API_TLS_KEY`, and
+  `HYPERCACHE_API_TLS_CLIENT_CA` wrap the listener with
+  `tls.NewListener`. With CA set, `RequireAndVerifyClientCert`
+  is enabled and the verified peer cert's Subject CN is matched
+  against the policy's `CertIdentities` to resolve the calling
+  identity. Plaintext, standard-TLS, and mTLS shapes all share
+  one listener path. End-to-end coverage at
+  [cmd/hypercache-server/mtls_e2e_test.go](cmd/hypercache-server/mtls_e2e_test.go)
+  drives a real handshake against an in-process CA / server-cert
+  / client-cert chain and asserts CN-to-identity resolution
+  works in both directions (matching CN → 200, non-matching
+  CN → 401).
+
 ### Security
 
 - **Constant-time bearer-token compare on the client API.** Replaced
