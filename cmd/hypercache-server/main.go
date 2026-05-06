@@ -37,6 +37,7 @@ import (
 	"github.com/hyp3rd/hypercache/internal/constants"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/backend"
+	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // Defaults applied when the corresponding env var is unset. Centralized
@@ -282,8 +283,13 @@ func runClientAPI(addr, nodeID string, hc *hypercache.HyperCache[backend.DistMem
 
 	app.Put("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handlePut(c, nodeCtx) }))
 	app.Get("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleGet(c, nodeCtx) }))
+	app.Head("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleHead(c, nodeCtx) }))
 	app.Delete("/v1/cache/:key", auth(func(c fiber.Ctx) error { return handleDelete(c, nodeCtx) }))
 	app.Get("/v1/owners/:key", auth(func(c fiber.Ctx) error { return handleOwners(c, nodeCtx) }))
+
+	app.Post("/v1/cache/batch/get", auth(func(c fiber.Ctx) error { return handleBatchGet(c, nodeCtx) }))
+	app.Post("/v1/cache/batch/put", auth(func(c fiber.Ctx) error { return handleBatchPut(c, nodeCtx) }))
+	app.Post("/v1/cache/batch/delete", auth(func(c fiber.Ctx) error { return handleBatchDelete(c, nodeCtx) }))
 
 	go func() {
 		err := app.Listen(addr)
@@ -391,22 +397,470 @@ func handlePut(c fiber.Ctx, nodeCtx *nodeContext) error {
 	})
 }
 
-// handleGet implements GET /v1/cache/:key — returns the raw bytes
-// with Content-Type application/octet-stream, or a JSON 404 when
-// the key is absent. JSON-on-error keeps the response shape
-// machine-friendly even when the value path returns raw bytes.
+// itemEnvelope is the JSON shape returned when the client asks for
+// `Accept: application/json` on a single-key GET. Values are always
+// emitted as base64 in the envelope so the response is binary-safe
+// without the heuristic decode dance the raw-bytes path uses —
+// callers that want the literal string can decode the base64
+// themselves.
+type itemEnvelope struct {
+	Key           string   `json:"key"`
+	Value         string   `json:"value"`
+	ValueEncoding string   `json:"value_encoding"`
+	TTLMs         int64    `json:"ttl_ms,omitempty"`
+	ExpiresAt     string   `json:"expires_at,omitempty"`
+	Version       uint64   `json:"version"`
+	Origin        string   `json:"origin,omitempty"`
+	LastUpdated   string   `json:"last_updated,omitempty"`
+	Node          string   `json:"node"`
+	Owners        []string `json:"owners"`
+}
+
+// wantsJSON reports whether the client explicitly asked for the JSON
+// envelope via Accept. A bare `*/*` or absent header keeps the
+// raw-bytes default — operators using `curl -X GET` with no Accept
+// header continue to see the literal value, not a base64 envelope.
+func wantsJSON(c fiber.Ctx) bool {
+	accept := c.Get(fiber.HeaderAccept)
+	if accept == "" {
+		return false
+	}
+
+	return strings.Contains(accept, fiber.MIMEApplicationJSON)
+}
+
+// itemValueAsBytes normalizes the cached value to its underlying
+// byte representation regardless of how it round-tripped through
+// the dist HTTP transport (writer-node []byte vs replica-node
+// base64-string vs non-owner json.RawMessage). Reuses the same
+// heuristics as writeValue so single-key and batch responses stay
+// in agreement.
+func itemValueAsBytes(v any) []byte {
+	switch x := v.(type) {
+	case []byte:
+		return x
+
+	case string:
+		if decoded, ok := decodeBase64Bytes(x); ok {
+			return decoded
+		}
+
+		return []byte(x)
+
+	case json.RawMessage:
+		var s string
+
+		err := json.Unmarshal(x, &s)
+		if err == nil {
+			if decoded, ok := decodeBase64Bytes(s); ok {
+				return decoded
+			}
+
+			return []byte(s)
+		}
+
+		return []byte(x)
+
+	default:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil
+		}
+
+		return raw
+	}
+}
+
+// itemRemainingTTL returns (ttl_ms, expires_at_iso) for an Item.
+// Returns (0, "") when the item has no expiration. Negative
+// remaining TTLs are clamped to 0 — a "currently expiring" item
+// is reported as 0ms left, not as a negative number.
+func itemRemainingTTL(it *cache.Item) (int64, string) {
+	if it.Expiration <= 0 {
+		return 0, ""
+	}
+
+	expiry := it.LastAccess.Add(it.Expiration)
+	remaining := max(time.Until(expiry).Milliseconds(), 0)
+
+	return remaining, expiry.UTC().Format(time.RFC3339)
+}
+
+// buildEnvelope constructs the JSON envelope for a cached item.
+// Centralized so the single-key GET and the batch-get response
+// emit identical shapes.
+func buildEnvelope(key string, it *cache.Item, nodeCtx *nodeContext) itemEnvelope {
+	bytes := itemValueAsBytes(it.Value)
+	ttlMs, expiresAt := itemRemainingTTL(it)
+
+	env := itemEnvelope{
+		Key:           key,
+		Value:         base64.StdEncoding.EncodeToString(bytes),
+		ValueEncoding: "base64",
+		TTLMs:         ttlMs,
+		ExpiresAt:     expiresAt,
+		Version:       it.Version,
+		Origin:        it.Origin,
+		Node:          nodeCtx.nodeID,
+		Owners:        nodeCtx.hc.ClusterOwners(key),
+	}
+
+	if !it.LastUpdated.IsZero() {
+		env.LastUpdated = it.LastUpdated.UTC().Format(time.RFC3339)
+	}
+
+	return env
+}
+
+// setItemHeaders mirrors buildEnvelope onto response headers — the
+// HEAD handler returns these without a body. Header names use the
+// `X-Cache-*` convention; values are best-effort string forms.
+func setItemHeaders(c fiber.Ctx, key string, it *cache.Item, nodeCtx *nodeContext) {
+	c.Set("X-Cache-Version", strconv.FormatUint(it.Version, 10))
+
+	if it.Origin != "" {
+		c.Set("X-Cache-Origin", it.Origin)
+	}
+
+	if !it.LastUpdated.IsZero() {
+		c.Set("X-Cache-Last-Updated", it.LastUpdated.UTC().Format(time.RFC3339))
+	}
+
+	ttlMs, expiresAt := itemRemainingTTL(it)
+	if ttlMs > 0 {
+		c.Set("X-Cache-TTL-Ms", strconv.FormatInt(ttlMs, 10))
+		c.Set("X-Cache-Expires-At", expiresAt)
+	}
+
+	owners := nodeCtx.hc.ClusterOwners(key)
+	if len(owners) > 0 {
+		c.Set("X-Cache-Owners", strings.Join(owners, ","))
+	}
+
+	c.Set("X-Cache-Node", nodeCtx.nodeID)
+}
+
+// handleGet implements GET /v1/cache/:key.
+//
+// Default response: raw bytes with Content-Type application/octet-stream
+// (binary fidelity, current behavior).
+//
+// Accept: application/json: itemEnvelope JSON with TTL, version,
+// owners, etc. Lets API clients fetch metadata in one round-trip
+// instead of GET + HEAD.
 func handleGet(c fiber.Ctx, nodeCtx *nodeContext) error {
 	key := c.Params("key")
 	if key == "" {
 		return jsonErr(c, fiber.StatusBadRequest, codeBadRequest, "missing key in path")
 	}
 
-	v, ok := nodeCtx.hc.Get(c.Context(), key)
+	it, ok := nodeCtx.hc.GetWithInfo(c.Context(), key)
 	if !ok {
 		return jsonErr(c, fiber.StatusNotFound, codeNotFound, "key not found")
 	}
 
-	return writeValue(c, v)
+	if wantsJSON(c) {
+		return c.JSON(buildEnvelope(key, it, nodeCtx))
+	}
+
+	return writeValue(c, it.Value)
+}
+
+// batchGetRequest documents the request shape for
+// `POST /v1/cache/batch/get`. Empty `keys` returns an empty
+// `results` array with status 200.
+type batchGetRequest struct {
+	Keys []string `json:"keys"`
+}
+
+// batchGetResult is one entry in the batch-get response. `Found:
+// false` results carry no metadata; `Found: true` results carry
+// the same envelope shape as a single-key Accept:json GET.
+type batchGetResult struct {
+	Key           string   `json:"key"`
+	Found         bool     `json:"found"`
+	Value         string   `json:"value,omitempty"`
+	ValueEncoding string   `json:"value_encoding,omitempty"`
+	TTLMs         int64    `json:"ttl_ms,omitempty"`
+	ExpiresAt     string   `json:"expires_at,omitempty"`
+	Version       uint64   `json:"version,omitempty"`
+	Origin        string   `json:"origin,omitempty"`
+	LastUpdated   string   `json:"last_updated,omitempty"`
+	Owners        []string `json:"owners,omitempty"`
+}
+
+// batchGetResponse is the top-level wrapper so a future caller can
+// add cluster-wide stats (per-batch latency, owners-touched, etc.)
+// without breaking the wire shape.
+type batchGetResponse struct {
+	Results []batchGetResult `json:"results"`
+	Node    string           `json:"node"`
+}
+
+// batchPutItem is one entry in the batch-put request. `value` is
+// either a UTF-8 string (default) or a base64-encoded byte payload
+// when `value_encoding` is `"base64"` — the same convention the
+// single-key Accept:json GET emits, so a batch-put can round-trip
+// the result of an earlier batch-get verbatim.
+type batchPutItem struct {
+	Key           string `json:"key"`
+	Value         string `json:"value"`
+	ValueEncoding string `json:"value_encoding,omitempty"`
+	TTLMs         int64  `json:"ttl_ms,omitempty"`
+}
+
+type batchPutRequest struct {
+	Items []batchPutItem `json:"items"`
+}
+
+// batchPutResult is one entry in the batch-put response. On
+// failure, `Stored` is false and `Error`/`Code` describe why —
+// per-item granularity so a single failing item doesn't void
+// the whole batch.
+type batchPutResult struct {
+	Key    string   `json:"key"`
+	Stored bool     `json:"stored"`
+	Bytes  int      `json:"bytes,omitempty"`
+	Owners []string `json:"owners,omitempty"`
+	Error  string   `json:"error,omitempty"`
+	Code   string   `json:"code,omitempty"`
+}
+
+type batchPutResponse struct {
+	Results []batchPutResult `json:"results"`
+	Node    string           `json:"node"`
+}
+
+// batchDeleteResult is one entry in the batch-delete response.
+type batchDeleteResult struct {
+	Key     string   `json:"key"`
+	Deleted bool     `json:"deleted"`
+	Owners  []string `json:"owners,omitempty"`
+	Error   string   `json:"error,omitempty"`
+	Code    string   `json:"code,omitempty"`
+}
+
+type batchDeleteRequest struct {
+	Keys []string `json:"keys"`
+}
+
+type batchDeleteResponse struct {
+	Results []batchDeleteResult `json:"results"`
+	Node    string              `json:"node"`
+}
+
+// handleBatchGet implements POST /v1/cache/batch/get — fetches
+// many keys in one round-trip with the same metadata envelope as
+// the single-key Accept:json GET. Each key's lookup is
+// independent: a missing key produces `{found: false}` rather
+// than failing the whole batch.
+func handleBatchGet(c fiber.Ctx, nodeCtx *nodeContext) error {
+	var req batchGetRequest
+
+	err := json.Unmarshal(c.Body(), &req)
+	if err != nil {
+		return jsonErr(c, fiber.StatusBadRequest, codeBadRequest, "invalid JSON: "+err.Error())
+	}
+
+	results := make([]batchGetResult, 0, len(req.Keys))
+	ctx := c.Context()
+
+	for _, key := range req.Keys {
+		if key == "" {
+			results = append(results, batchGetResult{Key: key, Found: false})
+
+			continue
+		}
+
+		it, ok := nodeCtx.hc.GetWithInfo(ctx, key)
+		if !ok {
+			results = append(results, batchGetResult{Key: key, Found: false})
+
+			continue
+		}
+
+		results = append(results, batchGetResultFromItem(key, it, nodeCtx))
+	}
+
+	return c.JSON(batchGetResponse{Results: results, Node: nodeCtx.nodeID})
+}
+
+// batchGetResultFromItem mirrors buildEnvelope's projection —
+// shared with the single-key Accept:json GET path so the wire
+// shape stays consistent.
+func batchGetResultFromItem(key string, it *cache.Item, nodeCtx *nodeContext) batchGetResult {
+	bytes := itemValueAsBytes(it.Value)
+	ttlMs, expiresAt := itemRemainingTTL(it)
+
+	res := batchGetResult{
+		Key:           key,
+		Found:         true,
+		Value:         base64.StdEncoding.EncodeToString(bytes),
+		ValueEncoding: "base64",
+		TTLMs:         ttlMs,
+		ExpiresAt:     expiresAt,
+		Version:       it.Version,
+		Origin:        it.Origin,
+		Owners:        nodeCtx.hc.ClusterOwners(key),
+	}
+
+	if !it.LastUpdated.IsZero() {
+		res.LastUpdated = it.LastUpdated.UTC().Format(time.RFC3339)
+	}
+
+	return res
+}
+
+// handleBatchPut implements POST /v1/cache/batch/put. Each item's
+// `value_encoding` selects how the wire `value` string is
+// interpreted: `"base64"` decodes bytes-first; anything else
+// (including absent) treats the string as UTF-8 text and stores
+// the raw bytes. Per-item errors are carried in the response —
+// a single failure doesn't void the whole batch.
+func handleBatchPut(c fiber.Ctx, nodeCtx *nodeContext) error {
+	var req batchPutRequest
+
+	err := json.Unmarshal(c.Body(), &req)
+	if err != nil {
+		return jsonErr(c, fiber.StatusBadRequest, codeBadRequest, "invalid JSON: "+err.Error())
+	}
+
+	results := make([]batchPutResult, 0, len(req.Items))
+	ctx := c.Context()
+
+	for _, item := range req.Items {
+		results = append(results, applyBatchPutItem(ctx, nodeCtx, item))
+	}
+
+	return c.JSON(batchPutResponse{Results: results, Node: nodeCtx.nodeID})
+}
+
+// applyBatchPutItem decodes a single batch-put item and forwards
+// it to the cache. Extracted so handleBatchPut stays readable
+// despite the value-encoding branch.
+func applyBatchPutItem(ctx context.Context, nodeCtx *nodeContext, item batchPutItem) batchPutResult {
+	if item.Key == "" {
+		return batchPutResult{Key: item.Key, Stored: false, Error: "missing key", Code: codeBadRequest}
+	}
+
+	value, decodeErr := decodeBatchPutValue(item)
+	if decodeErr != nil {
+		return batchPutResult{Key: item.Key, Stored: false, Error: decodeErr.Error(), Code: codeBadRequest}
+	}
+
+	ttl := time.Duration(item.TTLMs) * time.Millisecond
+
+	setErr := nodeCtx.hc.Set(ctx, item.Key, value, ttl)
+	if setErr != nil {
+		return batchPutResult{
+			Key:    item.Key,
+			Stored: false,
+			Error:  setErr.Error(),
+			Code:   classifyErrCode(setErr),
+		}
+	}
+
+	return batchPutResult{
+		Key:    item.Key,
+		Stored: true,
+		Bytes:  len(value),
+		Owners: nodeCtx.hc.ClusterOwners(item.Key),
+	}
+}
+
+// decodeBatchPutValue interprets the wire `value` string per its
+// `value_encoding`. Absent / unknown encoding is treated as
+// "string" (UTF-8 text bytes).
+func decodeBatchPutValue(item batchPutItem) ([]byte, error) {
+	if item.ValueEncoding != "base64" {
+		return []byte(item.Value), nil
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(item.Value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base64 value: %w", err)
+	}
+
+	return decoded, nil
+}
+
+// handleBatchDelete implements POST /v1/cache/batch/delete. Same
+// per-item granularity as handleBatchPut.
+func handleBatchDelete(c fiber.Ctx, nodeCtx *nodeContext) error {
+	var req batchDeleteRequest
+
+	err := json.Unmarshal(c.Body(), &req)
+	if err != nil {
+		return jsonErr(c, fiber.StatusBadRequest, codeBadRequest, "invalid JSON: "+err.Error())
+	}
+
+	results := make([]batchDeleteResult, 0, len(req.Keys))
+	ctx := c.Context()
+
+	for _, key := range req.Keys {
+		if key == "" {
+			results = append(results, batchDeleteResult{Key: key, Deleted: false, Error: "missing key", Code: codeBadRequest})
+
+			continue
+		}
+
+		owners := nodeCtx.hc.ClusterOwners(key)
+
+		removeErr := nodeCtx.hc.Remove(ctx, key)
+		if removeErr != nil {
+			results = append(results, batchDeleteResult{
+				Key:    key,
+				Owners: owners,
+				Error:  removeErr.Error(),
+				Code:   classifyErrCode(removeErr),
+			})
+
+			continue
+		}
+
+		results = append(results, batchDeleteResult{Key: key, Deleted: true, Owners: owners})
+	}
+
+	return c.JSON(batchDeleteResponse{Results: results, Node: nodeCtx.nodeID})
+}
+
+// classifyErrCode maps a service-level error to the canonical
+// machine-readable code string. Mirrors classifyAndRespond's
+// status mapping but returns just the code so per-item batch
+// results can include it without overriding the batch's HTTP
+// status.
+func classifyErrCode(err error) string {
+	switch {
+	case errors.Is(err, sentinel.ErrDraining):
+		return codeDraining
+	case errors.Is(err, sentinel.ErrNotOwner):
+		return codeInternal
+	default:
+		return codeInternal
+	}
+}
+
+// handleHead implements HEAD /v1/cache/:key — fast metadata
+// inspection. Returns 200 with X-Cache-* response headers when
+// the key is present, 404 when absent. No body.
+//
+// Lets clients check existence + remaining TTL + version
+// without paying the value-transfer cost. Useful for
+// cache-revalidation flows and conditional logic.
+func handleHead(c fiber.Ctx, nodeCtx *nodeContext) error {
+	key := c.Params("key")
+	if key == "" {
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+
+	it, ok := nodeCtx.hc.GetWithInfo(c.Context(), key)
+	if !ok {
+		return c.SendStatus(fiber.StatusNotFound)
+	}
+
+	setItemHeaders(c, key, it, nodeCtx)
+
+	return c.SendStatus(fiber.StatusOK)
 }
 
 // writeValue emits a cached value back to the client with the right

@@ -68,6 +68,79 @@ Bodies are treated as opaque bytes; `Content-Type` round-trips as
 `application/octet-stream`. Strings round-trip cleanly; structured
 values are JSON-encoded on response.
 
+### Metadata inspection
+
+`HEAD` returns the value's metadata in `X-Cache-*` response headers
+(no body — fast existence + TTL check):
+
+```sh
+curl -I -H 'Authorization: Bearer dev-token' \
+     'http://localhost:8080/v1/cache/greeting'
+# X-Cache-Version: 1
+# X-Cache-Origin: node-1
+# X-Cache-Last-Updated: 2026-05-06T10:00:00Z
+# X-Cache-Ttl-Ms: 28412
+# X-Cache-Expires-At: 2026-05-06T10:30:00Z
+# X-Cache-Owners: node-1,node-2,node-3
+# X-Cache-Node: node-1
+```
+
+`GET` with `Accept: application/json` returns the same metadata as
+a JSON envelope (value is base64 for binary fidelity):
+
+```sh
+curl -H 'Authorization: Bearer dev-token' \
+     -H 'Accept: application/json' \
+     'http://localhost:8080/v1/cache/greeting'
+# {
+#   "key": "greeting",
+#   "value": "d29ybGQ=",
+#   "value_encoding": "base64",
+#   "ttl_ms": 28412,
+#   "expires_at": "2026-05-06T10:30:00Z",
+#   "version": 1,
+#   "origin": "node-1",
+#   "last_updated": "2026-05-06T10:00:00Z",
+#   "node": "node-1",
+#   "owners": ["node-1", "node-2", "node-3"]
+# }
+```
+
+### Batch operations
+
+Three endpoints over `POST /v1/cache/batch/{get,put,delete}`. Each
+returns a `results` array with one entry per requested item; per-item
+errors are surfaced without failing the whole batch.
+
+```sh
+# Batch put — mixed UTF-8 strings and base64-encoded byte payloads.
+curl -H 'Authorization: Bearer dev-token' \
+     -X POST -H 'Content-Type: application/json' \
+     --data '{
+       "items": [
+         {"key": "greet-en", "value": "hello", "ttl_ms": 60000},
+         {"key": "greet-bin", "value": "d29ybGQ=", "value_encoding": "base64"}
+       ]
+     }' \
+     'http://localhost:8080/v1/cache/batch/put'
+
+# Batch get — fetches many keys in one round-trip; results carry
+# the same envelope shape as the single-key Accept:json GET.
+curl -H 'Authorization: Bearer dev-token' \
+     -X POST -H 'Content-Type: application/json' \
+     --data '{"keys": ["greet-en", "greet-bin", "missing"]}' \
+     'http://localhost:8080/v1/cache/batch/get'
+
+# Batch delete.
+curl -H 'Authorization: Bearer dev-token' \
+     -X POST -H 'Content-Type: application/json' \
+     --data '{"keys": ["greet-en", "greet-bin"]}' \
+     'http://localhost:8080/v1/cache/batch/delete'
+```
+
+Default `value_encoding` for batch-put items is the literal UTF-8
+string. Pass `"value_encoding": "base64"` for binary payloads.
+
 ## Graceful shutdown
 
 On `SIGTERM` / `SIGINT` the binary runs:

@@ -8,6 +8,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Richer client API — metadata inspection, JSON envelopes, batch
+  operations.** Three additions to the
+  `cmd/hypercache-server` HTTP surface:
+   - `HEAD /v1/cache/:key` returns the value's metadata in
+     `X-Cache-*` response headers (Version, Origin, Last-Updated,
+     TTL-Ms, Expires-At, Owners, Node) with no body — fast
+     existence + TTL inspection without paying the value-transfer
+     cost. 200 if present, 404 if not.
+   - `GET /v1/cache/:key` now honors `Accept: application/json`
+     and returns an `itemEnvelope` with the same metadata as
+     HEAD plus the base64-encoded value. The bare-`curl` default
+     remains raw bytes via `application/octet-stream` — current
+     clients are unaffected.
+   - `POST /v1/cache/batch/{get,put,delete}` enable bulk operations
+     in a single round-trip. Each request carries an array; the
+     response carries one result entry per item with per-item
+     status, owners, and error reporting. `batch-put` items
+     accept either UTF-8 strings (default) or base64-encoded byte
+     payloads via `value_encoding: "base64"`. Per-item errors are
+     surfaced in `error` + `code` fields without failing the
+     whole batch.
+  Six unit tests at
+  [cmd/hypercache-server/handlers_test.go](cmd/hypercache-server/handlers_test.go)
+  pin the contracts: HEAD present/missing, Accept-JSON envelope
+  shape, default-raw round-trip, mixed-encoding batch-put,
+  batch-get found/missing, batch-delete cycle.
 - **SWIM self-refutation + cross-process gossip dissemination.**
   Closes the last `experimental` marker on the heartbeat path.
   Three pieces:
