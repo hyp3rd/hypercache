@@ -7,6 +7,14 @@ name: docs
 #   * push to main — build + deploy to gh-pages.
 #   * workflow_dispatch — same as push (lets operators
 #     re-publish without a docs change).
+#
+# REPO SETUP REQUIRED — Settings → Pages → Source must be
+# "GitHub Actions" (NOT "Deploy from a branch"). The
+# branch-based default runs Jekyll on the main branch and
+# fails because docs/ uses MkDocs's `{% include-markdown %}`
+# syntax which Jekyll's `include` tag doesn't grok. The
+# repo-root `.nojekyll` file is a defensive fallback that
+# stops Jekyll from running even if the setting reverts.
 
 on:
   pull_request:
