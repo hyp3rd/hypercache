@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -1019,17 +1020,25 @@ func handleOwners(c fiber.Ctx, nodeCtx *nodeContext) error {
 // <token>` when token is non-empty; otherwise it's a passthrough.
 // Mirrors the same posture as DistHTTPAuth — applied to the client
 // API for symmetry.
+//
+// Token comparison uses crypto/subtle.ConstantTimeCompare to defeat
+// timing side-channels: a plaintext `got != want` returns as soon as
+// the first differing byte is found, leaking the per-byte equality
+// of the secret to a remote attacker who can measure response time.
+// `subtle.ConstantTimeCompare` runs in time independent of the
+// position of the first differing byte. Mirrors the dist transport's
+// inbound check at pkg/backend/dist_http_server.go.
 func bearerAuth(token string) func(fiber.Handler) fiber.Handler {
 	if token == "" {
 		return func(h fiber.Handler) fiber.Handler { return h }
 	}
 
-	want := "Bearer " + token
+	want := []byte("Bearer " + token)
 
 	return func(h fiber.Handler) fiber.Handler {
 		return func(c fiber.Ctx) error {
 			got := c.Get("Authorization")
-			if got != want {
+			if subtle.ConstantTimeCompare([]byte(got), want) != 1 {
 				return c.SendStatus(fiber.StatusUnauthorized)
 			}
 

@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **Constant-time bearer-token compare on the client API.** Replaced
+  the plaintext `got != want` check at
+  [cmd/hypercache-server/main.go](cmd/hypercache-server/main.go) with
+  `crypto/subtle.ConstantTimeCompare` to defeat timing side-channels.
+  A naive string compare returns as soon as the first differing byte
+  is found, leaking per-byte equality of `HYPERCACHE_AUTH_TOKEN` to a
+  remote attacker who can measure response time. The fix mirrors the
+  dist transport's existing constant-time check at
+  [pkg/backend/dist_http_server.go:144-152](pkg/backend/dist_http_server.go#L144-L152).
+  No public API change; the env-var contract and "empty token →
+  open mode" back-compatible behavior are unchanged. New auth-test suite
+  at [cmd/hypercache-server/auth_test.go](cmd/hypercache-server/auth_test.go)
+  pins the contract: missing/wrong/malformed/lowercase/wrong-length
+  bearer headers all return 401, public meta routes (`/healthz`,
+  `/v1/openapi.yaml`) stay reachable without credentials, every
+  protected route fires the wrapper. The new `newAuthedServer`
+  helper drives `registerClientRoutes` directly so future wiring
+  regressions are caught (the existing `handlers_test.go::newTestServer`
+  deliberately bypasses auth for handler-correctness coverage).
+
 ### Added
 
 - **OpenAPI 3.1 specification + drift-detection.** The
@@ -56,24 +78,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Richer client API — metadata inspection, JSON envelopes, batch
   operations.** Three additions to the
   `cmd/hypercache-server` HTTP surface:
-   - `HEAD /v1/cache/:key` returns the value's metadata in
-     `X-Cache-*` response headers (Version, Origin, Last-Updated,
-     TTL-Ms, Expires-At, Owners, Node) with no body — fast
-     existence + TTL inspection without paying the value-transfer
-     cost. 200 if present, 404 if not.
-   - `GET /v1/cache/:key` now honors `Accept: application/json`
-     and returns an `itemEnvelope` with the same metadata as
-     HEAD plus the base64-encoded value. The bare-`curl` default
-     remains raw bytes via `application/octet-stream` — current
-     clients are unaffected.
-   - `POST /v1/cache/batch/{get,put,delete}` enable bulk operations
-     in a single round-trip. Each request carries an array; the
-     response carries one result entry per item with per-item
-     status, owners, and error reporting. `batch-put` items
-     accept either UTF-8 strings (default) or base64-encoded byte
-     payloads via `value_encoding: "base64"`. Per-item errors are
-     surfaced in `error` + `code` fields without failing the
-     whole batch.
+      - `HEAD /v1/cache/:key` returns the value's metadata in
+        `X-Cache-*` response headers (Version, Origin, Last-Updated,
+        TTL-Ms, Expires-At, Owners, Node) with no body — fast
+        existence + TTL inspection without paying the value-transfer
+        cost. 200 if present, 404 if not.
+      - `GET /v1/cache/:key` now honors `Accept: application/json`
+        and returns an `itemEnvelope` with the same metadata as
+        HEAD plus the base64-encoded value. The bare-`curl` default
+        remains raw bytes via `application/octet-stream` — current
+        clients are unaffected.
+      - `POST /v1/cache/batch/{get,put,delete}` enable bulk operations
+        in a single round-trip. Each request carries an array; the
+        response carries one result entry per item with per-item
+        status, owners, and error reporting. `batch-put` items
+        accept either UTF-8 strings (default) or base64-encoded byte
+        payloads via `value_encoding: "base64"`. Per-item errors are
+        surfaced in `error` + `code` fields without failing the
+        whole batch.
   Six unit tests at
   [cmd/hypercache-server/handlers_test.go](cmd/hypercache-server/handlers_test.go)
   pin the contracts: HEAD present/missing, Accept-JSON envelope
@@ -82,26 +104,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **SWIM self-refutation + cross-process gossip dissemination.**
   Closes the last `experimental` marker on the heartbeat path.
   Three pieces:
-   - **`acceptGossip` self-refute** — incoming entries that
-     reference the local node as Suspect or Dead at incarnation
-     ≥ ours now bump the local incarnation and re-mark Alive.
-     Higher-incarnation-wins propagation in the same function
-     disseminates the refutation cluster-wide, so a falsely-
-     suspected node can clear suspicion through gossip alone
-     (pre-fix the only path was a fresh probe).
-   - **HTTP gossip wire** — new `Gossip(ctx, targetID, members)`
-     method on `DistTransport`, new
-     `POST /internal/gossip` server endpoint (auth-wrapped),
-     new `GossipMember` wire DTO. `runGossipTick` now falls
-     through to the HTTP path when the transport isn't an
-     `InProcessTransport`, so cross-process clusters disseminate
-     membership state — pre-Phase-E this was an in-process-only
-     no-op.
-   - The `experimental` qualifier is removed from
-     `heartbeatLoop`'s comment + the heartbeat-section field
-     doc; SWIM-style indirect probes (Phase B.1) and
-     self-refutation (this round) together provide the SWIM
-     properties the marker was tracking.
+      - **`acceptGossip` self-refute** — incoming entries that
+        reference the local node as Suspect or Dead at incarnation
+        ≥ ours now bump the local incarnation and re-mark Alive.
+        Higher-incarnation-wins propagation in the same function
+        disseminates the refutation cluster-wide, so a falsely-
+        suspected node can clear suspicion through gossip alone
+        (pre-fix the only path was a fresh probe).
+      - **HTTP gossip wire** — new `Gossip(ctx, targetID, members)`
+        method on `DistTransport`, new
+        `POST /internal/gossip` server endpoint (auth-wrapped),
+        new `GossipMember` wire DTO. `runGossipTick` now falls
+        through to the HTTP path when the transport isn't an
+        `InProcessTransport`, so cross-process clusters disseminate
+        membership state — pre-Phase-E this was an in-process-only
+        no-op.
+      - The `experimental` qualifier is removed from
+        `heartbeatLoop`'s comment + the heartbeat-section field
+        doc; SWIM-style indirect probes (Phase B.1) and
+        self-refutation (this round) together provide the SWIM
+        properties the marker was tracking.
   Regression coverage at
   [tests/integration/dist_swim_refute_test.go](tests/integration/dist_swim_refute_test.go):
   `TestDistSWIM_HTTPGossipExchange` exercises the wire (A pushes
