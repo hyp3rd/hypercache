@@ -1,0 +1,20 @@
+# Pinned dependency set for the MkDocs site build. Used by both
+# `make docs-build` (via the operator's pyenv `mkdocs` venv) and
+# `.github/workflows/docs.yml` (via actions/setup-python with
+# `cache: pip` — the file's hash is the cache key, so pinned
+# versions also produce reproducible cache hits).
+#
+# Bump deliberately: the Material theme moves fast and changes
+# can shift visual output. Verify with `mkdocs build --strict`
+# locally before bumping.
+
+
+# Transitive deps that Material relies on. Pinned for the same
+# reproducibility reason as the plugins above.
+Markdown==3.10.2
+mkdocs==1.6.1
+mkdocs-glightbox==0.5.2
+mkdocs-include-markdown-plugin==7.2.2
+mkdocs-material==9.7.6
+mkdocs-material-extensions==1.3.1
+Pygments==2.20.0

@@ -51,6 +51,7 @@ SOURCE_DIR_PREFIXES = (
     "__examples/",
     ".github/",
     "docker/",
+    "_mkdocs/",
 )
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
