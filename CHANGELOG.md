@@ -8,6 +8,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Documentation site on GitHub Pages**, built with MkDocs Material
+  and published automatically on every push to `main`. Eight
+  navigated pages — landing, quickstart, 5-node cluster tutorial,
+  Helm chart guide, server-binary reference, distributed-backend
+  architecture, operations runbook, RFC index — plus the
+  CHANGELOG and the `cmd/hypercache-server/README.md` pulled in
+  via the include-markdown plugin so they don't drift. A
+  build-time hook at [`_mkdocs/hooks.py`](_mkdocs/hooks.py)
+  rewrites repo-relative source-code references (`../pkg/foo.go`)
+  into canonical GitHub URLs so the same markdown renders
+  correctly both on github.com and on the rendered Pages site.
+  Workflow at
+  [`.github/workflows/docs.yml`](.github/workflows/docs.yml)
+  builds with `--strict` on every PR (catches broken docs-internal
+  links on submission) and deploys via `actions/deploy-pages@v4`
+  on main pushes. The README now links to the rendered site.
+  Polishing pass on the existing markdown surface: relaxed
+  `mdl` rules that fight MkDocs/frontmatter idioms (MD041
+  for YAML frontmatter pages, MD010 for Go's tab-in-code-blocks
+  convention, MD033/MD032 for Material's grid-cards HTML).
 - **Richer client API — metadata inspection, JSON envelopes, batch
   operations.** Three additions to the
   `cmd/hypercache-server` HTTP surface:

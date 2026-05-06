@@ -185,6 +185,15 @@ sec:
 	@echo "\nRunning gosec..."
 	gosec -exclude-generated -exclude-dir=__examples/size ./...
 
+docs-build:
+	PYENV_VERSION=mkdocs mkdocs build --strict
+
+docs-publish: docs-build
+	PYENV_VERSION=mkdocs mkdocs gh-deploy
+
+docs-serve: docs-build
+	PYENV_VERSION=mkdocs mkdocs serve
+
 # check_command_exists is a helper function that checks if a command exists.
 define check_command_exists
 @which $(1) > /dev/null 2>&1 || (echo "$(1) command not found" && exit 1)
@@ -218,6 +227,11 @@ help:
 	@echo
 	@echo "  update-deps\t\t\tUpdate all dependencies and tidy go.mod"
 	@echo
+	@echo
+	@echo "Documentation commands:"
+	@echo "  docs-build"
+	@echo "  docs-publish"
+	@echo "  docs-serve"
 	@echo
 	@echo "For more information, see the project README."
 

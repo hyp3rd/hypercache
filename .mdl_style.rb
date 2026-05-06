@@ -13,3 +13,22 @@ rule "MD029", style => "one"
 # under distinct parent headings — which is exactly the Keep-a-Changelog
 # shape, and still catches genuine duplicates within the same section.
 rule "MD024", :allow_different_nesting => true
+
+# MkDocs pages start with YAML frontmatter (---\ntitle: ...\n---), so
+# the first line cannot be a top-level heading. MD041 fights that
+# convention; the alternative would be losing per-page metadata.
+exclude_rule 'MD041'
+
+# Hard tabs in code blocks are valid — Go source uses tabs by
+# convention (gofmt enforces it), and MkDocs preserves them. The
+# default rule flags every Go example as broken, which would push
+# us to manually convert tabs in every code block.
+exclude_rule 'MD010'
+
+# MkDocs Material's "grid cards" feature requires `<div class="grid cards">`
+# HTML wrappers around a markdown list. MD033 (no inline HTML) flags
+# every grid block. Ditto for the surrounding-blank-line rule (MD032)
+# which doesn't see the list inside the div as a list. Skipping both
+# is the standard Material-theme posture.
+exclude_rule 'MD033'
+exclude_rule 'MD032'

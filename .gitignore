@@ -96,3 +96,9 @@ tags
 
 ### Project ###
 .dccache
+
+### MkDocs site build output (CI publishes; local builds shouldn't be committed) ###
+/site/
+
+### Python bytecode caches from MkDocs hooks ###
+_mkdocs/__pycache__/

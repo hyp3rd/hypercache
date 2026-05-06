@@ -81,6 +81,8 @@ words:
   - exhaustruct
   - Fanout
   - fasthttp
+  - fontawesome
+  - frontmatter
   - fatals
   - fctx
   - ferr
@@ -92,6 +94,7 @@ words:
   - freqs
   - funlen
   - geomean
+  - glightbox
   - gerr
   - gitversion
   - GITVERSION
@@ -123,6 +126,7 @@ words:
   - idxs
   - Iface
   - ineff
+  - inlinehilite
   - inmemory
   - intrange
   - ints
@@ -130,10 +134,12 @@ words:
   - Itemm
   - keyf
   - lamport
+  - linenums
   - LFUDA
   - localmodule
   - logrus
   - longbridgeapp
+  - mailtos
   - maxmemory
   - memprofile
   - Merkle
@@ -164,8 +170,11 @@ words:
   - podname
   - popd
   - Prealloc
+  - productionization
   - protoc
   - pushd
+  - pygments
+  - pymdownx
   - recvcheck
   - rediscluster
   - repls
@@ -191,12 +200,15 @@ words:
   - strs
   - subtest
   - subtests
+  - superfences
   - sval
   - thelper
   - toplevel
   - tparallel
+  - tasklist
   - tracetest
   - traefik
+  - twemoji
   - trunc
   - tunables
   - TTLMs
