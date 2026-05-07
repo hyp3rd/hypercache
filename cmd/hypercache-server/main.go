@@ -48,16 +48,25 @@ import (
 // here so operators see one canonical reference and so the magic-number
 // linter doesn't flag repeated literals at the env-parse sites.
 const (
-	defaultReplication    = 3
-	defaultCapacity       = 100_000
-	defaultVirtualNodes   = 64
-	defaultIndirectK      = 2
-	suspectMultiplier     = 3 // suspect after = N × heartbeat interval
-	deadMultiplier        = 6 // dead    after = N × heartbeat interval
-	defaultHintTTL        = 30 * time.Second
-	defaultHintReplay     = 200 * time.Millisecond
-	defaultHeartbeat      = 1 * time.Second
-	defaultRebalance      = 250 * time.Millisecond
+	defaultReplication  = 3
+	defaultCapacity     = 100_000
+	defaultVirtualNodes = 64
+	defaultIndirectK    = 2
+	suspectMultiplier   = 3 // suspect after = N × heartbeat interval
+	deadMultiplier      = 6 // dead    after = N × heartbeat interval
+	defaultHintTTL      = 30 * time.Second
+	defaultHintReplay   = 200 * time.Millisecond
+	defaultHeartbeat    = 1 * time.Second
+	defaultRebalance    = 250 * time.Millisecond
+	// Membership gossip cadence. Without an enabled gossip loop the
+	// cluster has no path to re-introduce a previously-removed node:
+	// peers' heartbeats only probe nodes already in their membership
+	// list, and the Health endpoint is one-way. A graceful drain →
+	// restart (the canonical operator workflow) leaves the restarted
+	// node invisible to the rest of the cluster forever. Default 1s
+	// matches the heartbeat cadence — gossip+heartbeat together
+	// disseminate membership changes within a couple of ticks.
+	defaultGossip         = 1 * time.Second
 	clientAPIReadTimeout  = 5 * time.Second
 	clientAPIWriteTimeout = 5 * time.Second
 	clientAPIIdleTimeout  = 60 * time.Second
@@ -85,6 +94,7 @@ type envConfig struct {
 	Heartbeat    time.Duration
 	IndirectK    int
 	RebalanceInt time.Duration
+	GossipInt    time.Duration
 }
 
 // loadConfig pulls every knob from the environment and applies sane
@@ -122,6 +132,7 @@ func loadConfig() (envConfig, error) {
 		Heartbeat:    envDuration("HYPERCACHE_HEARTBEAT", defaultHeartbeat),
 		IndirectK:    envInt("HYPERCACHE_INDIRECT_PROBE_K", defaultIndirectK),
 		RebalanceInt: envDuration("HYPERCACHE_REBALANCE_INTERVAL", defaultRebalance),
+		GossipInt:    envDuration("HYPERCACHE_GOSSIP_INTERVAL", defaultGossip),
 	}
 
 	return cfg, nil
@@ -235,6 +246,7 @@ func buildHyperCache(ctx context.Context, cfg envConfig, logger *slog.Logger) (*
 		backend.WithDistWriteConsistency(backend.ConsistencyQuorum),
 		backend.WithDistHeartbeat(cfg.Heartbeat, suspectMultiplier*cfg.Heartbeat, deadMultiplier*cfg.Heartbeat),
 		backend.WithDistIndirectProbes(cfg.IndirectK, cfg.Heartbeat/2),
+		backend.WithDistGossipInterval(cfg.GossipInt),
 		backend.WithDistHintTTL(cfg.HintTTL),
 		backend.WithDistHintReplayInterval(cfg.HintReplay),
 		backend.WithDistRebalanceInterval(cfg.RebalanceInt),

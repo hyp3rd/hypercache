@@ -384,6 +384,7 @@ func (s *distHTTPServer) handleSet(fctx fiber.Ctx, dm *DistMemory) error {
 		Version:     req.Version,
 		Origin:      req.Origin,
 		LastUpdated: time.Now(),
+		LastAccess:  time.Now(),
 	}
 
 	dm.applySet(s.ctx, it, req.Replicate)
