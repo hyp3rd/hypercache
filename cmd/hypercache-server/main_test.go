@@ -174,3 +174,49 @@ func TestDecodeBase64Bytes_NotPadded(t *testing.T) {
 		t.Errorf("expected 5-char input to be rejected (len%%4 != 0)")
 	}
 }
+
+// TestLoadConfigGossipInterval pins the gossip-interval wiring that
+// fixes the "previously-removed node never rejoins the cluster" bug.
+//
+// Without gossip enabled, dist_memory.startGossipIfEnabled bails on
+// gossipInterval <= 0 and no membership state ever propagates beyond
+// the initial seed list. After a graceful drain, the peers' heartbeat
+// loop removes the drained node; on restart, the rejoining node
+// populates ITS own membership from seeds but has no path to
+// re-introduce itself to those peers — only gossip carries that
+// information. The Health endpoint is one-way ("ok" / "draining"),
+// the heartbeat loop only probes peers already in membership, and
+// no other propagation mechanism exists.
+//
+// The regression pins both the unset-env default (must be > 0 so
+// gossip starts by default) and the override path. An integration
+// test that exercises actual rejoin propagation across an in-process
+// cluster is a follow-up; this pins the load-bearing wiring without
+// the harness complexity.
+func TestLoadConfigGossipInterval(t *testing.T) {
+	t.Run("default is non-zero so gossip starts", func(t *testing.T) {
+		t.Setenv("HYPERCACHE_GOSSIP_INTERVAL", "")
+
+		cfg, err := loadConfig()
+		if err != nil {
+			t.Fatalf("loadConfig: %v", err)
+		}
+
+		if cfg.GossipInt <= 0 {
+			t.Fatalf("GossipInt = %v; default must be > 0 (gossip disabled = silent rejoin breakage)", cfg.GossipInt)
+		}
+	})
+
+	t.Run("env override is honored", func(t *testing.T) {
+		t.Setenv("HYPERCACHE_GOSSIP_INTERVAL", "750ms")
+
+		cfg, err := loadConfig()
+		if err != nil {
+			t.Fatalf("loadConfig: %v", err)
+		}
+
+		if cfg.GossipInt.String() != "750ms" {
+			t.Errorf("GossipInt = %v, want 750ms", cfg.GossipInt)
+		}
+	})
+}
