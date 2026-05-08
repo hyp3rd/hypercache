@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`GET /v1/me` — resolved caller identity.** New scope-protected
+  (`read`) route that reads the resolved `httpauth.Identity` from
+  `c.Locals(httpauth.IdentityKey)` and returns
+  `{ id, scopes }` JSON. Mirrors the new schema documented at
+  [`/v1/me`](cmd/hypercache-server/openapi.yaml). Unblocks the
+  HyperCache Monitor's Phase C2 swap from the legacy
+  `/v1/owners/__probe__` probe to a real introspection of the
+  bound bearer token's grants. Anonymous mode (`AllowAnonymous: true`)
+  returns `id: "anonymous"` with all three scopes — same identity
+  the policy emits internally. Drift test
+  ([`openapi_test.go`](cmd/hypercache-server/openapi_test.go))
+  and auth-coverage table
+  ([`auth_test.go`](cmd/hypercache-server/auth_test.go)) updated
+  in lockstep.
 - **Client API auth v2: multi-token, scoped, mTLS-capable.** New
   [`pkg/httpauth/`](pkg/httpauth/) package with `Policy`,
   `TokenIdentity`, `CertIdentity`, `Scope` types and a

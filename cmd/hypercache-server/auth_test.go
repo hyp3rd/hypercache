@@ -232,6 +232,7 @@ func TestBearerAuth_AllProtectedRoutes(t *testing.T) {
 		{http.MethodHead, pathCacheKey},
 		{http.MethodDelete, pathCacheKey},
 		{http.MethodGet, "/v1/owners/k"},
+		{http.MethodGet, "/v1/me"},
 		{http.MethodPost, "/v1/cache/batch/get"},
 		{http.MethodPost, "/v1/cache/batch/put"},
 		{http.MethodPost, "/v1/cache/batch/delete"},
@@ -275,6 +276,7 @@ func TestScope_ReadOnlyToken(t *testing.T) {
 	}{
 		// Read scope: 200.
 		{http.MethodGet, "/v1/owners/k", http.StatusOK},
+		{http.MethodGet, "/v1/me", http.StatusOK},
 		// Write scope: 403 (token has Read only).
 		{http.MethodPut, pathCacheKey, http.StatusForbidden},
 		{http.MethodDelete, pathCacheKey, http.StatusForbidden},

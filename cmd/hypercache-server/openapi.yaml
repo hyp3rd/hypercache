@@ -248,6 +248,31 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /v1/me:
+    get:
+      operationId: getIdentity
+      tags: [ meta ]
+      summary: Resolved caller identity.
+      description: |
+        Returns the identity resolved from the request credentials
+        (bearer token, mTLS cert, or `anonymous` when AllowAnonymous
+        is enabled). Includes the granted scopes so callers can
+        introspect their permissions without trial-and-error against
+        scope-protected routes.
+
+        Requires the `read` scope — operators in pure-write or pure-
+        admin token configurations do not need to introspect their
+        own identity for normal cache use; the monitor's login flow
+        is the primary consumer.
+      responses:
+        "200":
+          description: Resolved identity + granted scopes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /v1/cache/batch/get:
     post:
       operationId: batchGet
@@ -467,6 +492,23 @@ components:
           description: Ring owners — primary first, replicas after.
           items: { type: string }
         node: { type: string }
+
+    IdentityResponse:
+      type: object
+      required: [ id, scopes ]
+      properties:
+        id:
+          type: string
+          description: |
+            Identity label from the auth config (Tokens[].ID,
+            CertIdentities[].SubjectCN, or `anonymous` when
+            AllowAnonymous is enabled).
+        scopes:
+          type: array
+          description: Permission scopes granted to this identity.
+          items:
+            type: string
+            enum: [ read, write, admin ]
 
     ItemEnvelope:
       type: object

@@ -352,6 +352,7 @@ func registerClientRoutes(app *fiber.App, policy httpauth.Policy, nodeCtx *nodeC
 	app.Head("/v1/cache/:key", read, func(c fiber.Ctx) error { return handleHead(c, nodeCtx) })
 	app.Delete("/v1/cache/:key", write, func(c fiber.Ctx) error { return handleDelete(c, nodeCtx) })
 	app.Get("/v1/owners/:key", read, func(c fiber.Ctx) error { return handleOwners(c, nodeCtx) })
+	app.Get("/v1/me", read, handleMe)
 
 	app.Post("/v1/cache/batch/get", read, func(c fiber.Ctx) error { return handleBatchGet(c, nodeCtx) })
 	app.Post("/v1/cache/batch/put", write, func(c fiber.Ctx) error { return handleBatchPut(c, nodeCtx) })
@@ -1172,6 +1173,44 @@ func handleOwners(c fiber.Ctx, nodeCtx *nodeContext) error {
 		Key:    key,
 		Owners: nodeCtx.hc.ClusterOwners(key),
 		Node:   nodeCtx.nodeID,
+	})
+}
+
+// meResponse is the body of GET /v1/me — the resolved caller identity
+// after auth middleware ran. Mirrors httpauth.Identity but written as
+// a wire type so the JSON tags are owned by the API surface, not the
+// internal auth package.
+type meResponse struct {
+	ID     string   `json:"id"`
+	Scopes []string `json:"scopes"`
+}
+
+// handleMe implements GET /v1/me — returns the calling principal's
+// identity and granted scopes. Used by the monitor to introspect a
+// bound bearer token without making a no-op probe against another
+// route. The middleware has already populated IdentityKey on every
+// request that reached this handler (anonymous mode included), so
+// the type assertion is safe; a missing or wrong-typed Locals entry
+// is a wiring bug and surfaces as a 500 rather than a silent default.
+func handleMe(c fiber.Ctx) error {
+	identity, ok := c.Locals(httpauth.IdentityKey).(httpauth.Identity)
+	if !ok {
+		return jsonErr(
+			c,
+			fiber.StatusInternalServerError,
+			codeInternal,
+			"identity not resolved by middleware (wiring bug)",
+		)
+	}
+
+	scopes := make([]string, len(identity.Scopes))
+	for i, s := range identity.Scopes {
+		scopes[i] = string(s)
+	}
+
+	return c.JSON(meResponse{
+		ID:     identity.ID,
+		Scopes: scopes,
 	})
 }
 
