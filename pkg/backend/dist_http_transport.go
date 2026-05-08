@@ -289,6 +289,7 @@ func decodeGetBody(r io.Reader) (*cache.Item, bool, error) {
 			Version:     mirror.Version,
 			Origin:      mirror.Origin,
 			LastUpdated: time.Now(),
+			LastAccess:  time.Now(),
 		}, true, nil
 	}
 
