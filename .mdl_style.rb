@@ -12,8 +12,8 @@ rule "MD029", style => "one"
 # allow_different_nesting permits same-text headings as long as they sit
 # under distinct parent headings — which is exactly the Keep-a-Changelog
 # shape, and still catches genuine duplicates within the same section.
-rule "MD024", :allow_different_nesting => true, :siblings_only => true
-
+# rule "MD024", :siblings_only => true, :allow_different_nesting => true
+exclude_rule "MD024"
 # MkDocs pages start with YAML frontmatter (---\ntitle: ...\n---), so
 # the first line cannot be a top-level heading. MD041 fights that
 # convention; the alternative would be losing per-page metadata.

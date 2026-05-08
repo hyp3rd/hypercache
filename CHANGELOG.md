@@ -639,7 +639,7 @@ Worth surfacing for contributors:
   `pkg/backend/dist_memory_test_helpers.go::EnableHTTPForTest`
   (build tag `test`).
 - **Lint discipline:** 35 `nolint` directives total across the repo,
-  each with a one-line justification. golangci-lint v2.12.1 runs
+  each with a one-line justification. golangci-lint v2.12.2 runs
   clean with `--build-tags test`.
 
 ### Removed
