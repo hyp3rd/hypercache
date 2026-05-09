@@ -8,6 +8,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Per-route scope enforcement on the management HTTP port.**
+  `WithMgmtControlAuth` is a new option that wraps the cluster-
+  mutating control endpoints (`POST /evict`, `POST /clear`,
+  `POST /trigger-expiration`) in a stricter auth gate than the
+  observability surface. The hypercache-server binary now wires
+  read-or-better on `/stats`/`/config`/`/cluster/*`/`/dist/*` and
+  admin-only on the control routes (see `cmd/hypercache-server/
+main.go`). `/health` is intentionally NOT auth-wrapped — k8s
+  liveness probes don't carry credentials, and a probe failure
+  cascades into a pod-restart loop. Also new: `httpauth.Policy.Verify`,
+  the "block-with-error" sibling of `Middleware()` that adapters
+  (like `WithMgmtAuth`/`WithMgmtControlAuth`) use when they own
+  their own next-handler dispatch. Existing `Middleware()` is now
+  thin sugar over `Verify() + c.Next()` so the auth logic lives
+  in exactly one place.
 - **`GET /v1/me` — resolved caller identity.** New scope-protected
   (`read`) route that reads the resolved `httpauth.Identity` from
   `c.Locals(httpauth.IdentityKey)` and returns

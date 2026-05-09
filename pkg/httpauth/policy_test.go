@@ -366,3 +366,114 @@ func TestPolicy_HasScope(t *testing.T) {
 		t.Errorf("Write should match Write")
 	}
 }
+
+// TestPolicy_Verify covers the public Verify() entry point — the
+// "block-with-error" sibling of Middleware that adapters
+// (ManagementHTTPServer.WithMgmtControlAuth, etc.) use when they
+// own their own next-handler dispatch. Same semantics as
+// Middleware: 401 on missing/invalid creds, 403 on wrong scope,
+// nil + Identity in Locals on success. The shared resolve() means
+// any future divergence between Middleware and Verify would be a
+// security bug; this test pins parity.
+func TestPolicy_Verify(t *testing.T) {
+	t.Parallel()
+
+	p := Policy{
+		Tokens: []TokenIdentity{
+			{ID: "ro", Token: "ro-token", Scopes: []Scope{ScopeRead}},
+			{ID: "admin", Token: "admin-token", Scopes: []Scope{ScopeRead, ScopeWrite, ScopeAdmin}},
+		},
+	}
+
+	cases := []struct {
+		name   string
+		header string
+		scope  Scope
+		want   int
+	}{
+		{"no creds → 401", "", ScopeRead, http.StatusUnauthorized},
+		{"bad bearer → 401", "Bearer wrong", ScopeRead, http.StatusUnauthorized},
+		{"read scope on read route → 200", "Bearer ro-token", ScopeRead, http.StatusOK},
+		{"read scope on admin route → 403", "Bearer ro-token", ScopeAdmin, http.StatusForbidden},
+		{"admin scope on admin route → 200", "Bearer admin-token", ScopeAdmin, http.StatusOK},
+		{"empty scope (any-authenticated) → 200 with creds", "Bearer ro-token", "", http.StatusOK},
+		{"empty scope still 401 without creds", "", "", http.StatusUnauthorized},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			app := fiber.New()
+			// Mount Verify in the wrapAuth-style adapter shape:
+			// auth happens, then handler runs only on nil error.
+			// This is exactly how ManagementHTTPServer wires it.
+			scope := tc.scope
+			app.Get("/protected", func(c fiber.Ctx) error {
+				err := p.Verify(c, scope)
+				if err != nil {
+					return err
+				}
+
+				return c.SendString("ok")
+			})
+
+			got := doStatus(t, app, tc.header)
+			if got != tc.want {
+				t.Fatalf("status: got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPolicy_Verify_StoresIdentityInLocals pins the side-effect
+// contract: a successful Verify populates IdentityKey before
+// returning. Adapters that read c.Locals(IdentityKey) — e.g. any
+// future audit-attribution handler on the mgmt port — depend on
+// it. Without this assertion a future refactor could regress
+// Verify into "scope-check only" silently.
+func TestPolicy_Verify_StoresIdentityInLocals(t *testing.T) {
+	t.Parallel()
+
+	p := Policy{
+		Tokens: []TokenIdentity{
+			{ID: "audit-target", Token: "tok", Scopes: []Scope{ScopeRead}},
+		},
+	}
+
+	app := fiber.New()
+	app.Get("/who", func(c fiber.Ctx) error {
+		err := p.Verify(c, ScopeRead)
+		if err != nil {
+			return err
+		}
+
+		v := c.Locals(IdentityKey)
+
+		id, ok := v.(Identity)
+		if !ok {
+			return c.Status(http.StatusInternalServerError).SendString("no identity")
+		}
+
+		return c.SendString(id.ID)
+	})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/who", strings.NewReader(""))
+	req.Header.Set("Authorization", "Bearer tok")
+
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+
+	defer func() { _ = resp.Body.Close() }()
+
+	body := make([]byte, 64)
+
+	n, _ := resp.Body.Read(body)
+
+	got := string(body[:n])
+	if got != "audit-target" {
+		t.Fatalf("locals identity ID = %q, want %q", got, "audit-target")
+	}
+}

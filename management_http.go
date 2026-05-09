@@ -18,14 +18,22 @@ type ManagementHTTPOption func(*ManagementHTTPServer)
 
 // ManagementHTTPServer holds Fiber app and settings.
 type ManagementHTTPServer struct {
-	addr             string
-	app              *fiber.App
-	readTimeout      time.Duration
-	writeTimeout     time.Duration
-	idleTimeout      time.Duration
-	bodyLimit        int
-	concurrency      int
-	authFunc         func(fiber.Ctx) error
+	addr         string
+	app          *fiber.App
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+	idleTimeout  time.Duration
+	bodyLimit    int
+	concurrency  int
+	authFunc     func(fiber.Ctx) error
+	// controlAuthFunc is an optional stricter auth gate applied
+	// only to the cluster-mutating control endpoints (/evict,
+	// /clear, /trigger-expiration). When set, it runs INSTEAD OF
+	// authFunc on those routes — typically configured to require
+	// admin scope while authFunc requires read. When nil, the
+	// control routes fall back to authFunc, preserving the
+	// pre-Phase-C2 single-gate behavior.
+	controlAuthFunc  func(fiber.Ctx) error
 	ln               net.Listener
 	started          bool
 	listenerDeadline time.Duration
@@ -49,9 +57,26 @@ type ManagementHTTPServer struct {
 	serveErr atomic.Pointer[error]
 }
 
-// WithMgmtAuth sets an auth function (return error to block).
+// WithMgmtAuth sets an auth function applied to every authenticated
+// route on the management port (return error to block). /health is
+// exempt — k8s liveness probes do not carry credentials.
+//
+// Pair with WithMgmtControlAuth for finer scope on the cluster-
+// mutating endpoints (/evict, /clear, /trigger-expiration); without
+// it, those routes fall back to this same gate.
 func WithMgmtAuth(fn func(fiber.Ctx) error) ManagementHTTPOption {
 	return func(s *ManagementHTTPServer) { s.authFunc = fn }
+}
+
+// WithMgmtControlAuth sets a stricter auth function applied only to
+// the cluster-mutating control endpoints — /evict, /clear,
+// /trigger-expiration. Use this with httpauth.Policy.Verify(c,
+// httpauth.ScopeAdmin) so a token granted only read or write
+// scope cannot trigger destructive operations through the mgmt
+// port. When nil, control routes inherit authFunc's gate (the
+// pre-Phase-C2 single-gate behavior).
+func WithMgmtControlAuth(fn func(fiber.Ctx) error) ManagementHTTPOption {
+	return func(s *ManagementHTTPServer) { s.controlAuthFunc = fn }
 }
 
 // WithMgmtReadTimeout sets read timeout.
@@ -254,20 +279,42 @@ func (s *ManagementHTTPServer) Shutdown(ctx context.Context) error {
 // mountRoutes.
 func (s *ManagementHTTPServer) mountRoutes(hc managementCache) { // split into helpers to satisfy funlen
 	useAuth := s.wrapAuth
+	useControlAuth := s.wrapControlAuth
 	s.registerBasic(useAuth, hc)
 	s.registerDistributed(useAuth, hc)
 	s.registerCluster(useAuth, hc)
-	s.registerControl(useAuth, hc)
+	s.registerControl(useControlAuth, hc)
 }
 
 // wrapAuth returns an auth-wrapped handler if authFunc provided.
 func (s *ManagementHTTPServer) wrapAuth(handler fiber.Handler) fiber.Handler {
-	if s.authFunc == nil {
+	return wrapWithGate(s.authFunc, handler)
+}
+
+// wrapControlAuth returns a handler wrapped with the stricter
+// control-route auth when controlAuthFunc is set, otherwise it
+// falls back to wrapAuth. This preserves the pre-Phase-C2
+// single-gate behavior for operators who haven't opted into
+// admin-scope enforcement on the mgmt port.
+func (s *ManagementHTTPServer) wrapControlAuth(handler fiber.Handler) fiber.Handler {
+	if s.controlAuthFunc != nil {
+		return wrapWithGate(s.controlAuthFunc, handler)
+	}
+
+	return s.wrapAuth(handler)
+}
+
+// wrapWithGate applies an auth-gate function before invoking the
+// underlying handler. Nil gate is a passthrough — same shape as
+// before WithMgmtAuth was wired, used by deployments that haven't
+// configured any auth on the mgmt port.
+func wrapWithGate(gate func(fiber.Ctx) error, handler fiber.Handler) fiber.Handler {
+	if gate == nil {
 		return handler
 	}
 
 	return func(fiberCtx fiber.Ctx) error {
-		authErr := s.authFunc(fiberCtx)
+		authErr := gate(fiberCtx)
 		if authErr != nil {
 			return authErr
 		}
@@ -277,7 +324,12 @@ func (s *ManagementHTTPServer) wrapAuth(handler fiber.Handler) fiber.Handler {
 }
 
 func (s *ManagementHTTPServer) registerBasic(useAuth func(fiber.Handler) fiber.Handler, hc managementCache) {
-	s.app.Get("/health", useAuth(func(fiberCtx fiber.Ctx) error { return fiberCtx.SendString("ok") }))
+	// /health is intentionally NOT wrapped in useAuth — k8s
+	// liveness/readiness probes do not carry credentials, and
+	// a probe failure cascades into a pod-restart loop. Mirrors
+	// the client-API binary's `/healthz` exemption (see
+	// cmd/hypercache-server/main.go:registerClientRoutes).
+	s.app.Get("/health", func(fiberCtx fiber.Ctx) error { return fiberCtx.SendString("ok") })
 	s.app.Get("/stats", useAuth(func(fiberCtx fiber.Ctx) error { return fiberCtx.JSON(hc.GetStats()) }))
 	s.app.Get("/config", useAuth(func(fiberCtx fiber.Ctx) error {
 		cfg := map[string]any{

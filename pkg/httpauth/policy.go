@@ -210,19 +210,48 @@ func (p Policy) Validate() error {
 // that want any-authenticated-caller semantics.
 func (p Policy) Middleware(required Scope) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		identity, ok := p.resolve(c)
-		if !ok {
-			return c.SendStatus(fiber.StatusUnauthorized)
+		err := p.Verify(c, required)
+		if err != nil {
+			return err
 		}
-
-		if required != "" && !identity.HasScope(required) {
-			return c.SendStatus(fiber.StatusForbidden)
-		}
-
-		c.Locals(IdentityKey, identity)
 
 		return c.Next()
 	}
+}
+
+// Verify resolves credentials, asserts the required scope, and
+// stores the resolved Identity in c.Locals(IdentityKey). Returns
+// nil on success; on failure returns a *fiber.Error carrying
+// status 401 (no credentials matched) or 403 (credentials matched
+// but scope is missing). Fiber's default error handler emits the
+// canonical text body for the status code.
+//
+// Use Verify when integrating with code that owns its own next-
+// handler dispatch — e.g. ManagementHTTPServer.WithMgmtAuth and
+// WithMgmtControlAuth, which short-circuit on a non-nil return
+// from the gate function and never call the wrapped handler.
+// Middleware() is thin sugar over Verify() + Next() so the auth
+// logic lives in exactly one place.
+//
+// CRITICAL: do NOT switch to `c.SendStatus(...)` here. SendStatus
+// returns nil on success, which would silently fall through to
+// the wrapped handler in wrapWithGate-style adapters and the
+// downstream handler would write its own success status over the
+// 401 body. Returning a *fiber.Error keeps both Middleware and
+// the gate adapters fail-closed.
+func (p Policy) Verify(c fiber.Ctx, required Scope) error {
+	identity, ok := p.resolve(c)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized)
+	}
+
+	if required != "" && !identity.HasScope(required) {
+		return fiber.NewError(fiber.StatusForbidden)
+	}
+
+	c.Locals(IdentityKey, identity)
+
+	return nil
 }
 
 // resolve walks the credential resolution chain in priority order:
