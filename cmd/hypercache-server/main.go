@@ -95,6 +95,17 @@ type envConfig struct {
 	IndirectK    int
 	RebalanceInt time.Duration
 	GossipInt    time.Duration
+
+	// Phase C OIDC. When OIDCIssuer is non-empty the binary
+	// constructs a ServerVerify closure (see oidc.go) and
+	// attaches it to AuthPolicy.ServerVerify so JWTs from the
+	// configured IdP authenticate alongside the static-bearer
+	// path. All four OIDC fields are required when any one is
+	// set; loadConfig fails-fast on partial configuration.
+	OIDCIssuer        string
+	OIDCAudience      string
+	OIDCIdentityClaim string // "sub" or "email"; default "sub"
+	OIDCScopeClaim    string // "scope" (space-separated string) or a custom array claim; default "scope"
 }
 
 // loadConfig pulls every knob from the environment and applies sane
@@ -115,27 +126,99 @@ func loadConfig() (envConfig, error) {
 	}
 
 	cfg := envConfig{
-		NodeID:       envOr("HYPERCACHE_NODE_ID", hostnameOrDefault()),
-		APIAddr:      envOr("HYPERCACHE_API_ADDR", ":8080"),
-		MgmtAddr:     envOr("HYPERCACHE_MGMT_ADDR", ":8081"),
-		DistAddr:     envOr("HYPERCACHE_DIST_ADDR", ":7946"),
-		Seeds:        splitCSV(os.Getenv("HYPERCACHE_SEEDS")),
-		Replication:  envInt("HYPERCACHE_REPLICATION", defaultReplication),
-		Capacity:     envInt("HYPERCACHE_CAPACITY", defaultCapacity),
-		AuthPolicy:   policy,
-		APITLSCert:   os.Getenv("HYPERCACHE_API_TLS_CERT"),
-		APITLSKey:    os.Getenv("HYPERCACHE_API_TLS_KEY"),
-		APITLSCA:     os.Getenv("HYPERCACHE_API_TLS_CLIENT_CA"),
-		LogLevel:     parseLogLevel(envOr("HYPERCACHE_LOG_LEVEL", "info")),
-		HintTTL:      envDuration("HYPERCACHE_HINT_TTL", defaultHintTTL),
-		HintReplay:   envDuration("HYPERCACHE_HINT_REPLAY", defaultHintReplay),
-		Heartbeat:    envDuration("HYPERCACHE_HEARTBEAT", defaultHeartbeat),
-		IndirectK:    envInt("HYPERCACHE_INDIRECT_PROBE_K", defaultIndirectK),
-		RebalanceInt: envDuration("HYPERCACHE_REBALANCE_INTERVAL", defaultRebalance),
-		GossipInt:    envDuration("HYPERCACHE_GOSSIP_INTERVAL", defaultGossip),
+		NodeID:            envOr("HYPERCACHE_NODE_ID", hostnameOrDefault()),
+		APIAddr:           envOr("HYPERCACHE_API_ADDR", ":8080"),
+		MgmtAddr:          envOr("HYPERCACHE_MGMT_ADDR", ":8081"),
+		DistAddr:          envOr("HYPERCACHE_DIST_ADDR", ":7946"),
+		Seeds:             splitCSV(os.Getenv("HYPERCACHE_SEEDS")),
+		Replication:       envInt("HYPERCACHE_REPLICATION", defaultReplication),
+		Capacity:          envInt("HYPERCACHE_CAPACITY", defaultCapacity),
+		AuthPolicy:        policy,
+		APITLSCert:        os.Getenv("HYPERCACHE_API_TLS_CERT"),
+		APITLSKey:         os.Getenv("HYPERCACHE_API_TLS_KEY"),
+		APITLSCA:          os.Getenv("HYPERCACHE_API_TLS_CLIENT_CA"),
+		LogLevel:          parseLogLevel(envOr("HYPERCACHE_LOG_LEVEL", "info")),
+		HintTTL:           envDuration("HYPERCACHE_HINT_TTL", defaultHintTTL),
+		HintReplay:        envDuration("HYPERCACHE_HINT_REPLAY", defaultHintReplay),
+		Heartbeat:         envDuration("HYPERCACHE_HEARTBEAT", defaultHeartbeat),
+		IndirectK:         envInt("HYPERCACHE_INDIRECT_PROBE_K", defaultIndirectK),
+		RebalanceInt:      envDuration("HYPERCACHE_REBALANCE_INTERVAL", defaultRebalance),
+		GossipInt:         envDuration("HYPERCACHE_GOSSIP_INTERVAL", defaultGossip),
+		OIDCIssuer:        os.Getenv("HYPERCACHE_OIDC_ISSUER"),
+		OIDCAudience:      os.Getenv("HYPERCACHE_OIDC_AUDIENCE"),
+		OIDCIdentityClaim: envOr("HYPERCACHE_OIDC_IDENTITY_CLAIM", "sub"),
+		OIDCScopeClaim:    envOr("HYPERCACHE_OIDC_SCOPE_CLAIM", "scope"),
+	}
+
+	// Phase C: partial OIDC config is fail-fast. Either configure
+	// nothing (OIDC disabled) or every required field. Identity
+	// and scope claims have defaults; issuer + audience are
+	// required when OIDC is enabled.
+	err = validateOIDCConfig(cfg)
+	if err != nil {
+		return envConfig{}, err
 	}
 
 	return cfg, nil
+}
+
+// errOIDCMissingAudience / errOIDCMissingIssuer are the sentinel
+// errors loadConfig wraps when the OIDC env vars are partially
+// configured. Static sentinels (vs ad-hoc fmt.Errorf) keep err113
+// happy and let callers `errors.Is` against the specific
+// misconfiguration.
+var (
+	errOIDCMissingAudience = errors.New("HYPERCACHE_OIDC_ISSUER set without HYPERCACHE_OIDC_AUDIENCE")
+	errOIDCMissingIssuer   = errors.New("HYPERCACHE_OIDC_AUDIENCE set without HYPERCACHE_OIDC_ISSUER")
+)
+
+// validateOIDCConfig returns nil when OIDC is either fully
+// configured or fully disabled. Returns a wrapped sentinel when
+// only one of (issuer, audience) is set — partial config is the
+// most common operator misconfiguration and we want it to surface
+// at boot rather than as silent 401s on JWT-bearing requests.
+func validateOIDCConfig(cfg envConfig) error {
+	if cfg.OIDCIssuer != "" && cfg.OIDCAudience == "" {
+		return fmt.Errorf("%w: both are required when OIDC is enabled", errOIDCMissingAudience)
+	}
+
+	if cfg.OIDCAudience != "" && cfg.OIDCIssuer == "" {
+		return fmt.Errorf("%w: both are required when OIDC is enabled", errOIDCMissingIssuer)
+	}
+
+	return nil
+}
+
+// attachOIDCVerifier builds the OIDC verifier (when configured)
+// and attaches it to cfg.AuthPolicy.ServerVerify BEFORE
+// buildHyperCache and registerClientRoutes capture the policy by
+// value. The discovery RPC against the IdP happens here
+// (blocking) so a misconfigured issuer URL surfaces as a
+// fail-fast at startup rather than silent 401s on every
+// JWT-bearing request later.
+//
+// Returns false when verifier construction failed (caller should
+// exit non-zero); true on success or when OIDC is disabled.
+//
+// Extracted from run() to keep its function-length under revive's
+// 75-line cap; the verifier-construction step is naturally
+// self-contained (one input, one output, one side effect on
+// cfg.AuthPolicy).
+func attachOIDCVerifier(ctx context.Context, cfg *envConfig, logger *slog.Logger) bool {
+	if cfg.OIDCIssuer == "" {
+		return true
+	}
+
+	verifier, err := buildOIDCVerifier(ctx, *cfg)
+	if err != nil {
+		logger.Error("oidc verifier construction failed", slog.Any("err", err))
+
+		return false
+	}
+
+	cfg.AuthPolicy.ServerVerify = verifier
+
+	return true
 }
 
 // envOr returns os.Getenv(key) or fallback when unset/empty.
@@ -1275,6 +1358,13 @@ func run() int {
 		cfg.AuthPolicy.AllowAnonymous = true
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if !attachOIDCVerifier(ctx, &cfg, logger) {
+		return 1
+	}
+
 	logger.Info(
 		"hypercache-server starting",
 		slog.String("api_addr", cfg.APIAddr),
@@ -1284,10 +1374,8 @@ func run() int {
 		slog.Int("replication", cfg.Replication),
 		slog.Int("auth_token_identities", len(cfg.AuthPolicy.Tokens)),
 		slog.Int("auth_cert_identities", len(cfg.AuthPolicy.CertIdentities)),
+		slog.Bool("oidc_enabled", cfg.AuthPolicy.ServerVerify != nil),
 	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	hc, err := buildHyperCache(ctx, cfg, logger)
 	if err != nil {

@@ -249,6 +249,86 @@ func TestManagementHTTP_AuthScoping(t *testing.T) {
 	})
 }
 
+// TestManagementHTTP_BearerAndOIDCCoexistence pins the Phase C
+// hybrid posture: a Policy with BOTH static `Tokens` AND a
+// `ServerVerify` hook (the OIDC verifier) authenticates either
+// flow correctly. The resolve chain in pkg/httpauth/policy.go is:
+//
+//	bearer match against Tokens?  → yes, win
+//	                              → no, fall through
+//	mTLS cert?                    → not in this test
+//	ServerVerify(c)?              → yes, win
+//	                              → no, 401
+//
+// This test proves: (a) a static-bearer-formatted token wins via
+// Tokens; (b) a token NOT in Tokens falls through to ServerVerify;
+// (c) when ServerVerify rejects, the request 401s. ServerVerify is
+// a hand-rolled stand-in for the production OIDC verifier — it
+// recognizes the literal string "oidc-jwt-stand-in" as a valid
+// "JWT" and grants admin scope. Real OIDC validation (signature,
+// JWKS, claims) is covered by cmd/hypercache-server/oidc_test.go;
+// this test covers only the resolve-chain wiring.
+func TestManagementHTTP_BearerAndOIDCCoexistence(t *testing.T) {
+	t.Parallel()
+
+	const (
+		staticToken    = "static-bearer-token"
+		oidcStandInJWT = "oidc-jwt-stand-in"
+	)
+
+	policy := httpauth.Policy{
+		Tokens: []httpauth.TokenIdentity{
+			{
+				ID:     "machine-integration",
+				Token:  staticToken,
+				Scopes: []httpauth.Scope{httpauth.ScopeRead, httpauth.ScopeWrite, httpauth.ScopeAdmin},
+			},
+		},
+		ServerVerify: func(c fiber.Ctx) (httpauth.Identity, error) {
+			authHeader := c.Get("Authorization")
+			if authHeader != "Bearer "+oidcStandInJWT {
+				return httpauth.Identity{}, fiber.ErrUnauthorized
+			}
+
+			return httpauth.Identity{
+				ID:     "operator@example.com",
+				Scopes: []httpauth.Scope{httpauth.ScopeRead, httpauth.ScopeWrite, httpauth.ScopeAdmin},
+			}, nil
+		},
+	}
+
+	addr := startScopedMgmt(t, policy)
+
+	// /stats requires read-or-better; both flows should grant it.
+	t.Run("static bearer authenticates via Tokens path", func(t *testing.T) {
+		t.Parallel()
+
+		got := mgmtRequest(t, addr, http.MethodGet, "/stats", staticToken)
+		require.Equal(t, http.StatusOK, got)
+	})
+
+	t.Run("OIDC-shaped bearer falls through to ServerVerify", func(t *testing.T) {
+		t.Parallel()
+
+		got := mgmtRequest(t, addr, http.MethodGet, "/stats", oidcStandInJWT)
+		require.Equal(t, http.StatusOK, got)
+	})
+
+	t.Run("unrecognized bearer 401s after both paths reject", func(t *testing.T) {
+		t.Parallel()
+
+		got := mgmtRequest(t, addr, http.MethodGet, "/stats", "neither-static-nor-oidc")
+		require.Equal(t, http.StatusUnauthorized, got)
+	})
+
+	t.Run("/evict requires admin; both flows grant it", func(t *testing.T) {
+		t.Parallel()
+
+		require.Equal(t, http.StatusAccepted, mgmtRequest(t, addr, http.MethodPost, "/evict", staticToken))
+		require.Equal(t, http.StatusAccepted, mgmtRequest(t, addr, http.MethodPost, "/evict", oidcStandInJWT))
+	})
+}
+
 // TestManagementHTTP_ClusterEvents pins the SSE wire contract.
 // Three properties matter to the monitor:
 //
