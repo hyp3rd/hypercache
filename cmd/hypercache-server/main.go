@@ -266,9 +266,33 @@ func buildHyperCache(ctx context.Context, cfg envConfig, logger *slog.Logger) (*
 		)
 	}
 
+	// Phase C2: light up scope enforcement on the management port.
+	// /health stays public (k8s liveness probes carry no creds).
+	// Read-or-better is required for the observability surface
+	// (/stats, /config, /dist/*, /cluster/*); admin scope is
+	// required for the cluster-mutating control routes (/evict,
+	// /clear, /trigger-expiration). Closes a long-standing gap
+	// where the mgmt port was fully unauthenticated server-side
+	// while the monitor's proxy carried the only check.
+	//
+	// Closure captures cfg.AuthPolicy by value — Policy is value-
+	// semantic and safe for concurrent use after construction;
+	// see pkg/httpauth/policy.go.
+	policy := cfg.AuthPolicy
+	mgmtReadAuth := func(fiberCtx fiber.Ctx) error {
+		return policy.Verify(fiberCtx, httpauth.ScopeRead)
+	}
+	mgmtAdminAuth := func(fiberCtx fiber.Ctx) error {
+		return policy.Verify(fiberCtx, httpauth.ScopeAdmin)
+	}
+
 	hcCfg.HyperCacheOptions = append(
 		hcCfg.HyperCacheOptions,
-		hypercache.WithManagementHTTP[backend.DistMemory](cfg.MgmtAddr),
+		hypercache.WithManagementHTTP[backend.DistMemory](
+			cfg.MgmtAddr,
+			hypercache.WithMgmtAuth(mgmtReadAuth),
+			hypercache.WithMgmtControlAuth(mgmtAdminAuth),
+		),
 	)
 
 	hc, err := hypercache.New(ctx, hypercache.GetDefaultManager(), hcCfg)
