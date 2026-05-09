@@ -8,6 +8,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`GET /cluster/events` — SSE stream of topology updates.** New
+  Server-Sent Events endpoint on the management HTTP port that
+  pushes `members` (full membership snapshot) and `heartbeat`
+  (counters snapshot) frames to subscribers, replacing the
+  monitor's 2-second poll cadence with a live stream. Connect-time
+  frames carry the current snapshot so a fresh subscriber doesn't
+  wait for the next mutation. The cache wires an in-process
+  broadcaster ([`internal/eventbus`](internal/eventbus/bus.go))
+  that drops events for slow consumers (per-subscriber bounded
+  buffer) so the SWIM heartbeat loop never backpressures on a
+  stuck operator's browser. Membership state changes propagate via
+  the new [`Membership.OnStateChange`](internal/cluster/membership.go)
+  observer hook; heartbeat snapshots tick at 1 Hz aligned with
+  the SWIM interval. Read-scope auth (matches existing
+  `/cluster/*` routes); honors the management server's lifecycle
+  context for graceful drain on `Stop()`.
+
+### Changed
+
+- **Management server `defaultWriteTimeout` 5 s → 0 (no cap).**
+  fasthttp resets WriteTimeout per response; the 5 s default
+  force-closed the new SSE stream at exactly that mark, the
+  consumer saw "other side closed", and the monitor fell back
+  to polling. Lifting the cap is safe for the mgmt port because
+  it's internal-only and JSON handlers complete in milliseconds;
+  idle keep-alive connections are still bounded by the 60 s
+  IdleTimeout. Operators who need a write cap can opt in via
+  [`WithMgmtWriteTimeout`](management_http.go).
+  Regression-pinned by `TestManagementHTTP_ClusterEvents`, which
+  reads frames for 6 s past the historic deadline.
 - **Per-route scope enforcement on the management HTTP port.**
   `WithMgmtControlAuth` is a new option that wraps the cluster-
   mutating control endpoints (`POST /evict`, `POST /clear`,

@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
+	"github.com/hyp3rd/hypercache/internal/eventbus"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
@@ -61,6 +62,13 @@ type DistMemory struct {
 	localNode  *cluster.Node
 	membership *cluster.Membership
 	ring       *cluster.Ring
+	// eventBus broadcasts topology changes (`members`, `heartbeat`)
+	// to in-process subscribers — primarily the management HTTP
+	// server's SSE endpoint. Nil-safe: methods on *eventbus.Bus
+	// panic on nil receiver, so we always construct one in
+	// initMembershipIfNeeded even when the bus has no subscribers
+	// yet (publish to a no-subscriber bus is a no-op).
+	eventBus *eventbus.Bus
 	// transport holds the active DistTransport behind an atomic.Pointer so that
 	// callers (including the hint-replay goroutine) can read it without racing
 	// against SetTransport / WithDistTransport / lazy HTTP server bring-up.
@@ -2297,6 +2305,7 @@ func (dm *DistMemory) ensureShardConfig() {
 func (dm *DistMemory) initMembershipIfNeeded() {
 	if dm.membership == nil {
 		dm.initStandaloneMembership()
+		dm.installEventBusObserver()
 
 		return
 	}
@@ -2311,6 +2320,8 @@ func (dm *DistMemory) initMembershipIfNeeded() {
 	if dm.nodeAddr == "" && dm.localNode != nil {
 		dm.nodeAddr = dm.localNode.Address
 	}
+
+	dm.installEventBusObserver()
 }
 
 // tryStartHTTP starts internal HTTP transport if not provided.
@@ -2396,6 +2407,8 @@ func (dm *DistMemory) startHeartbeatIfEnabled(ctx context.Context) {
 		dm.stopCh = stopCh
 		go dm.heartbeatLoop(ctx, stopCh)
 	}
+
+	dm.startHeartbeatEventPublisher()
 }
 
 // lookupOwners returns ring owners slice for a key (nil if no ring).
