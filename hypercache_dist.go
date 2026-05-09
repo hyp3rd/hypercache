@@ -3,8 +3,27 @@ package hypercache
 import (
 	"context"
 
+	"github.com/hyp3rd/hypercache/internal/eventbus"
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
+
+// EventBus returns the in-process broadcaster the distributed
+// backend uses to publish topology changes (`members`,
+// `heartbeat`). Returns nil when the backend is not DistMemory —
+// the management HTTP server's SSE handler treats nil as
+// "streaming unsupported" and falls back to a 503.
+//
+// The bus is owned by DistMemory and lives until the backend's
+// lifecycle context is cancelled. SSE handlers Subscribe via the
+// request context so they're reaped when either the client
+// disconnects or the cache shuts down.
+func (hyperCache *HyperCache[T]) EventBus() *eventbus.Bus {
+	if dm, ok := any(hyperCache.backend).(*backend.DistMemory); ok {
+		return dm.EventBus()
+	}
+
+	return nil
+}
 
 // DistMetrics returns distributed backend metrics if the underlying backend is DistMemory.
 // Returns nil if unsupported.

@@ -40,6 +40,7 @@ words:
   - assertable
   - autosync
   - backpressure
+  - backpressures
   - baselining
   - benchmarkdist
   - benchmem
@@ -49,6 +50,7 @@ words:
   - bodyclose
   - bufbuild
   - buildx
+  - bursty
   - cacheerrors
   - cachev
   - calledback
@@ -80,6 +82,7 @@ words:
   - Equalf
   - errcheck
   - errp
+  - eventbus
   - ewrap
   - excalidraw
   - excludeonly
@@ -230,6 +233,8 @@ words:
   - unmarshals
   - unpadded
   - unsharded
+  - unsub
+  - unsubbed
   - upserted
   - upserts
   - varnamelen

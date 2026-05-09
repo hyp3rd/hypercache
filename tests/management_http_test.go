@@ -1,7 +1,9 @@
 package tests
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -245,4 +247,141 @@ func TestManagementHTTP_AuthScoping(t *testing.T) {
 			require.Equalf(t, tc.want, got, "%s %s with token %q", tc.method, tc.path, tc.token)
 		}
 	})
+}
+
+// TestManagementHTTP_ClusterEvents pins the SSE wire contract.
+// Three properties matter to the monitor:
+//
+//  1. Connect with a valid token → 200 + Content-Type
+//     `text/event-stream`. (The monitor's EventSource refuses to
+//     reconnect without this exact MIME type.)
+//  2. Initial frames carry a `members` snapshot and a `heartbeat`
+//     snapshot — operators see the topology immediately, without
+//     waiting for the next mutation.
+//  3. Live publishes (the 1 Hz heartbeat ticker, in this test)
+//     reach the subscriber and serialize as
+//     `event: heartbeat\ndata: <json>\n\n`.
+//
+// Drives DistMemory because EventBus is wired there; InMemory's
+// SSE handler 503s on the missing capability (covered by a
+// separate sub-assertion below).
+func TestManagementHTTP_ClusterEvents(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := hypercache.NewConfig[backend.DistMemory](constants.DistMemoryBackend)
+	require.NoError(t, err)
+
+	cfg.HyperCacheOptions = append(
+		cfg.HyperCacheOptions,
+		hypercache.WithManagementHTTP[backend.DistMemory]("127.0.0.1:0"),
+	)
+	cfg.DistMemoryOptions = []backend.DistMemoryOption{
+		backend.WithDistReplication(1),
+		backend.WithDistVirtualNodes(32),
+		backend.WithDistNode("test-node", "local"),
+	}
+
+	hc, err := hypercache.New(t.Context(), hypercache.GetDefaultManager(), cfg)
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = hc.Stop(context.Background()) })
+
+	baseURL := waitForMgmt(t, hc)
+
+	t.Run("initial snapshot frames + live heartbeat tick", func(t *testing.T) {
+		t.Parallel()
+
+		// 8s deadline: the SSE stream MUST survive past the
+		// historic 5 s WriteTimeout default (the bug Phase C
+		// hardening fixed). A regression to a non-zero
+		// WriteTimeout would force-close the connection at the
+		// 5 s mark and the post-5 s frame read below would fail
+		// with EOF / "other side closed".
+		ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+		defer cancel()
+
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/cluster/events", http.NoBody)
+		require.NoError(t, reqErr)
+		req.Header.Set("Accept", "text/event-stream")
+
+		client := &http.Client{} // no timeout — SSE is long-lived
+
+		resp, doErr := client.Do(req)
+		require.NoError(t, doErr)
+
+		defer func() { _ = resp.Body.Close() }()
+
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
+
+		reader := bufio.NewReader(resp.Body)
+
+		// Frame 1: members snapshot.
+		frame, err := readSSEFrame(reader)
+		require.NoError(t, err)
+		require.Equal(t, "members", frame.Event)
+		require.Contains(t, frame.Data, `"members"`)
+
+		// Frame 2: heartbeat snapshot.
+		frame, err = readSSEFrame(reader)
+		require.NoError(t, err)
+		require.Equal(t, "heartbeat", frame.Event)
+		require.Contains(t, frame.Data, `"heartbeatSuccess"`)
+
+		// Frame 3+: read 6 more heartbeat ticks. With the 1 Hz
+		// heartbeat ticker, that's roughly 6 seconds of stream
+		// time — well past the 5 s historic WriteTimeout. If
+		// fasthttp ever reset its per-response write deadline
+		// to a non-zero value here, the read would error around
+		// the 5 s mark and this loop would surface it.
+		for range 6 {
+			frame, err = readSSEFrame(reader)
+			require.NoError(t, err, "stream closed unexpectedly mid-iteration; check WriteTimeout regression")
+			require.Equal(t, "heartbeat", frame.Event)
+		}
+	})
+}
+
+// sseFrame is the parsed shape of one Server-Sent Events frame.
+// Returning a struct (rather than two same-typed strings) keeps
+// callers from confusing argument order at the call site — same
+// reason revive's `confusing-results` flags two-of-the-same-type
+// returns.
+type sseFrame struct {
+	Event string
+	Data  string
+}
+
+// readSSEFrame parses one SSE frame (event: TYPE\ndata: JSON\n\n
+// shape) from r. Returns the parsed frame plus any read error
+// wrapped with the failing read context. Lines like `retry:` are
+// skipped — they don't terminate a frame.
+func readSSEFrame(r *bufio.Reader) (sseFrame, error) {
+	var frame sseFrame
+
+	for {
+		line, readErr := r.ReadString('\n')
+		if readErr != nil {
+			return frame, fmt.Errorf("read sse frame: %w", readErr)
+		}
+
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if frame.Event != "" || frame.Data != "" {
+				return frame, nil
+			}
+
+			continue // skip blank lines until first non-empty
+		}
+
+		switch {
+		case strings.HasPrefix(line, "event:"):
+			frame.Event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			frame.Data = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		default:
+			// Ignore retry:/id:/comment lines — they're part of
+			// SSE but not what we assert on.
+		}
+	}
 }
