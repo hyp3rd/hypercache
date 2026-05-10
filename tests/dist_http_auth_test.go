@@ -9,6 +9,7 @@ import (
 	"time"
 
 	fiber "github.com/gofiber/fiber/v3"
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 	"github.com/hyp3rd/hypercache/pkg/backend"
@@ -19,7 +20,7 @@ const authTestToken = "s3cret-cluster-token"
 
 // errCustomVerifyDenied is returned by the custom verify hook in
 // TestDistHTTPAuth_CustomVerify when the request lacks the expected token.
-var errCustomVerifyDenied = errors.New("custom verify denied")
+var errCustomVerifyDenied = ewrap.New("custom verify denied")
 
 // newAuthDistNode spins up a single DistMemory with HTTP auth enabled.
 // The test waits for /health to respond before returning so subsequent
@@ -275,7 +276,7 @@ func TestDistHTTPAuth_ClientSignsRequests(t *testing.T) {
 // in TestDistHTTPAuth_RejectsClientSignOnlyConfig — a value the test
 // can identify if the hook were ever invoked (it should not be: the
 // constructor must reject before any HTTP traffic).
-var errClientSignInvoked = errors.New("client sign hook should not run")
+var errClientSignInvoked = ewrap.New("client sign hook should not run")
 
 // TestDistHTTPAuth_RejectsClientSignOnlyConfig pins the
 // constructor-time guard that prevents the silent-inbound-bypass shape

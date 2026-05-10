@@ -63,6 +63,20 @@ linters:
     # (access to unexported helpers without re-exporting). Documented choice.
     - testpackage
 
+  exclusions:
+    rules:
+      # Phase C OIDC: makeOIDCServerVerify returns a closure with the
+      # signature `func(fiber.Ctx) (httpauth.Identity, error)` per
+      # the Policy.ServerVerify contract. The closure derives ctx
+      # from `c.Context()` (fiber's request-scoped ctx) — tying JWT
+      # verification to the boot-time discovery context would freeze
+      # cancellation at the wrong scope. contextcheck can't tell the
+      # closure receives ctx via the framework parameter and false-
+      # positives. Targeted to this single file.
+      - path: cmd/hypercache-server/oidc\.go
+        linters:
+          - contextcheck
+
   settings:
     cyclop:
       # The maximal code complexity to report.

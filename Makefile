@@ -37,6 +37,27 @@ stop-dev-cluster:
 	@echo
 	docker compose -f docker-compose.cluster.yml down -v --rmi local --remove-orphans
 
+# OIDC end-to-end example. The full stack — cache cluster +
+# Keycloak + Monitor — is defined and orchestrated from the
+# monitor repo's `examples/oidc/`. This target is a thin
+# passthrough so cache-repo operators can boot the stack
+# without leaving their working tree. The monitor repo must be
+# cloned as a sibling: ../hypercache-monitor.
+start-oidc:
+	@if [ ! -f ../hypercache-monitor/examples/oidc/docker-compose.yml ]; then \
+		echo "expected ../hypercache-monitor/examples/oidc/docker-compose.yml; clone the monitor repo as a sibling"; \
+		exit 1; \
+	fi
+	$(MAKE) -C ../hypercache-monitor start-oidc
+
+stop-oidc:
+	@if [ ! -f ../hypercache-monitor/examples/oidc/docker-compose.yml ]; then exit 0; fi
+	$(MAKE) -C ../hypercache-monitor stop-oidc
+
+clean-oidc:
+	@if [ ! -f ../hypercache-monitor/examples/oidc/docker-compose.yml ]; then exit 0; fi
+	$(MAKE) -C ../hypercache-monitor clean-oidc
+
 # test-cluster brings up the 5-node docker-compose cluster, waits for
 # every node's /healthz to be 200, runs the cross-node smoke test
 # (PUT/GET/DELETE asserted on every node), and tears the stack down —
@@ -235,4 +256,5 @@ help:
 	@echo
 	@echo "For more information, see the project README."
 
-.PHONY: init prepare-toolchain prepare-base-tools update-toolchain test test-race typecheck build ci bench bench-baseline vet update-deps lint sec help
+.PHONY: init prepare-toolchain prepare-base-tools update-toolchain test test-race typecheck build ci bench bench-baseline vet update-deps lint sec help \
+	start-dev-cluster stop-dev-cluster start-oidc stop-oidc clean-oidc

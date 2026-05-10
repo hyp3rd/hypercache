@@ -8,6 +8,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **OIDC verifier on the client API (`Policy.ServerVerify` hook).**
+  When `HYPERCACHE_OIDC_ISSUER` + `HYPERCACHE_OIDC_AUDIENCE` are
+  set, the binary fetches the IdP's
+  `/.well-known/openid-configuration` at boot, builds a
+  go-oidc-backed JWT verifier, and attaches it to
+  [`Policy.ServerVerify`](pkg/httpauth/policy.go). JWTs presented
+  via `Authorization: Bearer <jwt>` are validated for signature
+  and `iss`/`aud`/`exp`/`iat`/`nbf`, then the configured identity
+  claim (`HYPERCACHE_OIDC_IDENTITY_CLAIM`, default `sub`; common
+  override `email`) becomes `Identity.ID` and the configured
+  scope claim (`HYPERCACHE_OIDC_SCOPE_CLAIM`, default `scope` —
+  standard OAuth2 space-separated string; arrays also supported)
+  maps to `Identity.Scopes` (only `read`/`write`/`admin` survive;
+  unknown OIDC scopes are dropped silently). Coexists with the
+  static-bearer flow: a JWT that doesn't match any configured
+  `Tokens` entry falls through `resolveBearer` →
+  `ServerVerify`, so operators can run hybrid deployments
+  (machine integrations on static bearers, humans on OIDC).
+  Fail-fast at boot on an unreachable issuer URL or partial
+  config (one of issuer/audience set without the other). New
+  dep: `github.com/coreos/go-oidc/v3` (justified — JWKS
+  rotation, key id selection, alg validation, claim validation
+  are non-trivial; rolling our own is a CVE-magnet). 10 unit
+  tests in [oidc_test.go](cmd/hypercache-server/oidc_test.go)
+  drive an in-process IdP stub (signs JWTs with a hand-rolled
+  RSA key, serves discovery + JWKS); 4 integration tests in
+  [management_http_test.go](tests/management_http_test.go)
+  verify bearer + OIDC coexistence on the management port.
 - **`GET /cluster/events` — SSE stream of topology updates.** New
   Server-Sent Events endpoint on the management HTTP port that
   pushes `members` (full membership snapshot) and `heartbeat`

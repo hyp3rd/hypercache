@@ -26,11 +26,11 @@ package httpauth
 import (
 	"crypto/subtle"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"slices"
 
 	fiber "github.com/gofiber/fiber/v3"
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
@@ -383,4 +383,4 @@ func tlsConnectionState(c fiber.Ctx) *tls.ConnectionState {
 // this so callers can distinguish "config is wrong" from "filesystem
 // is wrong" (which surfaces as os.PathError) or "secrets backend
 // failed" (caller's concern).
-var ErrInvalidPolicy = errors.New("httpauth: invalid policy")
+var ErrInvalidPolicy = ewrap.New("httpauth: invalid policy")

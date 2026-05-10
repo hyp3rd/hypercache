@@ -49,13 +49,27 @@ func TestDistRebalanceReplicaDiffThrottle(t *testing.T) {
 	nodeA.AddPeer(addrC)
 	nodeB.AddPeer(addrC)
 
-	// Allow several intervals so limit triggers.
-	time.Sleep(900 * time.Millisecond)
+	// Poll until the throttle metric increments rather than rely on a
+	// hard sleep — under -race + shuffled test order the rebalancer's
+	// 80ms-tick loop loses enough scheduling that 900ms of wall-clock
+	// occasionally produces zero ticks. The 5s ceiling gives the
+	// metric time to surface even on a contended runner; once it
+	// surfaces we exit immediately, so the happy path stays fast.
+	var (
+		m, m2    backend.DistMetrics
+		deadline = time.Now().Add(5 * time.Second)
+	)
 
-	m := nodeA.Metrics()
-	m2 := nodeB.Metrics()
+	for time.Now().Before(deadline) {
+		m = nodeA.Metrics()
+		m2 = nodeB.Metrics()
 
-	if (m.RebalanceReplicaDiffThrottle + m2.RebalanceReplicaDiffThrottle) == 0 {
-		t.Fatalf("expected throttle metric to increment; A:%+v B:%+v", m, m2)
+		if (m.RebalanceReplicaDiffThrottle + m2.RebalanceReplicaDiffThrottle) > 0 {
+			return
+		}
+
+		time.Sleep(50 * time.Millisecond)
 	}
+
+	t.Fatalf("expected throttle metric to increment within 5s; A:%+v B:%+v", m, m2)
 }

@@ -29,10 +29,7 @@ It ships with a default [histogram stats collector](./stats/stats.go) and severa
 
 - Thread-safe & lock‑optimized (sharded map + worker pool)
 - High-performance (low allocations on hot paths, pooled items, serializer‑aware sizing)
-- Multiple backends (extensible):
-            1. [In-memory](./pkg/backend/inmemory.go)
-            1. [Redis](./pkg/backend/redis.go)
-            1. [Redis Cluster](./pkg/backend/redis_cluster.go)
+- Multiple backends (extensible): 1. [In-memory](./pkg/backend/inmemory.go) 1. [Redis](./pkg/backend/redis.go) 1. [Redis Cluster](./pkg/backend/redis_cluster.go)
 - Item expiration & proactive expiration triggering (debounced/coalesced)
 - Background or proactive (interval = 0) eviction using pluggable algorithms
 - Manual, non-blocking eviction triggering (`TriggerEviction()`)
@@ -178,32 +175,32 @@ if err != nil {
 
 ### Advanced options quick reference
 
-| Option | Purpose |
-| -------- | --------- |
-| `WithEvictionInterval` | Periodic eviction loop; set to `0` for proactive per-write eviction. |
-| `WithExpirationInterval` | Periodic scan for expired items. |
-| `WithExpirationTriggerBuffer` | Buffer size for coalesced expiration trigger channel. |
-| `WithExpirationTriggerDebounce` | Drop rapid-fire triggers within a window. |
-| `WithEvictionAlgorithm` | Select eviction algorithm (lru, lfu, clock, cawolfu, arc*). |
-| `WithEvictionShardCount` | Number of eviction-algorithm shards (default 32; 1 disables sharding). |
-| `WithMaxEvictionCount` | Cap number of items evicted per cycle. |
-| `WithMaxCacheSize` | Max cumulative serialized item size (bytes). |
-| `WithStatsCollector` | Choose stats collector implementation. |
-| `WithManagementHTTP` | Start optional management HTTP server. |
-| `WithDistReplication` | (DistMemory) Set replication factor (owners per key). |
-| `WithDistVirtualNodes` | (DistMemory) Virtual nodes per physical node for consistent hashing. |
-| `WithDistMerkleChunkSize` | (DistMemory) Keys per Merkle leaf chunk (power-of-two recommended). |
-| `WithDistMerkleAutoSync` | (DistMemory) Interval for background Merkle sync (<=0 disables). |
-| `WithDistMerkleAutoSyncPeers` | (DistMemory) Limit peers synced per auto-sync tick (0=all). |
-| `WithDistListKeysCap` | (DistMemory) Cap number of keys fetched via fallback enumeration. |
-| `WithDistNode` | (DistMemory) Explicit node identity (id/address). |
-| `WithDistSeeds` | (DistMemory) Static seed addresses to pre-populate membership. |
-| `WithDistTombstoneTTL` | (DistMemory) Retain delete tombstones for this duration before compaction (<=0 = infinite). |
-| `WithDistTombstoneSweep` | (DistMemory) Interval to run tombstone compaction (<=0 disables). |
-| `WithDistHTTPLimits` | (DistMemory) Body / response / timeout / concurrency caps for the dist HTTP server + auto-client. |
-| `WithDistHTTPAuth` | (DistMemory) Bearer-token auth (`Token`) plus optional `ServerVerify` / `ClientSign` hooks. |
+| Option                          | Purpose                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `WithEvictionInterval`          | Periodic eviction loop; set to `0` for proactive per-write eviction.                              |
+| `WithExpirationInterval`        | Periodic scan for expired items.                                                                  |
+| `WithExpirationTriggerBuffer`   | Buffer size for coalesced expiration trigger channel.                                             |
+| `WithExpirationTriggerDebounce` | Drop rapid-fire triggers within a window.                                                         |
+| `WithEvictionAlgorithm`         | Select eviction algorithm (lru, lfu, clock, cawolfu, arc\*).                                      |
+| `WithEvictionShardCount`        | Number of eviction-algorithm shards (default 32; 1 disables sharding).                            |
+| `WithMaxEvictionCount`          | Cap number of items evicted per cycle.                                                            |
+| `WithMaxCacheSize`              | Max cumulative serialized item size (bytes).                                                      |
+| `WithStatsCollector`            | Choose stats collector implementation.                                                            |
+| `WithManagementHTTP`            | Start optional management HTTP server.                                                            |
+| `WithDistReplication`           | (DistMemory) Set replication factor (owners per key).                                             |
+| `WithDistVirtualNodes`          | (DistMemory) Virtual nodes per physical node for consistent hashing.                              |
+| `WithDistMerkleChunkSize`       | (DistMemory) Keys per Merkle leaf chunk (power-of-two recommended).                               |
+| `WithDistMerkleAutoSync`        | (DistMemory) Interval for background Merkle sync (<=0 disables).                                  |
+| `WithDistMerkleAutoSyncPeers`   | (DistMemory) Limit peers synced per auto-sync tick (0=all).                                       |
+| `WithDistListKeysCap`           | (DistMemory) Cap number of keys fetched via fallback enumeration.                                 |
+| `WithDistNode`                  | (DistMemory) Explicit node identity (id/address).                                                 |
+| `WithDistSeeds`                 | (DistMemory) Static seed addresses to pre-populate membership.                                    |
+| `WithDistTombstoneTTL`          | (DistMemory) Retain delete tombstones for this duration before compaction (<=0 = infinite).       |
+| `WithDistTombstoneSweep`        | (DistMemory) Interval to run tombstone compaction (<=0 disables).                                 |
+| `WithDistHTTPLimits`            | (DistMemory) Body / response / timeout / concurrency caps for the dist HTTP server + auto-client. |
+| `WithDistHTTPAuth`              | (DistMemory) Bearer-token auth (`Token`) plus optional `ServerVerify` / `ClientSign` hooks.       |
 
-*ARC is experimental (not registered by default).
+\*ARC is experimental (not registered by default).
 
 ### Type-safe access (`Typed[V]`)
 
@@ -280,7 +277,10 @@ limits := backend.DistHTTPLimits{
 
 // 2) Auth: a shared bearer token covers most clusters; ServerVerify /
 //    ClientSign hooks are escape hatches for JWT, mTLS-derived
-//    identity, HMAC, etc.
+//    identity, HMAC, etc. The hypercache-server binary uses the
+//    ServerVerify hook to plug in an OIDC verifier
+//    (cmd/hypercache-server/oidc.go) when HYPERCACHE_OIDC_ISSUER is
+//    set; static-bearer logins coexist with IdP-issued JWTs.
 auth := backend.DistHTTPAuth{Token: "shared-cluster-secret"}
 
 bi, _ := backend.NewDistMemory(ctx,
@@ -316,44 +316,44 @@ Replica removal cleanup (actively dropping data from nodes no longer replicas) i
 
 Metrics (via management or `Metrics()`):
 
-| Metric | Description |
-| -------- | ------------- |
-| RebalancedKeys | Count of all rebalance-related migrations (primary changes + replica diff replications). |
-| RebalancedPrimary | Count of primary ownership change migrations (subset of RebalancedKeys). |
-| RebalanceBatches | Number of migration batches executed. |
-| RebalanceThrottle | Times migration concurrency limiter saturated. |
-| RebalanceLastNanos | Duration (ns) of last rebalance scan. |
-| RebalancedReplicaDiff | Count of replica-only diff replications (new replicas seeded). |
-| RebalanceReplicaDiffThrottle | Times replica-only diff processing hit per-tick cap. |
+| Metric                       | Description                                                                              |
+| ---------------------------- | ---------------------------------------------------------------------------------------- |
+| RebalancedKeys               | Count of all rebalance-related migrations (primary changes + replica diff replications). |
+| RebalancedPrimary            | Count of primary ownership change migrations (subset of RebalancedKeys).                 |
+| RebalanceBatches             | Number of migration batches executed.                                                    |
+| RebalanceThrottle            | Times migration concurrency limiter saturated.                                           |
+| RebalanceLastNanos           | Duration (ns) of last rebalance scan.                                                    |
+| RebalancedReplicaDiff        | Count of replica-only diff replications (new replicas seeded).                           |
+| RebalanceReplicaDiffThrottle | Times replica-only diff processing hit per-tick cap.                                     |
 
 Test helpers `AddPeer` and `RemovePeer` simulate join / leave events that trigger redistribution in integration tests (`dist_rebalance_*.go`).
 
 ### Roadmap / PRD Progress Snapshot
 
-| Area | Status |
-| ------ | -------- |
-| Core in-process sharding | Done |
-| Replication fan-out | Done |
-| Read-repair | Done |
-| Quorum consistency (R/W) | Done |
-| Hinted handoff (TTL, replay, caps) | Done |
-| Tombstones (TTL + compaction) | Done |
-| Merkle anti-entropy (pull) | Done |
-| Merkle phase metrics | Done |
-| Auto Merkle background sync | Done |
+| Area                                                               | Status                                                    |
+| ------------------------------------------------------------------ | --------------------------------------------------------- |
+| Core in-process sharding                                           | Done                                                      |
+| Replication fan-out                                                | Done                                                      |
+| Read-repair                                                        | Done                                                      |
+| Quorum consistency (R/W)                                           | Done                                                      |
+| Hinted handoff (TTL, replay, caps)                                 | Done                                                      |
+| Tombstones (TTL + compaction)                                      | Done                                                      |
+| Merkle anti-entropy (pull)                                         | Done                                                      |
+| Merkle phase metrics                                               | Done                                                      |
+| Auto Merkle background sync                                        | Done                                                      |
 | Rebalancing (primary/lost ownership + replica-add diff + shedding) | Partial (shedding grace delete added; future retry/queue) |
-| Failure detection (heartbeat) | Partial (basic) |
-| Lightweight gossip snapshot | Partial |
-| Replica-only migration diff | Planned |
-| Adaptive Merkle scheduling | Planned |
-| Advanced versioning (HLC/vector) | Planned |
-| Client SDK (direct routing) | Planned |
-| Tracing spans | Planned |
-| Security (TLS/auth) | Done (since v0.5.0; see "Transport hardening") |
-| Compression | Planned |
-| Persistence | Out of scope (current phase) |
-| Chaos / fault injection | Planned |
-| Benchmarks & tests | Ongoing (broad coverage) |
+| Failure detection (heartbeat)                                      | Partial (basic)                                           |
+| Lightweight gossip snapshot                                        | Partial                                                   |
+| Replica-only migration diff                                        | Planned                                                   |
+| Adaptive Merkle scheduling                                         | Planned                                                   |
+| Advanced versioning (HLC/vector)                                   | Planned                                                   |
+| Client SDK (direct routing)                                        | Planned                                                   |
+| Tracing spans                                                      | Planned                                                   |
+| Security (TLS/auth)                                                | Done (since v0.5.0; see "Transport hardening")            |
+| Compression                                                        | Planned                                                   |
+| Persistence                                                        | Out of scope (current phase)                              |
+| Chaos / fault injection                                            | Planned                                                   |
+| Benchmarks & tests                                                 | Ongoing (broad coverage)                                  |
 
 Example minimal setup:
 
@@ -433,4 +433,4 @@ I'm a surfer, and a software architect with 15 years of experience designing hig
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/francesco-cosentino/)
 
 [build-link]: https://github.com/hyp3rd/hypercache/actions/workflows/go.yml
-[codeql-link]:https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml
+[codeql-link]: https://github.com/hyp3rd/hypercache/actions/workflows/codeql.yml

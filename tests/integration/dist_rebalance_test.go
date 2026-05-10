@@ -2,7 +2,6 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,13 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyp3rd/ewrap"
+
 	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // errUnexpectedStatus is the sentinel returned when the dist node health
 // endpoint reports a non-OK status during the readiness poll.
-var errUnexpectedStatus = errors.New("unexpected dist node health status")
+var errUnexpectedStatus = ewrap.New("unexpected dist node health status")
 
 // rebalanceTestOpts is the shared option set used by TestDistRebalanceJoin
 // across all three nodes — extracted so each `mustDistNode` call site

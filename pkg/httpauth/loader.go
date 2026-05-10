@@ -1,10 +1,10 @@
 package httpauth
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
+	"github.com/hyp3rd/ewrap"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,8 +27,8 @@ const (
 // (file path, field name) via Error(). Token bodies are NEVER
 // included in any wrap — see fmt.Errorf sites below.
 var (
-	errEmptyScopes  = errors.New("scopes is empty; at least one of read/write/admin required")
-	errUnknownScope = errors.New("unknown scope (valid: read, write, admin)")
+	errEmptyScopes  = ewrap.New("scopes is empty; at least one of read/write/admin required")
+	errUnknownScope = ewrap.New("unknown scope (valid: read, write, admin)")
 )
 
 // fileSchema is the YAML wire shape of HYPERCACHE_AUTH_CONFIG.
