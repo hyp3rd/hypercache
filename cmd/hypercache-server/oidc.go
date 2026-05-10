@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	fiber "github.com/gofiber/fiber/v3"
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/pkg/httpauth"
 )
@@ -35,16 +35,16 @@ var (
 	// treats any error from ServerVerify as "this verifier
 	// declined" and continues to the AllowAnonymous fallback (or
 	// 401 if none configured).
-	errOIDCMissingBearer = errors.New("oidc: no bearer token in request")
+	errOIDCMissingBearer = ewrap.New("oidc: no bearer token in request")
 	// errOIDCIdentityMissing — the configured identity claim is
 	// absent from the JWT.
-	errOIDCIdentityMissing = errors.New("oidc: identity claim missing from JWT")
+	errOIDCIdentityMissing = ewrap.New("oidc: identity claim missing from JWT")
 	// errOIDCIdentityWrongType — the identity claim is present
 	// but not a string.
-	errOIDCIdentityWrongType = errors.New("oidc: identity claim is wrong type")
+	errOIDCIdentityWrongType = ewrap.New("oidc: identity claim is wrong type")
 	// errOIDCIdentityEmpty — the identity claim is a string but
 	// empty; httpauth.Identity.ID would be useless.
-	errOIDCIdentityEmpty = errors.New("oidc: identity claim is empty")
+	errOIDCIdentityEmpty = ewrap.New("oidc: identity claim is empty")
 )
 
 // buildOIDCVerifier constructs an OIDC IdToken verifier and returns

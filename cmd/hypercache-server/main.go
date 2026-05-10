@@ -35,6 +35,7 @@ import (
 
 	"github.com/goccy/go-json"
 	fiber "github.com/gofiber/fiber/v3"
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/internal/constants"
@@ -168,8 +169,8 @@ func loadConfig() (envConfig, error) {
 // happy and let callers `errors.Is` against the specific
 // misconfiguration.
 var (
-	errOIDCMissingAudience = errors.New("HYPERCACHE_OIDC_ISSUER set without HYPERCACHE_OIDC_AUDIENCE")
-	errOIDCMissingIssuer   = errors.New("HYPERCACHE_OIDC_AUDIENCE set without HYPERCACHE_OIDC_ISSUER")
+	errOIDCMissingAudience = ewrap.New("HYPERCACHE_OIDC_ISSUER set without HYPERCACHE_OIDC_AUDIENCE")
+	errOIDCMissingIssuer   = ewrap.New("HYPERCACHE_OIDC_AUDIENCE set without HYPERCACHE_OIDC_ISSUER")
 )
 
 // validateOIDCConfig returns nil when OIDC is either fully
@@ -416,8 +417,8 @@ const (
 // via fmt.Errorf at construction time so callers see the field
 // name + path; matched via errors.Is for control-flow.
 var (
-	errAPITLSPartial   = errors.New("HYPERCACHE_API_TLS_CERT and HYPERCACHE_API_TLS_KEY must both be set")
-	errAPITLSNoPEMInCA = errors.New("HYPERCACHE_API_TLS_CLIENT_CA: no PEM certificates parsed from file")
+	errAPITLSPartial   = ewrap.New("HYPERCACHE_API_TLS_CERT and HYPERCACHE_API_TLS_KEY must both be set")
+	errAPITLSNoPEMInCA = ewrap.New("HYPERCACHE_API_TLS_CLIENT_CA: no PEM certificates parsed from file")
 )
 
 // registerClientRoutes wires every client-API route onto the

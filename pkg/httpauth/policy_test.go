@@ -1,19 +1,19 @@
 package httpauth
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	fiber "github.com/gofiber/fiber/v3"
+	"github.com/hyp3rd/ewrap"
 )
 
 // errVerifyRejected is the canonical "ServerVerify said no" sentinel
 // the policy_test stubs return. Defining it as a static error
 // dodges err113 without reaching for fmt.Errorf in test bodies.
-var errVerifyRejected = errors.New("rejected")
+var errVerifyRejected = ewrap.New("rejected")
 
 // newTestApp wires a single auth-protected route and returns the
 // fiber app for in-memory request driving. The route returns 200
