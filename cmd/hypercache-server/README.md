@@ -235,6 +235,24 @@ curl -H 'Authorization: Bearer dev-token' \
      'http://localhost:9082/cluster/members'
 ```
 
+## Local OIDC stack (Keycloak + cache + monitor)
+
+For a working end-to-end OIDC integration — same 5-node cluster
+above, plus a pre-seeded Keycloak realm and the
+[hypercache-monitor](https://github.com/hyp3rd/hypercache-monitor)
+UI — clone the monitor repo as a sibling and run:
+
+```sh
+make start-oidc      # from this repo; thin passthrough to the monitor
+make stop-oidc
+make clean-oidc
+```
+
+The stack itself lives in the monitor at `examples/oidc/` so the
+cache cluster definition stays canonical here. See that example's
+README for the full walkthrough including the one-time
+`/etc/hosts` entry the OIDC redirect requires.
+
 ## Operational notes
 
 See [`docs/operations.md`](../../docs/operations.md) for the full
