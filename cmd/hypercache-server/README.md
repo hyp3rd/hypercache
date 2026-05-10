@@ -22,6 +22,8 @@ Override any of them via `HYPERCACHE_API_ADDR`, `HYPERCACHE_MGMT_ADDR`,
 All configuration is via environment variables — 12-factor style, so
 the same binary runs unchanged in Docker, k8s, and bare-metal.
 
+### Cluster + transport
+
 | Variable | Default | Description |
 |---|---|---|
 | `HYPERCACHE_NODE_ID` | `<hostname>` | Stable identifier for this node within the cluster |
@@ -31,7 +33,6 @@ the same binary runs unchanged in Docker, k8s, and bare-metal.
 | `HYPERCACHE_SEEDS` | _(empty)_ | Comma-separated peer addresses to bootstrap membership |
 | `HYPERCACHE_REPLICATION` | `3` | Replicas per key |
 | `HYPERCACHE_CAPACITY` | `100000` | Total cache capacity (items) |
-| `HYPERCACHE_AUTH_TOKEN` | _(empty)_ | Bearer token applied to client API + dist HTTP + management HTTP |
 | `HYPERCACHE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `HYPERCACHE_HEARTBEAT` | `1s` | Heartbeat probe interval |
 | `HYPERCACHE_INDIRECT_PROBE_K` | `2` | SWIM indirect-probe relay count (0 disables) |
@@ -39,11 +40,59 @@ the same binary runs unchanged in Docker, k8s, and bare-metal.
 | `HYPERCACHE_HINT_REPLAY` | `200ms` | Hint replay loop tick |
 | `HYPERCACHE_REBALANCE_INTERVAL` | `250ms` | Ownership-rebalance scan interval |
 
+### TLS / mTLS (client API)
+
+| Variable | Default | Description |
+|---|---|---|
+| `HYPERCACHE_API_TLS_CERT` | _(empty)_ | PEM cert for the client API listener. Both cert + key must be set to enable HTTPS. |
+| `HYPERCACHE_API_TLS_KEY` | _(empty)_ | PEM key. |
+| `HYPERCACHE_API_TLS_CLIENT_CA` | _(empty)_ | PEM CA bundle. When set, the listener requires + verifies client certs (mTLS); the peer CN surfaces as the resolved identity. |
+
+### Auth — bearer / scopes / OIDC
+
+The cache supports three authentication shapes layered through
+`pkg/httpauth.Policy`'s resolve chain — bearer match → mTLS peer cert →
+`ServerVerify` hook (OIDC). The first match wins; on no match the
+listener returns 401.
+
+| Variable | Default | Description |
+|---|---|---|
+| `HYPERCACHE_AUTH_TOKEN` | _(empty)_ | Single shared bearer applied to every listener. Mutually exclusive with `HYPERCACHE_AUTH_CONFIG` — setting both fails fast at boot. |
+| `HYPERCACHE_AUTH_CONFIG` | _(empty)_ | Path to a JSON file with the multi-token + scope policy. Maps each token to `{ id, scopes: ["read","write","admin"] }`. Fail-closed on missing or malformed file (no silent fallback to open mode). |
+| `HYPERCACHE_OIDC_ISSUER` | _(empty)_ | OIDC IdP issuer URL. The verifier discovers JWKS via `<issuer>/.well-known/openid-configuration`. Pairs with `HYPERCACHE_OIDC_AUDIENCE` — both required when enabled. |
+| `HYPERCACHE_OIDC_AUDIENCE` | _(empty)_ | Expected `aud` claim on incoming JWTs. Must match the IdP-registered client_id. |
+| `HYPERCACHE_OIDC_IDENTITY_CLAIM` | `sub` | Claim mapped to the resolved identity. Common alternatives: `email`, `preferred_username`. |
+| `HYPERCACHE_OIDC_SCOPE_CLAIM` | `scope` | Claim mapped to scopes. Standard OAuth2 is a space-separated string at `scope`; custom IdPs may expose an array claim like `cache_scopes`. Unknown scope values are dropped silently — only the three canonical scopes (`read` / `write` / `admin`) survive. |
+
+When `HYPERCACHE_OIDC_ISSUER` is set, the binary attaches an OIDC
+verifier to the listener's `ServerVerify` hook. JWTs that don't match
+the static-bearer table fall through to the verifier; the resolved
+identity + scopes drive every per-route policy gate (see
+[docs/operations.md](../../docs/operations.md) for the full per-route
+matrix).
+
+Per-cluster IdP federation is **not supported** — one IdP across all
+clusters by design. Operators with multiple IdPs need one HyperCache
+deployment per IdP. (Per-cluster federation is a documented v2
+follow-up — see the monitor's CHANGELOG.)
+
 ## Client API
 
-Bearer auth is applied to all routes when `HYPERCACHE_AUTH_TOKEN` is
-set; without a token the API is open. Add an
-`Authorization: Bearer TOKEN` header to every request when auth is on.
+Auth applies whenever any of `HYPERCACHE_AUTH_TOKEN`,
+`HYPERCACHE_AUTH_CONFIG`, or `HYPERCACHE_OIDC_ISSUER` is set; with none
+of them set the API is open. Add an `Authorization: Bearer TOKEN`
+header to every request — the bearer can be a static token entry, an
+operator-issued multi-token entry, or an IdP-issued JWT, and the
+listener picks the right resolver via the `pkg/httpauth.Policy` chain.
+
+`GET /v1/me` returns the resolved identity and granted scopes for the
+presented bearer — useful for cluster pickers and login probes:
+
+```sh
+curl -H 'Authorization: Bearer dev-token' \
+     'http://localhost:8080/v1/me'
+# { "id": "ops-rw", "scopes": ["read", "write"] }
+```
 
 ```sh
 # Set a key (raw bytes, optional ttl).
