@@ -2,6 +2,7 @@ package hypercache
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/hyp3rd/sectools/pkg/converters"
@@ -61,6 +62,13 @@ func (hyperCache *HyperCache[T]) startEvictionRoutine(ctx context.Context) {
 		return
 	}
 
+	hyperCache.logger.Info(
+		"eviction loop starting",
+		slog.Duration("interval", hyperCache.evictionInterval),
+		slog.Int("max_per_tick", int(hyperCache.maxEvictionCount)),
+		slog.String("algorithm", hyperCache.evictionAlgorithmName),
+	)
+
 	tick := time.NewTicker(hyperCache.evictionInterval)
 
 	go func() {
@@ -70,11 +78,13 @@ func (hyperCache *HyperCache[T]) startEvictionRoutine(ctx context.Context) {
 				hyperCache.evictionLoop(ctx)
 			case <-ctx.Done():
 				tick.Stop()
+				hyperCache.logger.Info("eviction loop stopped", slog.String("reason", "context_canceled"))
 
 				return
 
 			case <-hyperCache.stop:
 				tick.Stop()
+				hyperCache.logger.Info("eviction loop stopped", slog.String("reason", "stop_signal"))
 
 				return
 			}
@@ -89,6 +99,9 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 	// Enqueue the eviction loop in the worker pool to avoid blocking the main goroutine if the eviction loop is slow
 	hyperCache.workerPool.Enqueue(func() error {
 		hyperCache.StatsCollector.Incr("eviction_loop_count", 1)
+
+		start := time.Now()
+
 		defer hyperCache.StatsCollector.Timing("eviction_loop_duration", time.Now().UnixNano())
 
 		var evictedCount uint
@@ -133,8 +146,33 @@ func (hyperCache *HyperCache[T]) evictionLoop(ctx context.Context) {
 
 		hyperCache.StatsCollector.Gauge("evicted_item_count", evictedCount64)
 
+		hyperCache.logEvictionTick(evictedCount, itemCount, time.Since(start))
+
 		return nil
 	})
+}
+
+// logEvictionTick emits a single-line tick log so operators can grep
+// for `eviction tick`. Info when items were evicted, Debug for idle
+// ticks — the metric counters cover the idle case so we don't drown
+// logs in noise.
+func (hyperCache *HyperCache[T]) logEvictionTick(evicted uint, remaining int64, elapsed time.Duration) {
+	if evicted > 0 {
+		hyperCache.logger.Info(
+			"eviction tick",
+			slog.Uint64("evicted", uint64(evicted)),
+			slog.Int64("items_remaining", remaining),
+			slog.Duration("elapsed", elapsed),
+		)
+
+		return
+	}
+
+	hyperCache.logger.Debug(
+		"eviction tick (idle)",
+		slog.Int64("items", remaining),
+		slog.Duration("elapsed", elapsed),
+	)
 }
 
 // evictItem is a helper function that removes an item from the cache and returns the key of the evicted item.
@@ -177,6 +215,11 @@ func (hyperCache *HyperCache[T]) TriggerEviction(_ context.Context) {
 
 	select {
 	case hyperCache.evictCh <- true:
+		hyperCache.logger.Info("eviction triggered", slog.String("source", "manual"))
 	default:
+		// Trigger channel full; previous trigger already in-flight.
+		// Log at debug — the coalesced trigger is intentional, not
+		// an error worth waking the operator over.
+		hyperCache.logger.Debug("eviction trigger coalesced (already pending)")
 	}
 }

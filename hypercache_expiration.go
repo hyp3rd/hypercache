@@ -2,6 +2,7 @@ package hypercache
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/hyp3rd/hypercache/internal/constants"
@@ -11,6 +12,12 @@ import (
 
 // startExpirationRoutine launches the expiration loop and listens to manual triggers and stop signals.
 func (hyperCache *HyperCache[T]) startExpirationRoutine(ctx context.Context) {
+	hyperCache.logger.Info(
+		"expiration loop starting",
+		slog.Duration("interval", hyperCache.expirationInterval),
+		slog.Duration("debounce", hyperCache.expirationDebounceInterval),
+	)
+
 	go func() {
 		var tick *time.Ticker
 
@@ -61,12 +68,16 @@ func (hyperCache *HyperCache[T]) handleExpirationSelect(ctx context.Context, tic
 			tick.Stop()
 		}
 
+		hyperCache.logger.Info("expiration loop stopped", slog.String("reason", "context_canceled"))
+
 		return true
 
 	case <-hyperCache.stop:
 		if tick != nil {
 			tick.Stop()
 		}
+
+		hyperCache.logger.Info("expiration loop stopped", slog.String("reason", "stop_signal"))
 
 		return true
 	}
@@ -107,6 +118,9 @@ func (hyperCache *HyperCache[T]) execTriggerExpiration() {
 func (hyperCache *HyperCache[T]) expirationLoop(ctx context.Context) {
 	hyperCache.workerPool.Enqueue(func() error {
 		hyperCache.StatsCollector.Incr("expiration_loop_count", 1)
+
+		start := time.Now()
+
 		defer hyperCache.StatsCollector.Timing("expiration_loop_duration", time.Now().UnixNano())
 
 		var (
@@ -138,8 +152,27 @@ func (hyperCache *HyperCache[T]) expirationLoop(ctx context.Context) {
 			hyperCache.StatsCollector.Incr("item_expired_count", 1)
 		}
 
-		hyperCache.StatsCollector.Gauge("item_count", int64(hyperCache.backend.Count(ctx)))
+		itemCount := int64(hyperCache.backend.Count(ctx))
+		hyperCache.StatsCollector.Gauge("item_count", itemCount)
 		hyperCache.StatsCollector.Gauge("expired_item_count", expiredCount)
+
+		// Mirror the eviction-tick shape: Info only when there's
+		// actual work, Debug for idle ticks so background noise
+		// doesn't drown out the events operators care about.
+		if expiredCount > 0 {
+			hyperCache.logger.Info(
+				"expiration tick",
+				slog.Int64("expired", expiredCount),
+				slog.Int64("items_remaining", itemCount),
+				slog.Duration("elapsed", time.Since(start)),
+			)
+		} else {
+			hyperCache.logger.Debug(
+				"expiration tick (idle)",
+				slog.Int64("items", itemCount),
+				slog.Duration("elapsed", time.Since(start)),
+			)
+		}
 
 		return nil
 	})

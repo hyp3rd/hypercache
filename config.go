@@ -12,6 +12,7 @@
 package hypercache
 
 import (
+	"log/slog"
 	"strings"
 	"time"
 
@@ -161,6 +162,32 @@ func WithExpirationInterval[T backend.IBackendConstrain](expirationInterval time
 func WithEvictionInterval[T backend.IBackendConstrain](evictionInterval time.Duration) Option[T] {
 	return func(cache *HyperCache[T]) {
 		cache.evictionInterval = evictionInterval
+	}
+}
+
+// WithLogger sets the structured logger used by HyperCache for background-
+// loop and lifecycle events: eviction-loop trigger, expiration-loop trigger,
+// management HTTP server startup, and (when paired with a DistMemory
+// backend) the cluster-shape summary at boot.
+//
+// Defaults to a discard handler so library-mode embedded uses stay silent.
+// The hypercache-server binary wires its own slog.Logger here so operators
+// see structured JSON for every background task without needing the OTel
+// metrics pipeline. Pass nil to reset to the default discard handler.
+//
+// Note: the DistMemory backend has its own WithDistLogger option for
+// distributed-transport events (heartbeat, hint replay, rebalance). The
+// two are intentionally separate so an embedded user can silence one
+// surface without affecting the other.
+func WithLogger[T backend.IBackendConstrain](logger *slog.Logger) Option[T] {
+	return func(cache *HyperCache[T]) {
+		if logger == nil {
+			cache.logger = slog.New(slog.DiscardHandler)
+
+			return
+		}
+
+		cache.logger = logger
 	}
 }
 

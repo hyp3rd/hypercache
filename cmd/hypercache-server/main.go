@@ -377,6 +377,10 @@ func buildHyperCache(ctx context.Context, cfg envConfig, logger *slog.Logger) (*
 			hypercache.WithMgmtAuth(mgmtReadAuth),
 			hypercache.WithMgmtControlAuth(mgmtAdminAuth),
 		),
+		// Surfaces eviction/expiration loop start, per-tick activity,
+		// and the cluster-join startup summary in the binary's JSON
+		// log stream. Without this the HyperCache wrapper runs silent.
+		hypercache.WithLogger[backend.DistMemory](logger),
 	)
 
 	hc, err := hypercache.New(ctx, hypercache.GetDefaultManager(), hcCfg)
