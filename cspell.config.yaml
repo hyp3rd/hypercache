@@ -89,6 +89,7 @@ words:
   - elif
   - Equalf
   - errcheck
+  - errchkjson
   - errp
   - eventbus
   - ewrap
@@ -140,6 +141,7 @@ words:
   - hreq
   - htpasswd
   - httpauth
+  - httptest
   - HTTPTLS
   - hypercache
   - Hyperd
@@ -165,6 +167,7 @@ words:
   - logrus
   - longbridgeapp
   - mailtos
+  - mathrand
   - maxmemory
   - memprofile
   - Merkle
@@ -173,6 +176,7 @@ words:
   - mfinal
   - Mgmt
   - microbenchmark
+  - misrouted
   - mkdocs
   - mrand
   - mset
@@ -220,8 +224,8 @@ words:
   - SFCKGPQ
   - shamaton
   - shellcheck
-  - skeys
   - singleflight
+  - skeys
   - SLRU
   - softprops
   - statefulset
@@ -253,6 +257,7 @@ words:
   - unmarshals
   - unpadded
   - unparam
+  - unparseable
   - unsharded
   - unsub
   - unsubbed
