@@ -146,6 +146,14 @@ type DistMemory struct {
 	lastAutoSyncDuration atomic.Int64 // nanoseconds of last full loop
 	lastAutoSyncError    atomic.Value // error string or nil
 
+	// adaptive backoff: when enabled (autoSyncMaxBackoffFactor > 1), the
+	// auto-sync loop doubles its sleep after each tick that found zero
+	// divergence across all peers, capped at autoSyncMaxBackoffFactor.
+	// Any tick that pulls keys resets the factor to 1 immediately.
+	autoSyncMaxBackoffFactor int          // 0/1 = disabled
+	autoSyncBackoffFactor    atomic.Int64 // current multiplier; >=1 when adaptive enabled
+	autoSyncCleanTicks       atomic.Int64 // cumulative clean ticks (whole-cycle, not per-peer)
+
 	// tombstone version source when no prior item exists (monotonic per process)
 	tombVersionCounter atomic.Uint64
 
@@ -358,6 +366,29 @@ func WithDistMerkleAutoSync(interval time.Duration) DistMemoryOption {
 	}
 }
 
+// WithDistMerkleAdaptiveBackoff enables adaptive scheduling for the Merkle
+// anti-entropy loop. When maxFactor > 1, the loop doubles its sleep
+// interval (1×, 2×, 4×, 8×, …) after each tick that found zero divergence
+// across every peer, capped at maxFactor. Any tick with at least one
+// dirty peer resets the factor to 1 on the next sleep — recovery is
+// always immediate, never lazy.
+//
+// maxFactor <= 1 disables backoff (the default): the loop wakes at every
+// `WithDistMerkleAutoSync` interval regardless of recent divergence.
+//
+// The current factor is exposed as `dist.auto_sync.backoff_factor` and
+// the cumulative count of clean ticks as `dist.auto_sync.clean_ticks`.
+// Each factor change is logged once at Info; no per-tick spam.
+func WithDistMerkleAdaptiveBackoff(maxFactor int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if maxFactor < 1 {
+			maxFactor = 0
+		}
+
+		dm.autoSyncMaxBackoffFactor = maxFactor
+	}
+}
+
 // WithDistMerkleAutoSyncPeers limits number of peers synced per interval (0 or <0 = all).
 func WithDistMerkleAutoSyncPeers(n int) DistMemoryOption {
 	return func(dm *DistMemory) {
@@ -513,54 +544,14 @@ func equalBytes(a, b []byte) bool { // tiny helper
 }
 
 // SyncWith performs Merkle anti-entropy against a remote node (pull newer versions for differing chunks).
+//
+// Returns nil even when the local and remote trees agree (a "clean" sync).
+// Callers that need to distinguish clean from dirty cycles — currently only
+// the adaptive auto-sync backoff path — use syncWithStatus directly.
 func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error {
-	transport := dm.loadTransport()
-	if transport == nil {
-		return errNoTransport
-	}
+	_, err := dm.syncWithStatus(ctx, nodeID)
 
-	startFetch := time.Now()
-
-	remoteTree, err := transport.FetchMerkle(ctx, nodeID)
-	if err != nil {
-		dm.logger.Warn(
-			"merkle sync fetch failed",
-			slog.String("peer_id", nodeID),
-			slog.Any("err", err),
-		)
-
-		return err
-	}
-
-	fetchDur := time.Since(startFetch)
-	dm.metrics.merkleFetchNanos.Store(fetchDur.Nanoseconds())
-
-	startBuild := time.Now()
-	localTree := dm.BuildMerkleTree()
-	buildDur := time.Since(startBuild)
-	dm.metrics.merkleBuildNanos.Store(buildDur.Nanoseconds())
-
-	entries := dm.sortedMerkleEntries()
-	startDiff := time.Now()
-	diffs := localTree.DiffLeafRanges(remoteTree)
-	diffDur := time.Since(startDiff)
-	dm.metrics.merkleDiffNanos.Store(diffDur.Nanoseconds())
-
-	missing := dm.resolveMissingKeys(ctx, nodeID, entries)
-
-	dm.applyMerkleDiffs(ctx, nodeID, entries, diffs, localTree.ChunkSize)
-
-	for k := range missing { // missing = remote-only keys
-		dm.fetchAndAdopt(ctx, nodeID, k)
-	}
-
-	if len(diffs) == 0 && len(missing) == 0 {
-		return nil
-	}
-
-	dm.metrics.merkleSyncs.Add(1)
-
-	return nil
+	return err
 }
 
 // WithDistCapacity sets logical capacity (not strictly enforced yet).
@@ -1249,6 +1240,8 @@ type DistMetrics struct {
 	AutoSyncLoops                int64
 	LastAutoSyncNanos            int64
 	LastAutoSyncError            string
+	AutoSyncCleanTicks           int64 // cumulative ticks where every peer returned no divergence
+	AutoSyncBackoffFactor        int64 // current adaptive-backoff multiplier (1 when disabled or freshly reset)
 	TombstonesActive             int64
 	TombstonesPurged             int64
 	WriteQuorumFailures          int64
@@ -1313,6 +1306,8 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		AutoSyncLoops:                dm.metrics.autoSyncLoops.Load(),
 		LastAutoSyncNanos:            dm.lastAutoSyncDuration.Load(),
 		LastAutoSyncError:            lastErr,
+		AutoSyncCleanTicks:           dm.autoSyncCleanTicks.Load(),
+		AutoSyncBackoffFactor:        dm.autoSyncBackoffFactor.Load(),
 		TombstonesActive:             dm.metrics.tombstonesActive.Load(),
 		TombstonesPurged:             dm.metrics.tombstonesPurged.Load(),
 		WriteQuorumFailures:          dm.metrics.writeQuorumFailures.Load(),
@@ -3037,22 +3032,91 @@ func (dm *DistMemory) startAutoSyncIfEnabled(ctx context.Context) {
 	)
 }
 
+// syncWithStatus mirrors SyncWith but additionally reports whether the cycle
+// found no divergence (clean=true means: zero differing chunks, zero
+// remote-only keys). Used by runAutoSyncTick to drive the adaptive backoff
+// without changing the public SyncWith signature.
+func (dm *DistMemory) syncWithStatus(ctx context.Context, nodeID string) (bool, error) {
+	transport := dm.loadTransport()
+	if transport == nil {
+		return false, errNoTransport
+	}
+
+	startFetch := time.Now()
+
+	remoteTree, err := transport.FetchMerkle(ctx, nodeID)
+	if err != nil {
+		dm.logger.Warn(
+			"merkle sync fetch failed",
+			slog.String("peer_id", nodeID),
+			slog.Any("err", err),
+		)
+
+		return false, err
+	}
+
+	fetchDur := time.Since(startFetch)
+	dm.metrics.merkleFetchNanos.Store(fetchDur.Nanoseconds())
+
+	startBuild := time.Now()
+	localTree := dm.BuildMerkleTree()
+	buildDur := time.Since(startBuild)
+	dm.metrics.merkleBuildNanos.Store(buildDur.Nanoseconds())
+
+	entries := dm.sortedMerkleEntries()
+	startDiff := time.Now()
+	diffs := localTree.DiffLeafRanges(remoteTree)
+	diffDur := time.Since(startDiff)
+	dm.metrics.merkleDiffNanos.Store(diffDur.Nanoseconds())
+
+	missing := dm.resolveMissingKeys(ctx, nodeID, entries)
+
+	dm.applyMerkleDiffs(ctx, nodeID, entries, diffs, localTree.ChunkSize)
+
+	for k := range missing { // missing = remote-only keys
+		dm.fetchAndAdopt(ctx, nodeID, k)
+	}
+
+	if len(diffs) == 0 && len(missing) == 0 {
+		return true, nil
+	}
+
+	dm.metrics.merkleSyncs.Add(1)
+
+	return false, nil
+}
+
+// autoSyncLoop drives Merkle anti-entropy on a timer. With adaptive
+// backoff disabled (the default) it behaves like a fixed-interval ticker.
+// With backoff enabled it resets the timer between ticks using
+// nextAutoSyncDelay, doubling on clean cycles and snapping back to 1× on
+// dirty ones.
 func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration, stopCh <-chan struct{}) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	if dm.autoSyncMaxBackoffFactor > 1 {
+		dm.autoSyncBackoffFactor.Store(1)
+	}
+
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-stopCh:
 			return
-		case <-ticker.C:
-			dm.runAutoSyncTick(ctx)
+		case <-timer.C:
+			clean := dm.runAutoSyncTick(ctx)
+			dm.updateAutoSyncBackoff(clean)
+			timer.Reset(dm.nextAutoSyncDelay(interval))
 		}
 	}
 }
 
-// runAutoSyncTick performs one auto-sync cycle; separated for lower complexity.
-func (dm *DistMemory) runAutoSyncTick(ctx context.Context) {
+// runAutoSyncTick performs one auto-sync cycle. Returns true when every
+// peer reported a clean (no-divergence) result and at least one peer was
+// actually synced; false on any divergence, any sync error, or when no
+// peers were eligible (caller treats "no peers" as not-clean to avoid
+// backing off in single-node configurations).
+func (dm *DistMemory) runAutoSyncTick(ctx context.Context) bool {
 	start := time.Now()
 
 	var lastErr error
@@ -3060,6 +3124,7 @@ func (dm *DistMemory) runAutoSyncTick(ctx context.Context) {
 	members := dm.membership.List()
 	limit := dm.autoSyncPeersPerInterval
 	synced := 0
+	dirty := false
 
 	for _, member := range members {
 		if member == nil || string(member.ID) == dm.nodeID { // skip self
@@ -3070,9 +3135,12 @@ func (dm *DistMemory) runAutoSyncTick(ctx context.Context) {
 			break
 		}
 
-		err := dm.SyncWith(ctx, string(member.ID))
-		if err != nil { // capture last error only
+		clean, err := dm.syncWithStatus(ctx, string(member.ID))
+		if err != nil { // capture last error only; treat as dirty so we don't back off through outages
 			lastErr = err
+			dirty = true
+		} else if !clean {
+			dirty = true
 		}
 
 		synced++
@@ -3087,6 +3155,54 @@ func (dm *DistMemory) runAutoSyncTick(ctx context.Context) {
 	}
 
 	dm.metrics.autoSyncLoops.Add(1)
+
+	return synced > 0 && !dirty
+}
+
+// updateAutoSyncBackoff advances the backoff factor based on tick outcome.
+// Clean tick: double up to the cap. Dirty tick: snap back to 1×. No-op
+// when adaptive backoff is disabled (autoSyncMaxBackoffFactor <= 1).
+func (dm *DistMemory) updateAutoSyncBackoff(clean bool) {
+	if dm.autoSyncMaxBackoffFactor <= 1 {
+		return
+	}
+
+	prev := dm.autoSyncBackoffFactor.Load()
+
+	var next int64
+
+	if clean {
+		dm.autoSyncCleanTicks.Add(1)
+
+		next = min(prev*2, int64(dm.autoSyncMaxBackoffFactor))
+	} else {
+		next = 1
+	}
+
+	if next == prev {
+		return
+	}
+
+	dm.autoSyncBackoffFactor.Store(next)
+	dm.logger.Info(
+		"merkle auto-sync backoff factor changed",
+		slog.Int64("from", prev),
+		slog.Int64("to", next),
+		slog.Bool("clean", clean),
+	)
+}
+
+// nextAutoSyncDelay returns the sleep duration before the next auto-sync
+// tick. When adaptive backoff is disabled this is just `interval`; when
+// enabled it is `interval * currentFactor`.
+func (dm *DistMemory) nextAutoSyncDelay(interval time.Duration) time.Duration {
+	if dm.autoSyncMaxBackoffFactor <= 1 {
+		return interval
+	}
+
+	factor := max(dm.autoSyncBackoffFactor.Load(), 1)
+
+	return interval * time.Duration(factor)
 }
 
 func (dm *DistMemory) gossipLoop(stopCh <-chan struct{}) {
@@ -3799,6 +3915,16 @@ var distMetricSpecs = []distMetricSpec{
 		name: "dist.auto_sync.last_ns", unit: unitNanos, counter: false,
 		desc: "Duration of last auto-sync loop",
 		get:  func(m DistMetrics) int64 { return m.LastAutoSyncNanos },
+	},
+	{
+		name: "dist.auto_sync.clean_ticks", unit: unitTick, counter: true,
+		desc: "Auto-sync ticks where every peer returned zero divergence (drives adaptive backoff)",
+		get:  func(m DistMetrics) int64 { return m.AutoSyncCleanTicks },
+	},
+	{
+		name: "dist.auto_sync.backoff_factor", unit: unitTick, counter: false,
+		desc: "Current adaptive auto-sync backoff multiplier (1 when disabled or reset)",
+		get:  func(m DistMetrics) int64 { return m.AutoSyncBackoffFactor },
 	},
 
 	// --- Tombstones ---

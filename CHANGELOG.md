@@ -8,6 +8,16 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
+- **Adaptive Merkle anti-entropy scheduling.** New
+  [`backend.WithDistMerkleAdaptiveBackoff(maxFactor)`](pkg/backend/dist_memory.go) option lets the auto-sync
+  loop double its sleep interval after each tick that finds zero divergence across every peer, capped at
+  `maxFactor`. Any tick with at least one dirty peer snaps the factor back to 1× immediately — recovery is
+  never lazy. Disabled by default (factor=0 or 1) so existing deployments see no behavior change. Two new
+  OTel metrics expose the state: `dist.auto_sync.backoff_factor` (gauge) and `dist.auto_sync.clean_ticks`
+  (counter). Each factor change is logged once at Info (`merkle auto-sync backoff factor changed`) — no
+  per-tick log spam. Unit tests in
+  [`pkg/backend/dist_adaptive_backoff_test.go`](pkg/backend/dist_adaptive_backoff_test.go) cover the ramp,
+  the cap, the dirty-tick reset, and the disabled-by-default back-compat invariant.
 - **Structured logging for background loops and cluster lifecycle.** HyperCache gained a
   `WithLogger(*slog.Logger)` option ([config.go](config.go)) that wires a structured logger through the
   wrapper. Previously the eviction loop, expiration loop, and HyperCache lifecycle ran fully silent —
