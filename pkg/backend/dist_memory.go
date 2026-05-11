@@ -254,10 +254,29 @@ type distTransportSlot struct{ t DistTransport }
 
 // hintedEntry represents a deferred replica write.
 type hintedEntry struct {
-	item   *cache.Item
-	expire time.Time
-	size   int64 // approximate bytes for global cap accounting
+	item     *cache.Item
+	queuedAt time.Time
+	expire   time.Time
+	size     int64      // approximate bytes for global cap accounting
+	source   hintSource // why this hint exists (replication fan-out vs rebalance migration)
 }
+
+// hintSource records why a hint landed in the queue. Used to split
+// the aggregate hint counters (which sum across both sources) into a
+// migration-only view for operators tracking ownership-transfer
+// liveness during rebalance phases. Replication-only counts are derivable
+// as (aggregate - migration); we don't expose a third metric for it.
+type hintSource int8
+
+const (
+	// hintSourceReplication marks hints produced by a failed write fan-out
+	// to a peer replica. This is the historical default — every hint
+	// landed in this bucket before migration-source tagging existed.
+	hintSourceReplication hintSource = iota
+	// hintSourceMigration marks hints produced by a rebalance tick that
+	// could not deliver an item to its new primary owner.
+	hintSourceMigration
+)
 
 // tombstone marks a delete intent with version ordering to prevent resurrection.
 type tombstone struct {
@@ -1179,12 +1198,17 @@ type distMetrics struct {
 	versionConflicts             atomic.Int64 // times a newer version (or tie-broken origin) replaced previous candidate
 	versionTieBreaks             atomic.Int64 // subset of conflicts decided by origin tie-break
 	readPrimaryPromote           atomic.Int64 // times read path skipped unreachable primary and promoted next owner
-	hintedQueued                 atomic.Int64 // hints queued
+	hintedQueued                 atomic.Int64 // hints queued (both sources)
 	hintedReplayed               atomic.Int64 // hints successfully replayed
 	hintedExpired                atomic.Int64 // hints expired before delivery
 	hintedDropped                atomic.Int64 // hints dropped due to non-not-found transport errors
 	hintedGlobalDropped          atomic.Int64 // hints dropped due to global caps (count/bytes)
 	hintedBytes                  atomic.Int64 // approximate total bytes currently queued (best-effort)
+	migrationHintQueued          atomic.Int64 // subset of hintedQueued: rebalance migration source only
+	migrationHintReplayed        atomic.Int64 // subset of hintedReplayed: migration-source hints that drained
+	migrationHintExpired         atomic.Int64 // subset of hintedExpired: migration-source hints aged out
+	migrationHintDropped         atomic.Int64 // subset of hintedDropped + hintedGlobalDropped: migration-source hints that died
+	migrationHintLastAgeNanos    atomic.Int64 // queue residency of the most-recently-replayed migration hint (ns)
 	merkleSyncs                  atomic.Int64 // merkle sync operations completed
 	merkleKeysPulled             atomic.Int64 // keys applied during sync
 	merkleBuildNanos             atomic.Int64 // last build duration (ns)
@@ -1232,6 +1256,11 @@ type DistMetrics struct {
 	HintedDropped                int64
 	HintedGlobalDropped          int64
 	HintedBytes                  int64
+	MigrationHintQueued          int64 // subset of HintedQueued attributable to rebalance migrations
+	MigrationHintReplayed        int64 // subset of HintedReplayed for migration hints
+	MigrationHintExpired         int64 // subset of HintedExpired for migration hints
+	MigrationHintDropped         int64 // subset of HintedDropped + HintedGlobalDropped for migration hints
+	MigrationHintLastAgeNanos    int64 // queue residency of the most-recently-replayed migration hint (ns)
 	MerkleSyncs                  int64
 	MerkleKeysPulled             int64
 	MerkleBuildNanos             int64
@@ -1298,6 +1327,11 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		HintedDropped:                dm.metrics.hintedDropped.Load(),
 		HintedGlobalDropped:          dm.metrics.hintedGlobalDropped.Load(),
 		HintedBytes:                  dm.metrics.hintedBytes.Load(),
+		MigrationHintQueued:          dm.metrics.migrationHintQueued.Load(),
+		MigrationHintReplayed:        dm.metrics.migrationHintReplayed.Load(),
+		MigrationHintExpired:         dm.metrics.migrationHintExpired.Load(),
+		MigrationHintDropped:         dm.metrics.migrationHintDropped.Load(),
+		MigrationHintLastAgeNanos:    dm.metrics.migrationHintLastAgeNanos.Load(),
 		MerkleSyncs:                  dm.metrics.merkleSyncs.Load(),
 		MerkleKeysPulled:             dm.metrics.merkleKeysPulled.Load(),
 		MerkleBuildNanos:             dm.metrics.merkleBuildNanos.Load(),
@@ -2242,7 +2276,7 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) {
 			slog.Any("err", migrationErr),
 		)
 
-		dm.queueHint(string(owners[0]), item)
+		dm.queueHint(string(owners[0]), item, hintSourceMigration)
 	}
 
 	// Update originalPrimary so we don't recount repeatedly.
@@ -2723,7 +2757,7 @@ func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replica
 		// (timeout, 5xx, connection reset) silently dropped replicas.
 		// The hint TTL bounds total retry time, so a target that's
 		// permanently gone still drains rather than ballooning.
-		dm.queueHint(string(oid), item)
+		dm.queueHint(string(oid), item, hintSourceReplication)
 	}
 
 	return acks
@@ -2798,7 +2832,7 @@ func (dm *DistMemory) getWithConsistencyParallel(
 }
 
 // --- Hinted handoff implementation ---.
-func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced complexity
+func (dm *DistMemory) queueHint(nodeID string, item *cache.Item, source hintSource) { // reduced complexity
 	if dm.hintTTL <= 0 {
 		return
 	}
@@ -2825,12 +2859,24 @@ func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced co
 		dm.hintsMu.Unlock()
 		dm.metrics.hintedGlobalDropped.Add(1)
 
+		if source == hintSourceMigration {
+			dm.metrics.migrationHintDropped.Add(1)
+		}
+
 		return
 	}
 
 	cloned := *item
 
-	queue = append(queue, hintedEntry{item: &cloned, expire: time.Now().Add(dm.hintTTL), size: size})
+	now := time.Now()
+
+	queue = append(queue, hintedEntry{
+		item:     &cloned,
+		queuedAt: now,
+		expire:   now.Add(dm.hintTTL),
+		size:     size,
+		source:   source,
+	})
 	dm.hints[nodeID] = queue
 	dm.adjustHintAccounting(1, size)
 
@@ -2842,6 +2888,10 @@ func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced co
 
 	dm.metrics.hintedQueued.Add(1)
 	dm.metrics.hintedBytes.Store(bytesNow)
+
+	if source == hintSourceMigration {
+		dm.metrics.migrationHintQueued.Add(1)
+	}
 }
 
 // approxHintSize estimates the size of a hinted item for global caps.
@@ -2960,6 +3010,10 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 	if now.After(entry.expire) {
 		dm.metrics.hintedExpired.Add(1)
 
+		if entry.source == hintSourceMigration {
+			dm.metrics.migrationHintExpired.Add(1)
+		}
+
 		return 1
 	}
 
@@ -2972,6 +3026,19 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 	if err == nil {
 		dm.metrics.hintedReplayed.Add(1)
 
+		if entry.source == hintSourceMigration {
+			dm.metrics.migrationHintReplayed.Add(1)
+
+			// last_age_ns reflects queue residency of the most-recently
+			// replayed migration hint. Operators read this as "how long did
+			// the last migration retry wait for the new primary to come
+			// back?" — a direct signal of cross-node reachability during
+			// rolling deploys.
+			if !entry.queuedAt.IsZero() {
+				dm.metrics.migrationHintLastAgeNanos.Store(now.Sub(entry.queuedAt).Nanoseconds())
+			}
+		}
+
 		return 1
 	}
 
@@ -2980,6 +3047,10 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 	}
 
 	dm.metrics.hintedDropped.Add(1)
+
+	if entry.source == hintSourceMigration {
+		dm.metrics.migrationHintDropped.Add(1)
+	}
 
 	dm.logger.Warn(
 		"hint dropped after replay error",
@@ -3878,6 +3949,31 @@ var distMetricSpecs = []distMetricSpec{
 		name: "dist.hinted.bytes", unit: unitBytes, counter: false,
 		desc: "Approximate total bytes currently queued in hints",
 		get:  func(m DistMetrics) int64 { return m.HintedBytes },
+	},
+	{
+		name: "dist.migration.queued", unit: unitHint, counter: true,
+		desc: "Migration-source hints queued (subset of dist.hinted.queued from rebalance ticks)",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintQueued },
+	},
+	{
+		name: "dist.migration.replayed", unit: unitHint, counter: true,
+		desc: "Migration-source hints successfully delivered on replay",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintReplayed },
+	},
+	{
+		name: "dist.migration.expired", unit: unitHint, counter: true,
+		desc: "Migration-source hints that aged past hint TTL before delivery",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintExpired },
+	},
+	{
+		name: "dist.migration.dropped", unit: unitHint, counter: true,
+		desc: "Migration-source hints discarded by replay error or queue caps",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintDropped },
+	},
+	{
+		name: "dist.migration.last_age_ns", unit: unitNanos, counter: false,
+		desc: "Queue residency of the most-recently-replayed migration hint (ns)",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintLastAgeNanos },
 	},
 
 	// --- Anti-entropy (Merkle) ---
