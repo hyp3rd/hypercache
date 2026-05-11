@@ -3,11 +3,12 @@ package hypercache_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/hyp3rd/hypercache"
 	"github.com/hyp3rd/hypercache/internal/constants"

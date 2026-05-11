@@ -297,3 +297,114 @@ tokens:
 		t.Fatalf("policy = %+v, want one token from file", p)
 	}
 }
+
+// TestLoadFromEnv_UsersBlock verifies the new users: YAML block is
+// parsed into Policy.BasicIdentities with the bcrypt hash carried
+// through verbatim. The fixture uses a pre-generated bcrypt hash for
+// `pw-alice` at cost 4 so the test runtime stays sub-second; the
+// actual bcrypt verification path is exercised in policy_test.go.
+func TestLoadFromEnv_UsersBlock(t *testing.T) {
+	// Pre-computed bcrypt hash of "pw-alice" at cost 4. Stable enough
+	// to bake into the test fixture since bcrypt's $2a$ format is
+	// part of the on-disk contract we're pinning.
+	hash := "$2a$04$sc9cmgQ9AkudxNVW.B.jYOLEALRQdSuwTj94lblllSFCKGPQ4oG9y"
+
+	yaml := `
+users:
+  - id: svc-alice
+    username: alice
+    password_bcrypt: "` + hash + `"
+    scopes: [read, write]
+allow_basic_without_tls: true
+`
+
+	path := writeAuthYAML(t, yaml)
+	t.Setenv(EnvAuthConfig, path)
+	t.Setenv(EnvAuthToken, "")
+
+	p, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+
+	if len(p.BasicIdentities) != 1 {
+		t.Fatalf("len(BasicIdentities) = %d, want 1", len(p.BasicIdentities))
+	}
+
+	b := p.BasicIdentities[0]
+	if b.Username != userAlice {
+		t.Errorf("Username = %q, want %s", b.Username, userAlice)
+	}
+
+	if b.ID != "svc-alice" {
+		t.Errorf("ID = %q, want svc-alice", b.ID)
+	}
+
+	if string(b.PasswordBcrypt) != hash {
+		t.Errorf("PasswordBcrypt: got %q, want %q", b.PasswordBcrypt, hash)
+	}
+
+	wantScopes := []Scope{ScopeRead, ScopeWrite}
+	if len(b.Scopes) != len(wantScopes) {
+		t.Fatalf("Scopes = %v, want %v", b.Scopes, wantScopes)
+	}
+
+	if !p.AllowBasicWithoutTLS {
+		t.Errorf("AllowBasicWithoutTLS = false, want true")
+	}
+}
+
+// TestLoadFromEnv_UsersBlockRejectsBadBcrypt pins the loader's
+// fail-loud-at-boot contract: a structurally invalid bcrypt hash
+// must fail Validate() and bubble up as an error from LoadFromEnv,
+// rather than silently rejecting every Basic auth attempt at
+// runtime.
+func TestLoadFromEnv_UsersBlockRejectsBadBcrypt(t *testing.T) {
+	yaml := `
+users:
+  - id: svc-alice
+    username: alice
+    password_bcrypt: "this-is-not-a-bcrypt-hash"
+    scopes: [read]
+`
+
+	path := writeAuthYAML(t, yaml)
+	t.Setenv(EnvAuthConfig, path)
+	t.Setenv(EnvAuthToken, "")
+
+	_, err := LoadFromEnv()
+	if err == nil {
+		t.Fatalf("LoadFromEnv must reject malformed bcrypt hash; got no error")
+	}
+
+	if !strings.Contains(err.Error(), "password_bcrypt") {
+		t.Errorf("error message should reference password_bcrypt; got %q", err.Error())
+	}
+}
+
+// TestLoadFromEnv_UsersBlockRejectsEmptyUsername pins another
+// Validate rule: even a valid bcrypt hash must be paired with a
+// non-empty username, since username is the wire selector that
+// keys into the BasicIdentities slice at resolve time.
+func TestLoadFromEnv_UsersBlockRejectsEmptyUsername(t *testing.T) {
+	yaml := `
+users:
+  - id: svc-alice
+    username: ""
+    password_bcrypt: "$2a$04$sc9cmgQ9AkudxNVW.B.jYOLEALRQdSuwTj94lblllSFCKGPQ4oG9y"
+    scopes: [read]
+`
+
+	path := writeAuthYAML(t, yaml)
+	t.Setenv(EnvAuthConfig, path)
+	t.Setenv(EnvAuthToken, "")
+
+	_, err := LoadFromEnv()
+	if err == nil {
+		t.Fatalf("LoadFromEnv must reject empty username; got no error")
+	}
+
+	if !strings.Contains(err.Error(), "username") {
+		t.Errorf("error message should reference username; got %q", err.Error())
+	}
+}

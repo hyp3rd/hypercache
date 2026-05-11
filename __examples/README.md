@@ -23,3 +23,5 @@ All the code in this directory is for demonstration purposes only.
 1. [`Size`](./size/size.go) - An example of using the HyperCache package to store a list of items and limit the cache based on size.
 
 1. [`Observability (OpenTelemetry)`](./observability/otel.go) - Demonstrates wrapping the service with tracing and metrics middleware using OpenTelemetry.
+
+1. [`Distributed OIDC client`](./distributed-oidc-client/) - End-to-end demo of a backend service authenticating to a `hypercache-server` cluster via OIDC client credentials, then exercising the PUT/GET/DELETE/batch surface. See the example's [README](./distributed-oidc-client/README.md) for env-var setup and IdP integration patterns.

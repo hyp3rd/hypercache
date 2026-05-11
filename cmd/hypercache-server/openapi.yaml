@@ -255,15 +255,16 @@ paths:
       summary: Resolved caller identity.
       description: |
         Returns the identity resolved from the request credentials
-        (bearer token, mTLS cert, or `anonymous` when AllowAnonymous
-        is enabled). Includes the granted scopes so callers can
-        introspect their permissions without trial-and-error against
-        scope-protected routes.
+        (bearer token, HTTP Basic, mTLS cert, OIDC JWT, or
+        `anonymous` when AllowAnonymous is enabled). Includes the
+        granted scopes and the derived capability strings so callers
+        can introspect their permissions without trial-and-error
+        against scope-protected routes.
 
         Requires the `read` scope — operators in pure-write or pure-
         admin token configurations do not need to introspect their
         own identity for normal cache use; the monitor's login flow
-        is the primary consumer.
+        and the Go client SDK are the primary consumers.
       responses:
         "200":
           description: Resolved identity + granted scopes.
@@ -495,20 +496,31 @@ components:
 
     IdentityResponse:
       type: object
-      required: [ id, scopes ]
+      required: [ id, scopes, capabilities ]
       properties:
         id:
           type: string
           description: |
             Identity label from the auth config (Tokens[].ID,
-            CertIdentities[].SubjectCN, or `anonymous` when
-            AllowAnonymous is enabled).
+            BasicIdentities[].ID, CertIdentities[].SubjectCN, or
+            `anonymous` when AllowAnonymous is enabled).
         scopes:
           type: array
           description: Permission scopes granted to this identity.
           items:
             type: string
             enum: [ read, write, admin ]
+        capabilities:
+          type: array
+          description: |
+            Stable capability strings derived from `scopes`. Today
+            each scope maps 1:1 to a single capability prefixed with
+            `cache.` (e.g. `read` → `cache.read`). Capabilities are
+            the recommended view for clients — they remain stable
+            even if a scope is later split across multiple
+            capabilities.
+          items:
+            type: string
 
     ItemEnvelope:
       type: object

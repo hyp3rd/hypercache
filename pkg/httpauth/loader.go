@@ -50,15 +50,31 @@ var (
 // in load() — typos in scope names or field names should fail loudly,
 // not silently drop the misnamed identity.
 type fileSchema struct {
-	Tokens         []tokenFile `yaml:"tokens"`
-	CertIdentities []certFile  `yaml:"cert_identities"`
-	AllowAnonymous bool        `yaml:"allow_anonymous"`
+	Tokens               []tokenFile `yaml:"tokens"`
+	Users                []userFile  `yaml:"users"`
+	CertIdentities       []certFile  `yaml:"cert_identities"`
+	AllowAnonymous       bool        `yaml:"allow_anonymous"`
+	AllowBasicWithoutTLS bool        `yaml:"allow_basic_without_tls"`
 }
 
 type tokenFile struct {
 	ID     string   `yaml:"id"`
 	Token  string   `yaml:"token"`
 	Scopes []string `yaml:"scopes"`
+}
+
+// userFile is one HTTP-Basic-auth grant on disk. PasswordBcrypt is
+// the bcrypt-hashed password (string form, e.g.
+// `$2a$12$abc...`); generate via
+// `bcrypt.GenerateFromPassword([]byte(plaintext), bcrypt.DefaultCost)`
+// or any compatible CLI (`htpasswd -B`, `python -c 'import bcrypt; ...'`).
+// Raw passwords MUST NOT appear on disk; the loader rejects empty
+// or structurally-invalid bcrypt strings at boot.
+type userFile struct {
+	ID             string   `yaml:"id"`
+	Username       string   `yaml:"username"`
+	PasswordBcrypt string   `yaml:"password_bcrypt"`
+	Scopes         []string `yaml:"scopes"`
 }
 
 type certFile struct {
@@ -183,6 +199,22 @@ func schemaToPolicy(s fileSchema) (Policy, error) {
 		})
 	}
 
+	users := make([]BasicIdentity, 0, len(s.Users))
+
+	for i, u := range s.Users {
+		scopes, err := parseScopes(u.Scopes)
+		if err != nil {
+			return Policy{}, fmt.Errorf("users[%d] (%q): %w", i, u.Username, err)
+		}
+
+		users = append(users, BasicIdentity{
+			Username:       u.Username,
+			PasswordBcrypt: []byte(u.PasswordBcrypt),
+			ID:             u.ID,
+			Scopes:         scopes,
+		})
+	}
+
 	certs := make([]CertIdentity, 0, len(s.CertIdentities))
 
 	for i, c := range s.CertIdentities {
@@ -198,9 +230,11 @@ func schemaToPolicy(s fileSchema) (Policy, error) {
 	}
 
 	return Policy{
-		Tokens:         tokens,
-		CertIdentities: certs,
-		AllowAnonymous: s.AllowAnonymous,
+		Tokens:               tokens,
+		BasicIdentities:      users,
+		CertIdentities:       certs,
+		AllowAnonymous:       s.AllowAnonymous,
+		AllowBasicWithoutTLS: s.AllowBasicWithoutTLS,
 	}, nil
 }
 

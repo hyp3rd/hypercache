@@ -3,13 +3,14 @@ package integration
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )

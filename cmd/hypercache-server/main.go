@@ -1292,9 +1292,17 @@ func handleOwners(c fiber.Ctx, nodeCtx *nodeContext) error {
 // after auth middleware ran. Mirrors httpauth.Identity but written as
 // a wire type so the JSON tags are owned by the API surface, not the
 // internal auth package.
+//
+// Capabilities is the stable-string view of what the caller can DO
+// (vs Scopes, which is the storage-shape of what the caller HAS).
+// Today the mapping is 1:1 — every scope produces one capability
+// prefixed `cache.` — but the indirection lets us split a scope
+// without breaking clients that key off capability strings. See
+// httpauth.Identity.Capabilities() for the derivation.
 type meResponse struct {
-	ID     string   `json:"id"`
-	Scopes []string `json:"scopes"`
+	ID           string   `json:"id"`
+	Scopes       []string `json:"scopes"`
+	Capabilities []string `json:"capabilities"`
 }
 
 // handleMe implements GET /v1/me — returns the calling principal's
@@ -1321,8 +1329,9 @@ func handleMe(c fiber.Ctx) error {
 	}
 
 	return c.JSON(meResponse{
-		ID:     identity.ID,
-		Scopes: scopes,
+		ID:           identity.ID,
+		Scopes:       scopes,
+		Capabilities: identity.Capabilities(),
 	})
 }
 

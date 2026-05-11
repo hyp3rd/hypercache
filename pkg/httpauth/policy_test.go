@@ -1,6 +1,7 @@
 package httpauth
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,12 +9,44 @@ import (
 
 	fiber "github.com/gofiber/fiber/v3"
 	"github.com/hyp3rd/ewrap"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// bcryptTestCost is the bcrypt cost factor we use for fixtures.
+// Cost 4 is bcrypt's minimum; production keys go at cost 10+. Using
+// the minimum here keeps the test suite under a second total even
+// across many bcrypt-verifying cases.
+const bcryptTestCost = 4
+
+// mustBcrypt hashes a plaintext password at bcryptTestCost. Test
+// helper — panics on failure because a bcrypt failure with valid
+// input is a test-rig bug, not a runtime condition to handle.
+func mustBcrypt(t *testing.T, plaintext string) []byte {
+	t.Helper()
+
+	h, err := bcrypt.GenerateFromPassword([]byte(plaintext), bcryptTestCost)
+	if err != nil {
+		t.Fatalf("bcrypt.GenerateFromPassword: %v", err)
+	}
+
+	return h
+}
+
+// basicHeader builds an `Authorization: Basic ...` header value for
+// the given credentials. Keeps test rows short.
+func basicHeader(username, password string) string {
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+}
 
 // errVerifyRejected is the canonical "ServerVerify said no" sentinel
 // the policy_test stubs return. Defining it as a static error
 // dodges err113 without reaching for fmt.Errorf in test bodies.
 var errVerifyRejected = ewrap.New("rejected")
+
+// userAlice is the canonical username used across the Basic-auth
+// test rows. Defined as a const so goconst is happy and renaming
+// is a single edit.
+const userAlice = "alice"
 
 // newTestApp wires a single auth-protected route and returns the
 // fiber app for in-memory request driving. The route returns 200
@@ -476,4 +509,198 @@ func TestPolicy_Verify_StoresIdentityInLocals(t *testing.T) {
 	if got != "audit-target" {
 		t.Fatalf("locals identity ID = %q, want %q", got, "audit-target")
 	}
+}
+
+// TestPolicy_Basic exercises the resolveBasic happy path and the
+// most-frequent reject paths against a real Policy.Middleware chain.
+// AllowBasicWithoutTLS is set true here because fiber.App.Test
+// delivers plaintext requests; the fail-closed TLS posture is pinned
+// separately in TestPolicy_BasicRefusesPlaintextByDefault.
+func TestPolicy_Basic(t *testing.T) {
+	t.Parallel()
+
+	alicePassword := "correct-horse-battery-staple"
+	bobPassword := "another-good-password"
+
+	p := Policy{
+		BasicIdentities: []BasicIdentity{
+			{
+				Username:       userAlice,
+				PasswordBcrypt: mustBcrypt(t, alicePassword),
+				ID:             userAlice,
+				Scopes:         []Scope{ScopeRead},
+			},
+			{
+				Username:       "bob",
+				PasswordBcrypt: mustBcrypt(t, bobPassword),
+				ID:             "bob",
+				Scopes:         []Scope{ScopeRead, ScopeWrite},
+			},
+		},
+		AllowBasicWithoutTLS: true,
+	}
+
+	tests := []struct {
+		name   string
+		header string
+		scope  Scope
+		want   int
+	}{
+		{"no header → 401", "", ScopeRead, http.StatusUnauthorized},
+		{"unknown user → 401", basicHeader("eve", alicePassword), ScopeRead, http.StatusUnauthorized},
+		{"alice + wrong password → 401", basicHeader(userAlice, "wrong"), ScopeRead, http.StatusUnauthorized},
+		{"alice + correct password + Read → 200", basicHeader(userAlice, alicePassword), ScopeRead, http.StatusOK},
+		{"alice + correct password + Write → 403", basicHeader(userAlice, alicePassword), ScopeWrite, http.StatusForbidden},
+		{"bob + correct password + Write → 200", basicHeader("bob", bobPassword), ScopeWrite, http.StatusOK},
+		{"bob + correct password + Admin → 403", basicHeader("bob", bobPassword), ScopeAdmin, http.StatusForbidden},
+		{"malformed base64 → 401", "Basic !!!!", ScopeRead, http.StatusUnauthorized},
+		{"missing colon → 401", "Basic " + base64.StdEncoding.EncodeToString([]byte("aliceonly")), ScopeRead, http.StatusUnauthorized},
+		{"empty Basic → 401", "Basic ", ScopeRead, http.StatusUnauthorized},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			app := newTestApp(t, p, tc.scope)
+
+			got := doStatus(t, app, tc.header)
+			if got != tc.want {
+				t.Fatalf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPolicy_BasicRefusesPlaintextByDefault pins the fail-closed
+// posture: when AllowBasicWithoutTLS is false (the default) AND the
+// request arrived over plaintext, resolveBasic returns false and the
+// middleware 401s — even if the credentials would otherwise have
+// matched. This protects operators who forget TLS in production from
+// silently broadcasting passwords on the network.
+func TestPolicy_BasicRefusesPlaintextByDefault(t *testing.T) {
+	t.Parallel()
+
+	password := "secure-but-doomed-in-plaintext"
+
+	p := Policy{
+		BasicIdentities: []BasicIdentity{
+			{
+				Username:       userAlice,
+				PasswordBcrypt: mustBcrypt(t, password),
+				ID:             userAlice,
+				Scopes:         []Scope{ScopeRead},
+			},
+		},
+		// AllowBasicWithoutTLS NOT set — we want the default behavior.
+	}
+
+	app := newTestApp(t, p, ScopeRead)
+
+	got := doStatus(t, app, basicHeader(userAlice, password))
+	if got != http.StatusUnauthorized {
+		t.Fatalf("plaintext Basic must 401 by default; got %d", got)
+	}
+}
+
+// TestPolicy_BearerWinsOverBasic pins the chain order: bearer
+// resolution runs before Basic, so a request with a valid bearer
+// resolves to the bearer's identity regardless of any Basic
+// configuration. We read identity.ID back from c.Locals to make the
+// determinism explicit — if a future contributor swaps the chain
+// order, this test fails with a clear "got basic-id, want bearer-id"
+// message.
+func TestPolicy_BearerWinsOverBasic(t *testing.T) {
+	t.Parallel()
+
+	password := "alice-pass"
+
+	p := Policy{
+		Tokens: []TokenIdentity{
+			{ID: "bearer-id", Token: "tok", Scopes: []Scope{ScopeRead}},
+		},
+		BasicIdentities: []BasicIdentity{
+			{
+				Username:       userAlice,
+				PasswordBcrypt: mustBcrypt(t, password),
+				ID:             "basic-id",
+				Scopes:         []Scope{ScopeRead},
+			},
+		},
+		AllowBasicWithoutTLS: true,
+	}
+
+	app := fiber.New()
+	app.Get("/who", p.Middleware(ScopeRead), func(c fiber.Ctx) error {
+		id, ok := c.Locals(IdentityKey).(Identity)
+		if !ok {
+			return c.Status(http.StatusInternalServerError).SendString("no identity")
+		}
+
+		return c.SendString(id.ID)
+	})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/who", strings.NewReader(""))
+	req.Header.Set("Authorization", "Bearer tok")
+
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+
+	defer func() { _ = resp.Body.Close() }()
+
+	body := make([]byte, 64)
+	n, _ := resp.Body.Read(body)
+
+	got := string(body[:n])
+	if got != "bearer-id" {
+		t.Fatalf("bearer must win over basic; got identity ID %q, want %q", got, "bearer-id")
+	}
+}
+
+// TestIdentity_Capabilities pins the scope → capability mapping
+// surface that /v1/me exposes to clients. The 1:1 prefix-with-cache.
+// mapping is the v1 contract; if we ever break it (splitting a scope
+// across multiple capabilities) this test is the canary.
+func TestIdentity_Capabilities(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		scopes []Scope
+		want   []string
+	}{
+		{"empty", nil, []string{}},
+		{"read only", []Scope{ScopeRead}, []string{"cache.read"}},
+		{"read+write", []Scope{ScopeRead, ScopeWrite}, []string{"cache.read", "cache.write"}},
+		{"all three", []Scope{ScopeRead, ScopeWrite, ScopeAdmin}, []string{"cache.read", "cache.write", "cache.admin"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			id := Identity{ID: "test", Scopes: tc.scopes}
+
+			got := id.Capabilities()
+			if !sliceEq(got, tc.want) {
+				t.Fatalf("Capabilities() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func sliceEq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
 }

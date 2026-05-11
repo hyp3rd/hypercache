@@ -20,7 +20,7 @@ name is from `DistMemory.Metrics()` and its OTel mirror (`dist.*`) or from the w
 | Cluster has the right members but cache is empty | new node still rebalancing in                     | [Cold replica](#cold-replica)                             |
 | Peers flapping in `/cluster/members`             | network jitter, indirect probes failing           | [Heartbeat flapping](#heartbeat-flapping)                 |
 | Hints building up faster than they drain         | one peer unreachable or rejecting writes          | [Hint queue](#hint-queue-building)                        |
-| 401 / 403 on requests that should work           | misconfigured token, missing scope, OIDC expired  | [Auth failures](#auth-failures)                           |
+| 401 / 403 on requests that should work           | misconfigured token, missing scope, OIDC expired, Basic over plaintext  | [Auth failures](#auth-failures)                           |
 | Eviction running hot, latency spiking on Set     | cache at capacity, eviction can't keep up         | [Eviction pressure](#eviction-pressure)                   |
 | Replicas diverging                               | partition healed, version conflicts               | [Split-brain reconciliation](#split-brain-reconciliation) |
 | Drain stuck / load balancer still routing        | `/health` not flipping or LB caching              | [Drain not draining](#drain-not-draining)                 |
@@ -154,6 +154,11 @@ access, and at `/dist/metrics` for `auth.*` counters if your build has them.
   verifier rejects mismatches before any policy check runs.
 - For static bearers: the token must appear in the policy YAML (`HYPERCACHE_AUTH_CONFIG`) — confirm with
   `curl http://<node>:8081/v1/me` using that exact token.
+- For HTTP Basic (`users:` block): `curl -u <user>:<pass> https://<node>:8081/v1/me`. If 401 over plaintext
+  HTTP, the server is refusing Basic-without-TLS by default — either upgrade to HTTPS or set
+  `allow_basic_without_tls: true` in `HYPERCACHE_AUTH_CONFIG` for dev stacks (never production).
+- The new `capabilities` field on `/v1/me` shows what the caller can DO (`cache.read`, `cache.write`,
+  `cache.admin`) — clients should key off this, not the raw `scopes` array, for forward-compatibility.
 
 **What to do.**
 

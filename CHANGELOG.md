@@ -8,6 +8,30 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
+- **HTTP Basic auth as a first-class credential class (Redis-style `AUTH user pass`).** New top-level
+  `users:` block in `HYPERCACHE_AUTH_CONFIG` accepts bcrypt-hashed passwords. Each user resolves to the
+  same `Identity{ID, Scopes}` shape as every other auth mode, so all four mechanisms (static bearer →
+  Basic → mTLS → OIDC) coexist in one cluster with consistent downstream behavior. Fail-closed posture:
+  Basic over plaintext is refused by default; operators opt into dev-only plaintext via
+  `allow_basic_without_tls: true`. Implementation in
+  [`pkg/httpauth/policy.go`](pkg/httpauth/policy.go) with bcrypt verification via
+  `golang.org/x/crypto/bcrypt`. Threat note: bcrypt-per-request is CPU-bound; rate-limiting is left to a
+  fronting LB (see [RFC 0003](docs/rfcs/0003-client-sdk-and-redis-style-affordances.md) open question 3).
+- **`/v1/me` now returns a `capabilities` field.** Stable capability strings derived 1:1 from scopes
+  (`read` → `cache.read`, etc.). Clients should prefer `capabilities` over `scopes` for
+  forward-compatibility: if a scope is later split into multiple capabilities, scope-keyed clients
+  break but capability-keyed clients keep working. OpenAPI spec
+  ([`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml)) updated to reflect the
+  new required field; the binary's embedded spec is the contract.
+- **Tests pinning the new auth contract.**
+  [`pkg/httpauth/policy_test.go`](pkg/httpauth/policy_test.go) covers Basic resolves on correct
+  credentials, rejects on wrong passwords/users/malformed headers, refuses plaintext by default, and
+  documents the bearer-wins-over-Basic chain order via a Locals-introspection test.
+  [`pkg/httpauth/loader_test.go`](pkg/httpauth/loader_test.go) covers the YAML round-trip plus the
+  fail-loud-at-boot guards for malformed bcrypt hashes and empty usernames.
+- **Operator runbook updates.**
+  [`docs/oncall.md`](docs/oncall.md) Auth failures section gains a Basic-auth debugging row covering
+  the `curl -u user:pass /v1/me` canary and the plaintext-refused failure mode.
 - **Migration-source observability for the hint queue.** Hints produced by rebalance migrations are now
   tagged at queue time and tracked in a dedicated set of counters alongside the existing aggregate
   metrics. Five new OTel metrics: `dist.migration.queued`, `dist.migration.replayed`,

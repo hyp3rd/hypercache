@@ -32,7 +32,11 @@ func TestHandleMe_BodyShape(t *testing.T) {
 				ID:     "ops-readonly",
 				Scopes: []httpauth.Scope{httpauth.ScopeRead},
 			},
-			want: meResponse{ID: "ops-readonly", Scopes: []string{"read"}},
+			want: meResponse{
+				ID:           "ops-readonly",
+				Scopes:       []string{"read"},
+				Capabilities: []string{"cache.read"},
+			},
 		},
 		{
 			name: "rw operator",
@@ -40,7 +44,11 @@ func TestHandleMe_BodyShape(t *testing.T) {
 				ID:     "ops-rw",
 				Scopes: []httpauth.Scope{httpauth.ScopeRead, httpauth.ScopeWrite},
 			},
-			want: meResponse{ID: "ops-rw", Scopes: []string{"read", "write"}},
+			want: meResponse{
+				ID:           "ops-rw",
+				Scopes:       []string{"read", "write"},
+				Capabilities: []string{"cache.read", "cache.write"},
+			},
 		},
 		{
 			name: "anonymous (AllowAnonymous=true on the policy)",
@@ -48,7 +56,11 @@ func TestHandleMe_BodyShape(t *testing.T) {
 				ID:     "anonymous",
 				Scopes: []httpauth.Scope{httpauth.ScopeRead, httpauth.ScopeWrite, httpauth.ScopeAdmin},
 			},
-			want: meResponse{ID: "anonymous", Scopes: []string{"read", "write", "admin"}},
+			want: meResponse{
+				ID:           "anonymous",
+				Scopes:       []string{"read", "write", "admin"},
+				Capabilities: []string{"cache.read", "cache.write", "cache.admin"},
+			},
 		},
 	}
 
@@ -120,6 +132,16 @@ func assertMeBody(t *testing.T, got, want meResponse) {
 	for i, s := range want.Scopes {
 		if got.Scopes[i] != s {
 			t.Errorf("scopes[%d]: got %q, want %q", i, got.Scopes[i], s)
+		}
+	}
+
+	if len(got.Capabilities) != len(want.Capabilities) {
+		t.Fatalf("capabilities length: got %d, want %d (got=%v)", len(got.Capabilities), len(want.Capabilities), got.Capabilities)
+	}
+
+	for i, c := range want.Capabilities {
+		if got.Capabilities[i] != c {
+			t.Errorf("capabilities[%d]: got %q, want %q", i, got.Capabilities[i], c)
 		}
 	}
 }

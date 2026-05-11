@@ -34,6 +34,10 @@ dictionaryDefinitions: []
 dictionaries: []
 words:
   - acks
+  - Addrs
+  - affordances
+  - Akudx
+  - aliceonly
   - ALPN
   - APITLS
   - APITLSCA
@@ -42,6 +46,7 @@ words:
   - backpressure
   - backpressures
   - baselining
+  - bcrypted
   - benchmarkdist
   - benchmem
   - benchstat
@@ -60,6 +65,7 @@ words:
   - cespare
   - chans
   - cheatsheet
+  - clientcredentials
   - cmap
   - Cmder
   - codacy
@@ -74,6 +80,7 @@ words:
   - Decr
   - dels
   - depguard
+  - deprioritize
   - derr
   - disambiguator
   - distconfig
@@ -104,6 +111,7 @@ words:
   - funlen
   - geomean
   - gerr
+  - Getenv
   - gitversion
   - GITVERSION
   - glightbox
@@ -130,6 +138,7 @@ words:
   - honnef
   - hostnames
   - hreq
+  - htpasswd
   - httpauth
   - HTTPTLS
   - hypercache
@@ -144,9 +153,12 @@ words:
   - ireturn
   - Itemm
   - journalctl
+  - keepalive
+  - keepalives
   - keyf
   - keypair
   - lamport
+  - lblll
   - LFUDA
   - linenums
   - localmodule
@@ -179,12 +191,14 @@ words:
   - nosec
   - NOVENDOR
   - oapi
+  - oncall
   - paralleltest
   - Pipeliner
   - pluggability
   - podname
   - popd
   - Prealloc
+  - Println
   - productionization
   - protoc
   - pushd
@@ -203,14 +217,17 @@ words:
   - sectools
   - securego
   - sess
+  - SFCKGPQ
   - shamaton
   - shellcheck
   - skeys
+  - singleflight
   - SLRU
   - softprops
   - statefulset
   - staticcheck
   - stdlib
+  - strawman
   - stretchr
   - strfnv
   - stringly
@@ -224,6 +241,7 @@ words:
   - thelper
   - toplevel
   - tparallel
+  - traceparent
   - tracetest
   - traefik
   - trunc
@@ -240,6 +258,7 @@ words:
   - unsubbed
   - upserted
   - upserts
+  - Valkey
   - varnamelen
   - venv
   - vettool
@@ -248,5 +267,6 @@ words:
   - wrapcheck
   - Wrapf
   - xxhash
+  - YOLEALR
 ignoreWords: []
 import: []
