@@ -146,6 +146,14 @@ type DistMemory struct {
 	lastAutoSyncDuration atomic.Int64 // nanoseconds of last full loop
 	lastAutoSyncError    atomic.Value // error string or nil
 
+	// adaptive backoff: when enabled (autoSyncMaxBackoffFactor > 1), the
+	// auto-sync loop doubles its sleep after each tick that found zero
+	// divergence across all peers, capped at autoSyncMaxBackoffFactor.
+	// Any tick that pulls keys resets the factor to 1 immediately.
+	autoSyncMaxBackoffFactor int          // 0/1 = disabled
+	autoSyncBackoffFactor    atomic.Int64 // current multiplier; >=1 when adaptive enabled
+	autoSyncCleanTicks       atomic.Int64 // cumulative clean ticks (whole-cycle, not per-peer)
+
 	// tombstone version source when no prior item exists (monotonic per process)
 	tombVersionCounter atomic.Uint64
 
@@ -246,10 +254,29 @@ type distTransportSlot struct{ t DistTransport }
 
 // hintedEntry represents a deferred replica write.
 type hintedEntry struct {
-	item   *cache.Item
-	expire time.Time
-	size   int64 // approximate bytes for global cap accounting
+	item     *cache.Item
+	queuedAt time.Time
+	expire   time.Time
+	size     int64      // approximate bytes for global cap accounting
+	source   hintSource // why this hint exists (replication fan-out vs rebalance migration)
 }
+
+// hintSource records why a hint landed in the queue. Used to split
+// the aggregate hint counters (which sum across both sources) into a
+// migration-only view for operators tracking ownership-transfer
+// liveness during rebalance phases. Replication-only counts are derivable
+// as (aggregate - migration); we don't expose a third metric for it.
+type hintSource int8
+
+const (
+	// hintSourceReplication marks hints produced by a failed write fan-out
+	// to a peer replica. This is the historical default — every hint
+	// landed in this bucket before migration-source tagging existed.
+	hintSourceReplication hintSource = iota
+	// hintSourceMigration marks hints produced by a rebalance tick that
+	// could not deliver an item to its new primary owner.
+	hintSourceMigration
+)
 
 // tombstone marks a delete intent with version ordering to prevent resurrection.
 type tombstone struct {
@@ -355,6 +382,29 @@ func WithDistMerkleChunkSize(n int) DistMemoryOption {
 func WithDistMerkleAutoSync(interval time.Duration) DistMemoryOption {
 	return func(dm *DistMemory) {
 		dm.autoSyncInterval = interval
+	}
+}
+
+// WithDistMerkleAdaptiveBackoff enables adaptive scheduling for the Merkle
+// anti-entropy loop. When maxFactor > 1, the loop doubles its sleep
+// interval (1×, 2×, 4×, 8×, …) after each tick that found zero divergence
+// across every peer, capped at maxFactor. Any tick with at least one
+// dirty peer resets the factor to 1 on the next sleep — recovery is
+// always immediate, never lazy.
+//
+// maxFactor <= 1 disables backoff (the default): the loop wakes at every
+// `WithDistMerkleAutoSync` interval regardless of recent divergence.
+//
+// The current factor is exposed as `dist.auto_sync.backoff_factor` and
+// the cumulative count of clean ticks as `dist.auto_sync.clean_ticks`.
+// Each factor change is logged once at Info; no per-tick spam.
+func WithDistMerkleAdaptiveBackoff(maxFactor int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if maxFactor < 1 {
+			maxFactor = 0
+		}
+
+		dm.autoSyncMaxBackoffFactor = maxFactor
 	}
 }
 
@@ -513,54 +563,14 @@ func equalBytes(a, b []byte) bool { // tiny helper
 }
 
 // SyncWith performs Merkle anti-entropy against a remote node (pull newer versions for differing chunks).
+//
+// Returns nil even when the local and remote trees agree (a "clean" sync).
+// Callers that need to distinguish clean from dirty cycles — currently only
+// the adaptive auto-sync backoff path — use syncWithStatus directly.
 func (dm *DistMemory) SyncWith(ctx context.Context, nodeID string) error {
-	transport := dm.loadTransport()
-	if transport == nil {
-		return errNoTransport
-	}
+	_, err := dm.syncWithStatus(ctx, nodeID)
 
-	startFetch := time.Now()
-
-	remoteTree, err := transport.FetchMerkle(ctx, nodeID)
-	if err != nil {
-		dm.logger.Warn(
-			"merkle sync fetch failed",
-			slog.String("peer_id", nodeID),
-			slog.Any("err", err),
-		)
-
-		return err
-	}
-
-	fetchDur := time.Since(startFetch)
-	dm.metrics.merkleFetchNanos.Store(fetchDur.Nanoseconds())
-
-	startBuild := time.Now()
-	localTree := dm.BuildMerkleTree()
-	buildDur := time.Since(startBuild)
-	dm.metrics.merkleBuildNanos.Store(buildDur.Nanoseconds())
-
-	entries := dm.sortedMerkleEntries()
-	startDiff := time.Now()
-	diffs := localTree.DiffLeafRanges(remoteTree)
-	diffDur := time.Since(startDiff)
-	dm.metrics.merkleDiffNanos.Store(diffDur.Nanoseconds())
-
-	missing := dm.resolveMissingKeys(ctx, nodeID, entries)
-
-	dm.applyMerkleDiffs(ctx, nodeID, entries, diffs, localTree.ChunkSize)
-
-	for k := range missing { // missing = remote-only keys
-		dm.fetchAndAdopt(ctx, nodeID, k)
-	}
-
-	if len(diffs) == 0 && len(missing) == 0 {
-		return nil
-	}
-
-	dm.metrics.merkleSyncs.Add(1)
-
-	return nil
+	return err
 }
 
 // WithDistCapacity sets logical capacity (not strictly enforced yet).
@@ -1188,12 +1198,17 @@ type distMetrics struct {
 	versionConflicts             atomic.Int64 // times a newer version (or tie-broken origin) replaced previous candidate
 	versionTieBreaks             atomic.Int64 // subset of conflicts decided by origin tie-break
 	readPrimaryPromote           atomic.Int64 // times read path skipped unreachable primary and promoted next owner
-	hintedQueued                 atomic.Int64 // hints queued
+	hintedQueued                 atomic.Int64 // hints queued (both sources)
 	hintedReplayed               atomic.Int64 // hints successfully replayed
 	hintedExpired                atomic.Int64 // hints expired before delivery
 	hintedDropped                atomic.Int64 // hints dropped due to non-not-found transport errors
 	hintedGlobalDropped          atomic.Int64 // hints dropped due to global caps (count/bytes)
 	hintedBytes                  atomic.Int64 // approximate total bytes currently queued (best-effort)
+	migrationHintQueued          atomic.Int64 // subset of hintedQueued: rebalance migration source only
+	migrationHintReplayed        atomic.Int64 // subset of hintedReplayed: migration-source hints that drained
+	migrationHintExpired         atomic.Int64 // subset of hintedExpired: migration-source hints aged out
+	migrationHintDropped         atomic.Int64 // subset of hintedDropped + hintedGlobalDropped: migration-source hints that died
+	migrationHintLastAgeNanos    atomic.Int64 // queue residency of the most-recently-replayed migration hint (ns)
 	merkleSyncs                  atomic.Int64 // merkle sync operations completed
 	merkleKeysPulled             atomic.Int64 // keys applied during sync
 	merkleBuildNanos             atomic.Int64 // last build duration (ns)
@@ -1241,6 +1256,11 @@ type DistMetrics struct {
 	HintedDropped                int64
 	HintedGlobalDropped          int64
 	HintedBytes                  int64
+	MigrationHintQueued          int64 // subset of HintedQueued attributable to rebalance migrations
+	MigrationHintReplayed        int64 // subset of HintedReplayed for migration hints
+	MigrationHintExpired         int64 // subset of HintedExpired for migration hints
+	MigrationHintDropped         int64 // subset of HintedDropped + HintedGlobalDropped for migration hints
+	MigrationHintLastAgeNanos    int64 // queue residency of the most-recently-replayed migration hint (ns)
 	MerkleSyncs                  int64
 	MerkleKeysPulled             int64
 	MerkleBuildNanos             int64
@@ -1249,6 +1269,8 @@ type DistMetrics struct {
 	AutoSyncLoops                int64
 	LastAutoSyncNanos            int64
 	LastAutoSyncError            string
+	AutoSyncCleanTicks           int64 // cumulative ticks where every peer returned no divergence
+	AutoSyncBackoffFactor        int64 // current adaptive-backoff multiplier (1 when disabled or freshly reset)
 	TombstonesActive             int64
 	TombstonesPurged             int64
 	WriteQuorumFailures          int64
@@ -1305,6 +1327,11 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		HintedDropped:                dm.metrics.hintedDropped.Load(),
 		HintedGlobalDropped:          dm.metrics.hintedGlobalDropped.Load(),
 		HintedBytes:                  dm.metrics.hintedBytes.Load(),
+		MigrationHintQueued:          dm.metrics.migrationHintQueued.Load(),
+		MigrationHintReplayed:        dm.metrics.migrationHintReplayed.Load(),
+		MigrationHintExpired:         dm.metrics.migrationHintExpired.Load(),
+		MigrationHintDropped:         dm.metrics.migrationHintDropped.Load(),
+		MigrationHintLastAgeNanos:    dm.metrics.migrationHintLastAgeNanos.Load(),
 		MerkleSyncs:                  dm.metrics.merkleSyncs.Load(),
 		MerkleKeysPulled:             dm.metrics.merkleKeysPulled.Load(),
 		MerkleBuildNanos:             dm.metrics.merkleBuildNanos.Load(),
@@ -1313,6 +1340,8 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		AutoSyncLoops:                dm.metrics.autoSyncLoops.Load(),
 		LastAutoSyncNanos:            dm.lastAutoSyncDuration.Load(),
 		LastAutoSyncError:            lastErr,
+		AutoSyncCleanTicks:           dm.autoSyncCleanTicks.Load(),
+		AutoSyncBackoffFactor:        dm.autoSyncBackoffFactor.Load(),
 		TombstonesActive:             dm.metrics.tombstonesActive.Load(),
 		TombstonesPurged:             dm.metrics.tombstonesPurged.Load(),
 		WriteQuorumFailures:          dm.metrics.writeQuorumFailures.Load(),
@@ -2247,7 +2276,7 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) {
 			slog.Any("err", migrationErr),
 		)
 
-		dm.queueHint(string(owners[0]), item)
+		dm.queueHint(string(owners[0]), item, hintSourceMigration)
 	}
 
 	// Update originalPrimary so we don't recount repeatedly.
@@ -2728,7 +2757,7 @@ func (dm *DistMemory) replicateTo(ctx context.Context, item *cache.Item, replica
 		// (timeout, 5xx, connection reset) silently dropped replicas.
 		// The hint TTL bounds total retry time, so a target that's
 		// permanently gone still drains rather than ballooning.
-		dm.queueHint(string(oid), item)
+		dm.queueHint(string(oid), item, hintSourceReplication)
 	}
 
 	return acks
@@ -2803,7 +2832,7 @@ func (dm *DistMemory) getWithConsistencyParallel(
 }
 
 // --- Hinted handoff implementation ---.
-func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced complexity
+func (dm *DistMemory) queueHint(nodeID string, item *cache.Item, source hintSource) { // reduced complexity
 	if dm.hintTTL <= 0 {
 		return
 	}
@@ -2830,12 +2859,24 @@ func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced co
 		dm.hintsMu.Unlock()
 		dm.metrics.hintedGlobalDropped.Add(1)
 
+		if source == hintSourceMigration {
+			dm.metrics.migrationHintDropped.Add(1)
+		}
+
 		return
 	}
 
 	cloned := *item
 
-	queue = append(queue, hintedEntry{item: &cloned, expire: time.Now().Add(dm.hintTTL), size: size})
+	now := time.Now()
+
+	queue = append(queue, hintedEntry{
+		item:     &cloned,
+		queuedAt: now,
+		expire:   now.Add(dm.hintTTL),
+		size:     size,
+		source:   source,
+	})
 	dm.hints[nodeID] = queue
 	dm.adjustHintAccounting(1, size)
 
@@ -2847,6 +2888,10 @@ func (dm *DistMemory) queueHint(nodeID string, item *cache.Item) { // reduced co
 
 	dm.metrics.hintedQueued.Add(1)
 	dm.metrics.hintedBytes.Store(bytesNow)
+
+	if source == hintSourceMigration {
+		dm.metrics.migrationHintQueued.Add(1)
+	}
 }
 
 // approxHintSize estimates the size of a hinted item for global caps.
@@ -2965,6 +3010,10 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 	if now.After(entry.expire) {
 		dm.metrics.hintedExpired.Add(1)
 
+		if entry.source == hintSourceMigration {
+			dm.metrics.migrationHintExpired.Add(1)
+		}
+
 		return 1
 	}
 
@@ -2977,6 +3026,19 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 	if err == nil {
 		dm.metrics.hintedReplayed.Add(1)
 
+		if entry.source == hintSourceMigration {
+			dm.metrics.migrationHintReplayed.Add(1)
+
+			// last_age_ns reflects queue residency of the most-recently
+			// replayed migration hint. Operators read this as "how long did
+			// the last migration retry wait for the new primary to come
+			// back?" — a direct signal of cross-node reachability during
+			// rolling deploys.
+			if !entry.queuedAt.IsZero() {
+				dm.metrics.migrationHintLastAgeNanos.Store(now.Sub(entry.queuedAt).Nanoseconds())
+			}
+		}
+
 		return 1
 	}
 
@@ -2985,6 +3047,10 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 	}
 
 	dm.metrics.hintedDropped.Add(1)
+
+	if entry.source == hintSourceMigration {
+		dm.metrics.migrationHintDropped.Add(1)
+	}
 
 	dm.logger.Warn(
 		"hint dropped after replay error",
@@ -3037,22 +3103,91 @@ func (dm *DistMemory) startAutoSyncIfEnabled(ctx context.Context) {
 	)
 }
 
+// syncWithStatus mirrors SyncWith but additionally reports whether the cycle
+// found no divergence (clean=true means: zero differing chunks, zero
+// remote-only keys). Used by runAutoSyncTick to drive the adaptive backoff
+// without changing the public SyncWith signature.
+func (dm *DistMemory) syncWithStatus(ctx context.Context, nodeID string) (bool, error) {
+	transport := dm.loadTransport()
+	if transport == nil {
+		return false, errNoTransport
+	}
+
+	startFetch := time.Now()
+
+	remoteTree, err := transport.FetchMerkle(ctx, nodeID)
+	if err != nil {
+		dm.logger.Warn(
+			"merkle sync fetch failed",
+			slog.String("peer_id", nodeID),
+			slog.Any("err", err),
+		)
+
+		return false, err
+	}
+
+	fetchDur := time.Since(startFetch)
+	dm.metrics.merkleFetchNanos.Store(fetchDur.Nanoseconds())
+
+	startBuild := time.Now()
+	localTree := dm.BuildMerkleTree()
+	buildDur := time.Since(startBuild)
+	dm.metrics.merkleBuildNanos.Store(buildDur.Nanoseconds())
+
+	entries := dm.sortedMerkleEntries()
+	startDiff := time.Now()
+	diffs := localTree.DiffLeafRanges(remoteTree)
+	diffDur := time.Since(startDiff)
+	dm.metrics.merkleDiffNanos.Store(diffDur.Nanoseconds())
+
+	missing := dm.resolveMissingKeys(ctx, nodeID, entries)
+
+	dm.applyMerkleDiffs(ctx, nodeID, entries, diffs, localTree.ChunkSize)
+
+	for k := range missing { // missing = remote-only keys
+		dm.fetchAndAdopt(ctx, nodeID, k)
+	}
+
+	if len(diffs) == 0 && len(missing) == 0 {
+		return true, nil
+	}
+
+	dm.metrics.merkleSyncs.Add(1)
+
+	return false, nil
+}
+
+// autoSyncLoop drives Merkle anti-entropy on a timer. With adaptive
+// backoff disabled (the default) it behaves like a fixed-interval ticker.
+// With backoff enabled it resets the timer between ticks using
+// nextAutoSyncDelay, doubling on clean cycles and snapping back to 1× on
+// dirty ones.
 func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration, stopCh <-chan struct{}) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	if dm.autoSyncMaxBackoffFactor > 1 {
+		dm.autoSyncBackoffFactor.Store(1)
+	}
+
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-stopCh:
 			return
-		case <-ticker.C:
-			dm.runAutoSyncTick(ctx)
+		case <-timer.C:
+			clean := dm.runAutoSyncTick(ctx)
+			dm.updateAutoSyncBackoff(clean)
+			timer.Reset(dm.nextAutoSyncDelay(interval))
 		}
 	}
 }
 
-// runAutoSyncTick performs one auto-sync cycle; separated for lower complexity.
-func (dm *DistMemory) runAutoSyncTick(ctx context.Context) {
+// runAutoSyncTick performs one auto-sync cycle. Returns true when every
+// peer reported a clean (no-divergence) result and at least one peer was
+// actually synced; false on any divergence, any sync error, or when no
+// peers were eligible (caller treats "no peers" as not-clean to avoid
+// backing off in single-node configurations).
+func (dm *DistMemory) runAutoSyncTick(ctx context.Context) bool {
 	start := time.Now()
 
 	var lastErr error
@@ -3060,6 +3195,7 @@ func (dm *DistMemory) runAutoSyncTick(ctx context.Context) {
 	members := dm.membership.List()
 	limit := dm.autoSyncPeersPerInterval
 	synced := 0
+	dirty := false
 
 	for _, member := range members {
 		if member == nil || string(member.ID) == dm.nodeID { // skip self
@@ -3070,9 +3206,12 @@ func (dm *DistMemory) runAutoSyncTick(ctx context.Context) {
 			break
 		}
 
-		err := dm.SyncWith(ctx, string(member.ID))
-		if err != nil { // capture last error only
+		clean, err := dm.syncWithStatus(ctx, string(member.ID))
+		if err != nil { // capture last error only; treat as dirty so we don't back off through outages
 			lastErr = err
+			dirty = true
+		} else if !clean {
+			dirty = true
 		}
 
 		synced++
@@ -3087,6 +3226,54 @@ func (dm *DistMemory) runAutoSyncTick(ctx context.Context) {
 	}
 
 	dm.metrics.autoSyncLoops.Add(1)
+
+	return synced > 0 && !dirty
+}
+
+// updateAutoSyncBackoff advances the backoff factor based on tick outcome.
+// Clean tick: double up to the cap. Dirty tick: snap back to 1×. No-op
+// when adaptive backoff is disabled (autoSyncMaxBackoffFactor <= 1).
+func (dm *DistMemory) updateAutoSyncBackoff(clean bool) {
+	if dm.autoSyncMaxBackoffFactor <= 1 {
+		return
+	}
+
+	prev := dm.autoSyncBackoffFactor.Load()
+
+	var next int64
+
+	if clean {
+		dm.autoSyncCleanTicks.Add(1)
+
+		next = min(prev*2, int64(dm.autoSyncMaxBackoffFactor))
+	} else {
+		next = 1
+	}
+
+	if next == prev {
+		return
+	}
+
+	dm.autoSyncBackoffFactor.Store(next)
+	dm.logger.Info(
+		"merkle auto-sync backoff factor changed",
+		slog.Int64("from", prev),
+		slog.Int64("to", next),
+		slog.Bool("clean", clean),
+	)
+}
+
+// nextAutoSyncDelay returns the sleep duration before the next auto-sync
+// tick. When adaptive backoff is disabled this is just `interval`; when
+// enabled it is `interval * currentFactor`.
+func (dm *DistMemory) nextAutoSyncDelay(interval time.Duration) time.Duration {
+	if dm.autoSyncMaxBackoffFactor <= 1 {
+		return interval
+	}
+
+	factor := max(dm.autoSyncBackoffFactor.Load(), 1)
+
+	return interval * time.Duration(factor)
 }
 
 func (dm *DistMemory) gossipLoop(stopCh <-chan struct{}) {
@@ -3763,6 +3950,31 @@ var distMetricSpecs = []distMetricSpec{
 		desc: "Approximate total bytes currently queued in hints",
 		get:  func(m DistMetrics) int64 { return m.HintedBytes },
 	},
+	{
+		name: "dist.migration.queued", unit: unitHint, counter: true,
+		desc: "Migration-source hints queued (subset of dist.hinted.queued from rebalance ticks)",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintQueued },
+	},
+	{
+		name: "dist.migration.replayed", unit: unitHint, counter: true,
+		desc: "Migration-source hints successfully delivered on replay",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintReplayed },
+	},
+	{
+		name: "dist.migration.expired", unit: unitHint, counter: true,
+		desc: "Migration-source hints that aged past hint TTL before delivery",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintExpired },
+	},
+	{
+		name: "dist.migration.dropped", unit: unitHint, counter: true,
+		desc: "Migration-source hints discarded by replay error or queue caps",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintDropped },
+	},
+	{
+		name: "dist.migration.last_age_ns", unit: unitNanos, counter: false,
+		desc: "Queue residency of the most-recently-replayed migration hint (ns)",
+		get:  func(m DistMetrics) int64 { return m.MigrationHintLastAgeNanos },
+	},
 
 	// --- Anti-entropy (Merkle) ---
 	{
@@ -3799,6 +4011,16 @@ var distMetricSpecs = []distMetricSpec{
 		name: "dist.auto_sync.last_ns", unit: unitNanos, counter: false,
 		desc: "Duration of last auto-sync loop",
 		get:  func(m DistMetrics) int64 { return m.LastAutoSyncNanos },
+	},
+	{
+		name: "dist.auto_sync.clean_ticks", unit: unitTick, counter: true,
+		desc: "Auto-sync ticks where every peer returned zero divergence (drives adaptive backoff)",
+		get:  func(m DistMetrics) int64 { return m.AutoSyncCleanTicks },
+	},
+	{
+		name: "dist.auto_sync.backoff_factor", unit: unitTick, counter: false,
+		desc: "Current adaptive auto-sync backoff multiplier (1 when disabled or reset)",
+		get:  func(m DistMetrics) int64 { return m.AutoSyncBackoffFactor },
 	},
 
 	// --- Tombstones ---
