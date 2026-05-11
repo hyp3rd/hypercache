@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"hash"
 	"hash/fnv"
 	"log/slog"
@@ -870,6 +871,8 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 	// background loops). The constructor ctx is used only for operations
 	// that must complete during NewDistMemory itself (e.g. listener bind).
 	dm.tryStartHTTP(ctx)
+	dm.logClusterJoin()
+
 	dm.startHeartbeatIfEnabled(lifeCtx)
 	dm.startHintReplayIfEnabled(lifeCtx)
 	dm.startGossipIfEnabled()
@@ -1495,6 +1498,11 @@ func (dm *DistMemory) AddPeer(address string) {
 	}
 
 	dm.membership.Upsert(cluster.NewNode("", address))
+	dm.logger.Info(
+		"peer added to membership",
+		slog.String("peer_addr", address),
+		slog.Int("members_after", len(dm.membership.List())),
+	)
 }
 
 // RemovePeer removes a peer by address (best-effort) to simulate node leave in tests.
@@ -1507,9 +1515,61 @@ func (dm *DistMemory) RemovePeer(address string) {
 		if n.Address == address {
 			dm.membership.Remove(n.ID)
 
+			dm.logger.Info(
+				"peer removed from membership",
+				slog.String("peer_id", string(n.ID)),
+				slog.String("peer_addr", address),
+				slog.Int("members_after", len(dm.membership.List())),
+			)
+
 			return
 		}
 	}
+}
+
+// logClusterJoin emits a single structured line summarizing the cluster
+// shape this node is about to join. The most operator-visible event in
+// the cluster lifecycle: one log per node startup that captures every
+// knob that affects placement and replication (so log archaeology can
+// reconstruct what shape the cluster believed itself to have when a
+// given node booted).
+func (dm *DistMemory) logClusterJoin() {
+	if dm.logger == nil {
+		return
+	}
+
+	peers := []string{}
+	if dm.membership != nil {
+		for _, n := range dm.membership.List() {
+			if dm.localNode != nil && n.ID == dm.localNode.ID {
+				continue
+			}
+
+			peers = append(peers, fmt.Sprintf("%s@%s", n.ID, n.Address))
+		}
+	}
+
+	nodeID := ""
+	nodeAddr := ""
+
+	if dm.localNode != nil {
+		nodeID = string(dm.localNode.ID)
+		nodeAddr = dm.localNode.Address
+	}
+
+	dm.logger.Info(
+		"cluster join: node starting",
+		slog.String("node_id", nodeID),
+		slog.String("node_addr", nodeAddr),
+		slog.Int("replication", dm.replication),
+		slog.Int("virtual_nodes", dm.virtualNodes),
+		slog.Int("peers_known", len(peers)),
+		slog.Any("peers", peers),
+		slog.Duration("heartbeat_interval", dm.hbInterval),
+		slog.Duration("rebalance_interval", dm.rebalanceInterval),
+		slog.Duration("gossip_interval", dm.gossipInterval),
+		slog.Duration("auto_sync_interval", dm.autoSyncInterval),
+	)
 }
 
 // distMembershipSnap is the result of membershipSnapshot — bundled
@@ -1825,6 +1885,14 @@ func (dm *DistMemory) startRebalancerIfEnabled(ctx context.Context) {
 	dm.rebalanceStopCh = stopCh
 
 	go dm.rebalanceLoop(ctx, stopCh)
+
+	dm.logger.Info(
+		"rebalance loop started",
+		slog.Duration("interval", dm.rebalanceInterval),
+		slog.Int("batch_size", dm.rebalanceBatchSize),
+		slog.Int("max_concurrent", dm.rebalanceMaxConcurrent),
+		slog.Int("replica_diff_max_per_tick", dm.replicaDiffMaxPerTick),
+	)
 }
 
 func (dm *DistMemory) rebalanceLoop(ctx context.Context, stopCh <-chan struct{}) {
@@ -2406,6 +2474,14 @@ func (dm *DistMemory) startHeartbeatIfEnabled(ctx context.Context) {
 
 		dm.stopCh = stopCh
 		go dm.heartbeatLoop(ctx, stopCh)
+
+		dm.logger.Info(
+			"heartbeat loop started",
+			slog.Duration("interval", dm.hbInterval),
+			slog.Duration("suspect_after", dm.hbSuspectAfter),
+			slog.Duration("dead_after", dm.hbDeadAfter),
+			slog.Int("indirect_probe_k", dm.indirectProbeK),
+		)
 	}
 
 	dm.startHeartbeatEventPublisher()
@@ -2823,6 +2899,12 @@ func (dm *DistMemory) startHintReplayIfEnabled(ctx context.Context) {
 
 	dm.hintStopCh = stopCh
 	go dm.hintReplayLoop(ctx, stopCh)
+
+	dm.logger.Info(
+		"hint replay loop started",
+		slog.Duration("interval", dm.hintReplayInt),
+		slog.Duration("hint_ttl", dm.hintTTL),
+	)
 }
 
 func (dm *DistMemory) hintReplayLoop(ctx context.Context, stopCh <-chan struct{}) {
@@ -2924,6 +3006,11 @@ func (dm *DistMemory) startGossipIfEnabled() {
 
 	dm.gossipStopCh = stopCh
 	go dm.gossipLoop(stopCh)
+
+	dm.logger.Info(
+		"gossip loop started",
+		slog.Duration("interval", dm.gossipInterval),
+	)
 }
 
 // startAutoSyncIfEnabled launches periodic merkle syncs to all other members.
@@ -2942,6 +3029,12 @@ func (dm *DistMemory) startAutoSyncIfEnabled(ctx context.Context) {
 
 	interval := dm.autoSyncInterval
 	go dm.autoSyncLoop(ctx, interval, stopCh)
+
+	dm.logger.Info(
+		"merkle auto-sync loop started",
+		slog.Duration("interval", interval),
+		slog.Int("peer_cap_per_tick", dm.autoSyncPeersPerInterval),
+	)
 }
 
 func (dm *DistMemory) autoSyncLoop(ctx context.Context, interval time.Duration, stopCh <-chan struct{}) {

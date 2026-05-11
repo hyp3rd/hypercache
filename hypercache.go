@@ -9,6 +9,7 @@ package hypercache
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,6 +73,12 @@ type HyperCache[T backend.IBackendConstrain] struct {
 	StatsCollector stats.ICollector
 	// Optional management HTTP server
 	mgmtHTTP *ManagementHTTPServer
+	// Structured logger. Defaults to a no-op (slog.New(slog.DiscardHandler))
+	// so the cache stays silent unless the operator opts into observability
+	// via WithLogger. Used for background-loop start/tick and for cache-
+	// lifecycle events that operators want to follow without standing up
+	// the OTel metrics pipeline.
+	logger *slog.Logger
 }
 
 // touchBackend is the optional interface a backend implements when it wants

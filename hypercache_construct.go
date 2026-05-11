@@ -2,6 +2,7 @@ package hypercache
 
 import (
 	"context"
+	"log/slog"
 	"runtime"
 	"time"
 
@@ -134,6 +135,11 @@ func newHyperCacheBase[T backend.IBackendConstrain](b backend.IBackend[T]) *Hype
 		// key's data shard and eviction shard map to the same logical position.
 		// Users can override with WithEvictionShardCount; <=1 disables sharding.
 		evictionShardCount: cache.ShardCount,
+		// Default to a discard handler so library-mode embedded uses stay
+		// silent unless the operator opts in via WithLogger. The
+		// hypercache-server binary wires a structured slog.Logger here so
+		// background-loop and cluster lifecycle events surface in JSON.
+		logger: slog.New(slog.DiscardHandler),
 	}
 }
 
