@@ -59,6 +59,7 @@ words:
   - Cbor
   - cespare
   - chans
+  - cheatsheet
   - cmap
   - Cmder
   - codacy
@@ -142,6 +143,7 @@ words:
   - ints
   - ireturn
   - Itemm
+  - journalctl
   - keyf
   - keypair
   - lamport
