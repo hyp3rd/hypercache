@@ -118,5 +118,6 @@ nav:
       - Distributed Backend: distributed.md
   - Reference:
       - API Reference: api.md
+      - Client SDK: client-sdk.md
       - Changelog: changelog.md
       - RFCs: rfcs/index.md

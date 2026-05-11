@@ -90,6 +90,7 @@ words:
   - Equalf
   - errcheck
   - errchkjson
+  - Errorf
   - errp
   - eventbus
   - ewrap
@@ -98,6 +99,7 @@ words:
   - exhaustruct
   - Fanout
   - fasthttp
+  - Fatalf
   - fatals
   - fctx
   - ferr
@@ -269,6 +271,7 @@ words:
   - vettool
   - vnode
   - vnodes
+  - Warnf
   - wrapcheck
   - Wrapf
   - xxhash

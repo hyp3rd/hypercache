@@ -8,6 +8,19 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
+- **Client SDK reference + example migration.** New [`docs/client-sdk.md`](docs/client-sdk.md) is the
+  recommended starting point for Go consumers — covers every auth mode (bearer / Basic / OIDC client
+  credentials / custom mTLS via `WithHTTPClient`), the multi-endpoint failover policy, topology refresh
+  semantics with the 1s floor and seed fallback, the full sentinel + `*StatusError` recipe set, and the
+  production caveats (connection pooling, retry policy, OTel propagation, OIDC refresh visibility). The
+  existing hand-rolled HTTP demo at `__examples/distributed-oidc-client/` was renamed to
+  [`__examples/distributed-oidc-client-raw/`](__examples/distributed-oidc-client-raw/) — kept in-tree as the
+  "what the SDK does under the hood" reference and for non-Go consumers reading along — while
+  [`__examples/distributed-oidc-client/`](__examples/distributed-oidc-client/) is now the ~150-line SDK
+  consumer that collapses the prior 480 lines down by ~70%. Top-level
+  [`__examples/README.md`](__examples/README.md) lists both with the SDK version flagged as recommended. The
+  SDK page is registered under Reference in [`mkdocs.yml`](mkdocs.yml) alongside the API reference and
+  changelog.
 - **`pkg/client` — Go SDK for hypercache-server clusters.** Closes the three operational gaps the OIDC-client
   example surfaced: - **Multi-endpoint HA without an external LB.** `client.New([]string{...}, opts...)`
   accepts a slice of seed endpoints. Each request picks one at random; on transport failure / 5xx / 503

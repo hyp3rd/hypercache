@@ -24,4 +24,6 @@ All the code in this directory is for demonstration purposes only.
 
 1. [`Observability (OpenTelemetry)`](./observability/otel.go) - Demonstrates wrapping the service with tracing and metrics middleware using OpenTelemetry.
 
-1. [`Distributed OIDC client`](./distributed-oidc-client/) - End-to-end demo of a backend service authenticating to a `hypercache-server` cluster via OIDC client credentials, then exercising the PUT/GET/DELETE/batch surface. See the example's [README](./distributed-oidc-client/README.md) for env-var setup and IdP integration patterns.
+1. [`Distributed OIDC client (SDK)`](./distributed-oidc-client/) - **Recommended**: ~150-line consumer using [`pkg/client`](../pkg/client/) for OIDC client-credentials auth, multi-endpoint failover, topology refresh, and typed errors. The path most Go integrators should follow. See [`docs/client-sdk.md`](../docs/client-sdk.md) for the full SDK reference.
+
+1. [`Distributed OIDC client (raw HTTP)`](./distributed-oidc-client-raw/) - The hand-crafted version of the above against `net/http` — kept in the tree as a reference for what the SDK does internally and for environments that can't depend on `pkg/client` (non-Go consumers reading along, code-review reference, etc.).
