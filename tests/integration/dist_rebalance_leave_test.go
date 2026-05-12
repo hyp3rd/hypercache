@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestDistRebalanceLeave verifies keys are redistributed after a node leaves.
@@ -32,18 +31,15 @@ func TestDistRebalanceLeave(t *testing.T) {
 	nodeC := mustDistNode(ctx, t, "C", addrC, []string{addrA, addrB}, opts...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx); _ = nodeC.Stop(ctx) }()
 
-	// Insert keys through A.
-	totalKeys := 300
-	for i := range totalKeys {
-		k := cacheKey(i)
+	// Inject keys across all three nodes — when C leaves, keys
+	// that lived on C need to migrate to surviving owners, so
+	// the pre-leave state must have keys on every node for the
+	// post-leave migration assertion to be meaningful. See
+	// populateKeys' doc in dist_rebalance_test.go for why we use
+	// DebugInject instead of Set.
+	const totalKeys = 300
 
-		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
-
-		err := nodeA.Set(ctx, it)
-		if err != nil {
-			t.Fatalf("set %s: %v", k, err)
-		}
-	}
+	populateKeysOnAll(ctx, t, totalKeys, nodeA, nodeB, nodeC)
 
 	time.Sleep(250 * time.Millisecond) // allow replication
 
