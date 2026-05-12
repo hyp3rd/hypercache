@@ -286,7 +286,8 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Fixed
 
-- **Set-forward promotion no longer requires the in-process `ErrBackendNotFound` sentinel.**
+- **Set-forward promotion no longer requires the in-process `ErrBackendNotFound` sentinel, and the dead
+  primary now converges via the hint queue (not just the next merkle tick).**
   [`handleForwardPrimary`](pkg/backend/dist_memory.go) used to gate "primary unreachable → promote to
   replica" on `errors.Is(errFwd, sentinel.ErrBackendNotFound)`, the error the in-process transport returns
   for an unregistered peer. HTTP/gRPC transports against a stopped container surface
@@ -299,10 +300,17 @@ All notable changes to HyperCache are recorded here. The format follows
   matching the in-process and production transport behavior under the same resilience contract. Spurious
   promotion on a transient blip is benign — `applySet` version-compares on the receiver, and merkle
   anti-entropy / `chooseNewer` reconcile any divergent `(version, origin)` pair via the existing
-  last-write-wins rule. New test [`TestDistSet_PromotesOnGenericForwardError`](tests/hypercache_distmemory_forward_primary_promotion_test.go)
-  uses the chaos hooks at `DropRate=1.0` to deterministically force a generic forward error and asserts the
-  Set succeeds via promotion; the existing `TestDistFailureRecovery` continues to pass byte-identical (the
-  change widens the promotion gate, doesn't narrow it).
+  last-write-wins rule. Defense-in-depth follow-up: when promotion fires, `setImpl` now widens the replica
+  fan-out from `owners[1:]` to the full `owners` list, so `replicateTo`'s existing best-effort hint queueing
+  catches the failed forward to the dead primary. Its post-restart convergence window is bounded by
+  hint-replay (`WithDistHintReplayInterval`, ~200ms in the default cluster config) rather than waiting for
+  the next merkle tick. New OTel counter `dist.write.forward_promotion` exposes how often promotion fired —
+  a flapping primary surfaces as a steady rise here, well before any read- or write-side error spikes.
+  Test [`TestDistSet_PromotesOnGenericForwardError`](tests/hypercache_distmemory_forward_primary_promotion_test.go)
+  uses the chaos hooks at `DropRate=1.0` to deterministically force a generic forward error, asserts the
+  Set succeeds via promotion, that `HintedQueued` bumps, and — after chaos clears — that the original
+  primary receives the write through the natural hint-replay loop. The existing `TestDistFailureRecovery`
+  continues to pass byte-identical (the change widens the promotion gate, doesn't narrow it).
 - **`TestDistRebalanceReplicaDiffThrottle` no longer flakes under `make test-race`.** The test's 900ms hard
   sleep wasn't enough wall-clock budget for the rebalancer's 80ms-tick loop to actually fire 11 ticks under
   `-race` + `-shuffle=on`'s scheduler pressure. Replaced the sleep with a 5-second polling loop that exits as

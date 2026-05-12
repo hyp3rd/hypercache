@@ -1274,6 +1274,7 @@ type distMetrics struct {
 	writeQuorumFailures          atomic.Int64 // number of write operations that failed quorum
 	writeAcks                    atomic.Int64 // cumulative replica write acks (includes primary)
 	writeAttempts                atomic.Int64 // total write operations attempted (Set)
+	writeForwardPromotion        atomic.Int64 // times a Set forward to primary failed and the local replica self-promoted
 	rebalancedKeys               atomic.Int64 // keys migrated during rebalancing
 	rebalanceBatches             atomic.Int64 // number of batches processed
 	rebalanceThrottle            atomic.Int64 // times rebalance was throttled due to concurrency limits
@@ -1334,6 +1335,7 @@ type DistMetrics struct {
 	WriteQuorumFailures          int64
 	WriteAcks                    int64
 	WriteAttempts                int64
+	WriteForwardPromotion        int64
 	RebalancedKeys               int64
 	RebalanceBatches             int64
 	RebalanceThrottle            int64
@@ -1409,6 +1411,7 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		WriteQuorumFailures:          dm.metrics.writeQuorumFailures.Load(),
 		WriteAcks:                    dm.metrics.writeAcks.Load(),
 		WriteAttempts:                dm.metrics.writeAttempts.Load(),
+		WriteForwardPromotion:        dm.metrics.writeForwardPromotion.Load(),
 		RebalancedKeys:               dm.metrics.rebalancedKeys.Load(),
 		RebalanceBatches:             dm.metrics.rebalanceBatches.Load(),
 		RebalanceThrottle:            dm.metrics.rebalanceThrottle.Load(),
@@ -3657,6 +3660,8 @@ func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster
 	if len(owners) > 1 {
 		for _, oid := range owners[1:] {
 			if oid == dm.localNode.ID && dm.ownsKeyInternal(item.Key) {
+				dm.metrics.writeForwardPromotion.Add(1)
+
 				return true, nil
 			}
 		}
@@ -3823,6 +3828,8 @@ func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.
 
 	span.SetAttributes(attribute.Int("dist.owners.count", len(owners)))
 
+	promoted := false
+
 	if owners[0] != dm.localNode.ID { // attempt forward; may promote
 		proceedAsPrimary, ferr := dm.handleForwardPrimary(ctx, owners, item)
 		if ferr != nil {
@@ -3832,6 +3839,8 @@ func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.
 		if !proceedAsPrimary { // forwarded successfully; nothing else to do
 			return nil
 		}
+
+		promoted = true
 	}
 
 	// primary path: assign version & timestamp
@@ -3840,7 +3849,19 @@ func (dm *DistMemory) setImpl(ctx context.Context, item *cache.Item, span trace.
 	item.LastUpdated = time.Now()
 	dm.applySet(ctx, item, false)
 
-	acks := 1 + dm.replicateTo(ctx, item, owners[1:])
+	// When we promoted, the original primary is unreachable but still
+	// a listed owner. Pass the full owners list (not owners[1:]) so
+	// replicateTo's existing failure-path queues a hint for the dead
+	// primary — its post-restart convergence is bounded by hint-replay
+	// (~200ms by default) rather than waiting for the next merkle tick.
+	// replicateTo already skips the local node, so adding owners[0]
+	// back in doesn't cause a self-forward.
+	replicas := owners[1:]
+	if promoted {
+		replicas = owners
+	}
+
+	acks := 1 + dm.replicateTo(ctx, item, replicas)
 	dm.metrics.writeAcks.Add(int64(acks))
 
 	span.SetAttributes(attribute.Int("dist.acks", acks))
@@ -4191,6 +4212,11 @@ var distMetricSpecs = []distMetricSpec{
 		name: "dist.write.quorum_failures", unit: unitOp, counter: true,
 		desc: "Set operations that failed quorum",
 		get:  func(m DistMetrics) int64 { return m.WriteQuorumFailures },
+	},
+	{
+		name: "dist.write.forward_promotion", unit: unitOp, counter: true,
+		desc: "Set forwards that promoted the local replica because the primary was unreachable",
+		get:  func(m DistMetrics) int64 { return m.WriteForwardPromotion },
 	},
 
 	// --- Rebalance ---
