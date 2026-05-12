@@ -1255,13 +1255,13 @@ type distMetrics struct {
 	hintedQueued                 atomic.Int64 // hints queued (both sources)
 	hintedReplayed               atomic.Int64 // hints successfully replayed
 	hintedExpired                atomic.Int64 // hints expired before delivery
-	hintedDropped                atomic.Int64 // hints dropped due to non-not-found transport errors
+	hintedDropped                atomic.Int64 // Deprecated: no longer bumped — processHint retains on any error; OTel-registered for stability
 	hintedGlobalDropped          atomic.Int64 // hints dropped due to global caps (count/bytes)
 	hintedBytes                  atomic.Int64 // approximate total bytes currently queued (best-effort)
 	migrationHintQueued          atomic.Int64 // subset of hintedQueued: rebalance migration source only
 	migrationHintReplayed        atomic.Int64 // subset of hintedReplayed: migration-source hints that drained
 	migrationHintExpired         atomic.Int64 // subset of hintedExpired: migration-source hints aged out
-	migrationHintDropped         atomic.Int64 // subset of hintedDropped + hintedGlobalDropped: migration-source hints that died
+	migrationHintDropped         atomic.Int64 // migration-source hints dropped by global cap overflow (replay errors no longer bump this)
 	migrationHintLastAgeNanos    atomic.Int64 // queue residency of the most-recently-replayed migration hint (ns)
 	merkleSyncs                  atomic.Int64 // merkle sync operations completed
 	merkleKeysPulled             atomic.Int64 // keys applied during sync
@@ -3140,24 +3140,23 @@ func (dm *DistMemory) processHint(ctx context.Context, nodeID string, entry hint
 		return 1
 	}
 
-	if errors.Is(err, sentinel.ErrBackendNotFound) { // keep – backend still absent
-		return 0
-	}
-
-	dm.metrics.hintedDropped.Add(1)
-
-	if entry.source == hintSourceMigration {
-		dm.metrics.migrationHintDropped.Add(1)
-	}
-
-	dm.logger.Warn(
-		"hint dropped after replay error",
+	// Retain on any non-nil error. Pre-fix this dropped the hint
+	// unless the in-process `ErrBackendNotFound` sentinel matched,
+	// but production HTTP/gRPC transports surface `net.OpError`,
+	// `io.EOF`, or `context.DeadlineExceeded` for a briefly-
+	// unreachable peer (mid-restart, network blip), causing the
+	// hint to be abandoned on its very first replay attempt
+	// instead of being retained through the outage. The hint TTL
+	// bounds total retry time, so a permanently-broken target
+	// still drains; flapping targets converge once they stabilize.
+	dm.logger.Debug(
+		"hint replay attempt failed; retaining for retry",
 		slog.String("peer_id", nodeID),
 		slog.String("key", entry.item.Key),
 		slog.Any("err", err),
 	)
 
-	return 1
+	return 0
 }
 
 // --- Simple gossip (in-process only) ---.
@@ -3908,12 +3907,50 @@ func (dm *DistMemory) removeImpl(ctx context.Context, keys []string) error {
 			return sentinel.ErrNotOwner
 		}
 
-		dm.metrics.forwardRemove.Add(1)
-
-		_ = transport.ForwardRemove(ctx, string(owners[0]), key, true)
+		err := dm.forwardOrPromoteRemove(ctx, transport, key, owners)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+// forwardOrPromoteRemove forwards a Remove to the listed primary; on
+// any non-nil transport error, promotes to a local replica owner if
+// possible (apply locally + fan out to peer replicas). This mirrors
+// handleForwardPrimary's promotion contract for the write path —
+// pre-fix the Remove path silently swallowed the forward error and
+// returned `nil` to the caller, so a `docker stop` of the primary
+// caused deletes to be lost on every owner. The dead primary catches
+// up via merkle anti-entropy on restart, the same convergence
+// mechanism that already handles replica-side tombstones in
+// `replicateRemoveWithSpan`.
+func (dm *DistMemory) forwardOrPromoteRemove(
+	ctx context.Context,
+	transport DistTransport,
+	key string,
+	owners []cluster.NodeID,
+) error {
+	dm.metrics.forwardRemove.Add(1)
+
+	err := transport.ForwardRemove(ctx, string(owners[0]), key, true)
+	if err == nil {
+		return nil
+	}
+
+	if len(owners) > 1 {
+		for _, oid := range owners[1:] {
+			if oid == dm.localNode.ID && dm.ownsKeyInternal(key) {
+				dm.metrics.writeForwardPromotion.Add(1)
+				dm.applyRemove(ctx, key, true)
+
+				return nil
+			}
+		}
+	}
+
+	return err
 }
 
 // distMetricSpec describes one OTel observable instrument backed by a
