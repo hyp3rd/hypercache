@@ -13,7 +13,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -21,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hyp3rd/ewrap"
 	"golang.org/x/oauth2/clientcredentials"
 
 	"github.com/hyp3rd/hypercache/pkg/client"
@@ -40,8 +40,8 @@ const (
 // errors.Is against it; in the example, run() surfaces the
 // wrapped error to stderr.
 var (
-	errEnvMissing          = errors.New("missing required env var")
-	errDiscoveryNoEndpoint = errors.New("OIDC discovery doc missing token_endpoint")
+	errEnvMissing          = ewrap.New("missing required env var")
+	errDiscoveryNoEndpoint = ewrap.New("OIDC discovery doc missing token_endpoint")
 )
 
 func main() {

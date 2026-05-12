@@ -160,6 +160,79 @@ err := dm.SyncWith(ctx, "node-B")
 
 `WithDistMerkleAutoSync(interval)` runs this on a timer; manual calls are useful for debugging.
 
+## Chaos hooks (resilience testing)
+
+The dist backend exposes fault-injection hooks via the `Chaos` type
+and `WithDistChaos` option. **Tests only** — there's no production
+safety net; pointing a live cluster at a Chaos with `DropRate=1.0`
+will drop every transport call.
+
+What's covered today:
+
+- **Drop**: with configurable probability, return `ErrChaosDrop`
+  instead of forwarding the call. Useful for "what if the peer's
+  down for N seconds?" scenarios — the hint queue should absorb
+  the drops and replay them once chaos is disabled.
+- **Latency**: with configurable probability, sleep before
+  forwarding. Useful for "what if the peer's slow?" — exercises
+  the timeout + retry surface.
+
+What's deliberately out of scope for v1:
+
+- Per-peer partition simulation (block a specific peer ID).
+  Tracked as a follow-up; the current hooks treat every peer
+  uniformly. Workaround: spin a third node, configure chaos on
+  it only, and observe what happens when "node N misbehaves".
+
+### Usage
+
+```go
+import "github.com/hyp3rd/hypercache/pkg/backend"
+
+chaos := backend.NewChaos()
+
+bm, _ := backend.NewDistMemory(ctx,
+    backend.WithDistNode("A", addr),
+    backend.WithDistChaos(chaos),
+    // ... other options ...
+)
+
+// Mid-test: enable 50% drops + 10ms latency on every call.
+chaos.SetDropRate(0.5)
+chaos.SetLatency(10*time.Millisecond, 1.0)
+
+// ... drive the cluster, observe behavior ...
+
+// Heal: turn faults off.
+chaos.SetDropRate(0)
+
+// Verify the chaos counters fired AND the cluster recovered.
+metrics := bm.(*backend.DistMemory).Metrics()
+fmt.Println("drops:", metrics.ChaosDrops)
+fmt.Println("hint replays after heal:", metrics.HintedReplayed)
+```
+
+### Metrics
+
+- `dist.chaos.drops` (counter) — calls dropped since construction.
+- `dist.chaos.latencies` (counter) — calls that had latency injected.
+
+Both stay at zero when chaos isn't configured (the wrapper isn't
+installed at all — `WithDistChaos` is opt-in).
+
+### What this gives you
+
+The rebalance flake we caught manually in May 2026
+(`TestDistRebalanceThrottle` failing under `-shuffle` due to a
+transient quorum miss) is exactly the class of bug the chaos hooks
+exist to surface. Wire chaos at 5-10% drop rate against the test
+suite, run under `-race`, and the timing-sensitive paths surface
+deterministically rather than as 1-in-50 CI flakes.
+
+See [`pkg/backend/dist_chaos_test.go`](../pkg/backend/dist_chaos_test.go)
+and [`tests/integration/dist_chaos_test.go`](../tests/integration/dist_chaos_test.go)
+for runnable examples.
+
 ## Capacity planning notes
 
 - Each shard mutex is independent — write throughput scales with shard count up to CPU saturation.
