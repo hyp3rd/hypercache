@@ -216,6 +216,8 @@ docs-serve: docs-build
 	PYENV_VERSION=mkdocs mkdocs serve
 
 pre-commit:
+	@eval "$$(pyenv init -)" && \
+	pyenv activate pre-commit && \
 	pre-commit run -a trailing-whitespace && \
 	pre-commit run -a end-of-file-fixer && \
 	pre-commit run -a markdownlint && \

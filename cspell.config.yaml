@@ -215,6 +215,7 @@ words:
   - pyenv
   - pygments
   - pymdownx
+  - reaad
   - recvcheck
   - rediscluster
   - Redocly

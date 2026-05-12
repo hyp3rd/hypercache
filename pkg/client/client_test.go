@@ -634,3 +634,92 @@ func TestClient_New_OptionErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestClient_Can_Allowed pins the happy path: the server says
+// allowed=true and the SDK surfaces it as `true, nil`.
+func TestClient_Can_Allowed(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/me/can" {
+			http.Error(w, "wrong route", http.StatusNotFound)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"capability": r.URL.Query().Get("capability"),
+			"allowed":    true,
+		})
+	}))
+
+	t.Cleanup(srv.Close)
+
+	c, _ := client.New([]string{srv.URL})
+	t.Cleanup(func() { _ = c.Close() })
+
+	allowed, err := c.Can(context.Background(), "cache.write")
+	if err != nil {
+		t.Fatalf("Can: %v", err)
+	}
+
+	if !allowed {
+		t.Errorf("Can(cache.write): got allowed=false, want true")
+	}
+}
+
+// TestClient_Can_Denied pins the inverse: when the server says
+// allowed=false, the SDK surfaces `false, nil` — denial is not
+// an error. The caller decides whether the missing capability is
+// fatal at the application layer.
+func TestClient_Can_Denied(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"capability": r.URL.Query().Get("capability"),
+			"allowed":    false,
+		})
+	}))
+
+	t.Cleanup(srv.Close)
+
+	c, _ := client.New([]string{srv.URL})
+	t.Cleanup(func() { _ = c.Close() })
+
+	allowed, err := c.Can(context.Background(), "cache.admin")
+	if err != nil {
+		t.Fatalf("Can: %v", err)
+	}
+
+	if allowed {
+		t.Errorf("Can(cache.admin): got allowed=true, want false (denial path)")
+	}
+}
+
+// TestClient_Can_UnknownCapability pins the spelling-mistake
+// discrimination: an unknown capability comes back as
+// ErrBadRequest, not (false, nil). Callers writing
+// `if allowed, _ := c.Can(ctx, "cache.reaad")` should see the
+// typo surface rather than silently degrade to "I guess I can't".
+func TestClient_Can_UnknownCapability(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "unknown capability 'cache.reaad'")
+	}))
+
+	t.Cleanup(srv.Close)
+
+	c, _ := client.New([]string{srv.URL})
+	t.Cleanup(func() { _ = c.Close() })
+
+	_, err := c.Can(context.Background(), "cache.reaad")
+	if !errors.Is(err, client.ErrBadRequest) {
+		t.Errorf("Can(unknown): want errors.Is(_, ErrBadRequest), got %v", err)
+	}
+}

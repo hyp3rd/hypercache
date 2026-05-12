@@ -109,7 +109,14 @@ func WithOIDCClientCredentials(cfg clientcredentials.Config) Option {
 
 		baseCtx := contextWithBaseHTTP(base)
 
-		c.http = oauth2.NewClient(baseCtx, cfg.TokenSource(baseCtx))
+		// Wrap the underlying TokenSource so rotations log via the
+		// client's slog.Logger. The wrapper holds a pointer to the
+		// Client so WithLogger applied AFTER this option still
+		// reaches the refresh log surface — c.logger is read at
+		// rotation time, not capture time.
+		source := newLoggingTokenSource(cfg.TokenSource(baseCtx), c)
+
+		c.http = oauth2.NewClient(baseCtx, source)
 
 		return nil
 	}

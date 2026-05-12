@@ -277,6 +277,49 @@ func (c *Client) Identity(ctx context.Context) (*Identity, error) {
 	}, nil
 }
 
+// Can probes whether the caller's resolved identity holds the
+// given capability. Cheaper than the speculative-write pattern
+// (try the action, catch 403) and stable across future
+// scope-to-capability refactors — clients key off the capability
+// string, not the internal scope shape.
+//
+// Returns (true, nil) when the cluster confirms the capability,
+// (false, nil) when it confirms the capability is missing, and
+// (false, err) when the probe itself failed (network, auth,
+// unknown capability — `errors.Is(err, ErrBadRequest)` discriminates
+// the spelling-mistake case).
+//
+// Pair with the canonical at-startup canary:
+//
+//	can, err := c.Can(ctx, "cache.write")
+//	if err != nil { log.Fatal(err) }
+//	if !can { log.Fatal("this credential cannot write") }
+func (c *Client) Can(ctx context.Context, capability string) (bool, error) {
+	path := "/v1/me/can?capability=" + url.QueryEscape(capability)
+
+	resp, err := c.do(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return false, err
+	}
+	defer closeBody(resp)
+
+	if resp.StatusCode != http.StatusOK {
+		return false, classifyResponse(resp)
+	}
+
+	var out struct {
+		Capability string `json:"capability"`
+		Allowed    bool   `json:"allowed"`
+	}
+
+	decodeErr := json.NewDecoder(resp.Body).Decode(&out)
+	if decodeErr != nil {
+		return false, fmt.Errorf("decode /v1/me/can: %w", decodeErr)
+	}
+
+	return out.Allowed, nil
+}
+
 // --- internal helpers used by options.go ---
 
 // bearerAuthTransport returns a RoundTripper that injects the
