@@ -72,7 +72,7 @@ periodic ticks `rebalance.batches` increments visible at `/dist/metrics`.
   if scan duration exceeds the interval, you have a sustained backlog.
 
 **What to do.** Usually wait. If wait is unbounded, see
-[Rebalance under load](operations.md#failure-mode--rebalance-under-load).
+[Rebalance under load](operations.md#failure-mode-rebalance-under-load).
 
 ## Heartbeat flapping
 
@@ -109,7 +109,7 @@ emit the second line, with no preceding `pruned (dead)`).
 
 **What to do.** If `refuted` is climbing in step with `failure`, the system is self-correcting — extend
 `WithDistHeartbeat`'s `suspectAfter` / `deadAfter` if the flap is noisy. If `indirect_probe.failure` is also
-climbing, the peer is genuinely unreachable — see [replica loss](operations.md#failure-mode--replica-loss).
+climbing, the peer is genuinely unreachable — see [replica loss](operations.md#failure-mode-replica-loss).
 
 ## Hint queue building
 
@@ -134,7 +134,7 @@ mismatch, schema drift, or a truly bad value.
 - `dist.hinted.global_dropped` (counter) — caps exceeded; hints are being silently dropped. Hard limit hit.
 - `dist.hinted.expired` (counter) — hints aged past `WithDistHintTTL`.
 
-**What to do.** See [Hint queue overflow](operations.md#failure-mode--hint-queue-overflow) for the full
+**What to do.** See [Hint queue overflow](operations.md#failure-mode-hint-queue-overflow) for the full
 playbook. Short version: restore the peer, or remove it from membership and let hints expire.
 
 ## Auth failures
@@ -224,7 +224,7 @@ log-spam under load).
 err := dm.SyncWith(ctx, "peer-node-id")
 ```
 
-The full discussion is in [Split-brain](operations.md#failure-mode--split-brain).
+The full discussion is in [Split-brain](operations.md#failure-mode-split-brain).
 
 ## Drain not draining
 

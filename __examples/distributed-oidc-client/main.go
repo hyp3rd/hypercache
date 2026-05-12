@@ -135,6 +135,27 @@ func demo(ctx context.Context, c *client.Client) error {
 
 	fmt.Fprintln(os.Stdout, "deleted")
 
+	// Batch shape: write three keys in a single round-trip. The
+	// per-item Stored / Err fields surface per-key results; the
+	// outer error fires only on transport / auth / HTTP-level
+	// failures (4xx / 5xx).
+	batchResults, err := c.BatchSet(ctx, []client.BatchSetItem{
+		{Key: "batch-1", Value: []byte("one"), TTL: time.Minute},
+		{Key: "batch-2", Value: []byte("two"), TTL: time.Minute},
+		{Key: "batch-3", Value: []byte("three"), TTL: time.Minute},
+	})
+	if err != nil {
+		return fmt.Errorf("batch set: %w", err)
+	}
+
+	for _, r := range batchResults {
+		if r.Stored {
+			fmt.Fprintf(os.Stdout, "batch stored %s (%d bytes)\n", r.Key, r.Bytes)
+		} else {
+			fmt.Fprintf(os.Stdout, "batch %s FAILED: %v\n", r.Key, r.Err)
+		}
+	}
+
 	return nil
 }
 

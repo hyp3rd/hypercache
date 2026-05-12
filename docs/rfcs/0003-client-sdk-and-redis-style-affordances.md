@@ -67,7 +67,7 @@ Closing these gaps is the SDK work.
 
 ### Where the existing roadmap lands
 
-[ROADMAP.md](../../ROADMAP.md) Phase 5 already scopes "Go client: seed discovery, ring bootstrap, direct owner
+[ROADMAP.md](https://github.com/hyp3rd/hypercache/blob/main/ROADMAP.md) Phase 5 already scopes "Go client: seed discovery, ring bootstrap, direct owner
 hashing, parallel fan-out for QUORUM/ALL". This RFC refines that scope and folds in the auth and
 operational-error work surfaced by the example.
 

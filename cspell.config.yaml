@@ -69,6 +69,7 @@ words:
   - cmap
   - Cmder
   - codacy
+  - codebook
   - codegen
   - codemod
   - containedctx
@@ -147,6 +148,7 @@ words:
   - HTTPTLS
   - hypercache
   - Hyperd
+  - idempotently
   - idxs
   - Iface
   - ineff

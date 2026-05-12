@@ -72,7 +72,7 @@ func (c *Client) topologyRefreshLoop() {
 // tick; manual callers usually don't need to.
 func (c *Client) RefreshTopology(ctx context.Context) error {
 	resp, err := c.do(ctx, http.MethodGet, "/cluster/members", nil, map[string]string{
-		"Accept": "application/json",
+		"Accept": contentTypeJSON,
 	})
 	if err != nil {
 		return fmt.Errorf("fetch /cluster/members: %w", err)

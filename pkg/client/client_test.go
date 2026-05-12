@@ -96,11 +96,11 @@ func newCacheStub(t *testing.T) *cacheStub {
 			cs.store[key] = body
 
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"key":    key,
-				"stored": true,
-				"bytes":  len(body),
-				"node":   stubNode,
-				"owners": []string{stubNode},
+				jsonKey:    key,
+				jsonStored: true,
+				"bytes":    len(body),
+				jsonNode:   stubNode,
+				jsonOwners: []string{stubNode},
 			})
 
 		case http.MethodGet:
@@ -115,12 +115,12 @@ func newCacheStub(t *testing.T) *cacheStub {
 				w.Header().Set("Content-Type", "application/json")
 
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"key":            key,
+					jsonKey:          key,
 					"value":          base64.StdEncoding.EncodeToString(val),
 					"value_encoding": "base64",
 					"version":        1,
-					"node":           stubNode,
-					"owners":         []string{stubNode},
+					jsonNode:         stubNode,
+					jsonOwners:       []string{stubNode},
 				})
 
 				return

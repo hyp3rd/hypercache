@@ -8,6 +8,19 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
+- **Batch operations on the client SDK.** `BatchSet`, `BatchGet`, `BatchDelete` close the v1 SDK gap PR3's
+  stopping conditions called out — the raw OIDC example demonstrated batch round-trips but the SDK had no
+  equivalent. Each method takes a slice and returns per-item results so a single HTTP call can carry
+  mixed-outcome batches (some stored, some draining) without forcing the caller to either fail-the-whole-batch
+  or parse the wire envelope by hand. Per-item `Err` is the standard `*StatusError`, so
+  `errors.Is(result.Err, client.ErrDraining)` works inside per-item handling the same way it does for
+  single-key calls. Empty input short-circuits to an empty result slice without dispatching an HTTP request.
+  Eight new test cases in [`pkg/client/batch_test.go`](pkg/client/batch_test.go) cover the happy path for each
+  verb, per-item failures, mixed found/missing in `BatchGet`, empty-input no-op, and the HTTP-level
+  failure-wraps-`ErrAllEndpointsFailed` regression guard. The OIDC example
+  ([`__examples/distributed-oidc-client/main.go`](__examples/distributed-oidc-client/main.go)) gains a final
+  `BatchSet` step demonstrating the surface, and [`docs/client-sdk.md`](docs/client-sdk.md) grows a dedicated
+  "Batch operations" section explaining the per-item granularity contract.
 - **Client SDK reference + example migration.** New [`docs/client-sdk.md`](docs/client-sdk.md) is the
   recommended starting point for Go consumers — covers every auth mode (bearer / Basic / OIDC client
   credentials / custom mTLS via `WithHTTPClient`), the multi-endpoint failover policy, topology refresh

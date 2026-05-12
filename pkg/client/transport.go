@@ -24,6 +24,11 @@ const httpErrorStatusFloor = 400
 // keep logs sane.
 const errBodyTruncateLen = 256
 
+// contentTypeJSON is the Content-Type / Accept value the SDK uses
+// for JSON request bodies. Kept as a const so a typo can't drift
+// individual call sites apart.
+const contentTypeJSON = "application/json"
+
 // failoverShuffler is the pluggable random source the do() path uses
 // to randomize endpoint order. Wrapped in a struct so tests can
 // inject a deterministic sequence (see useStaticOrder in tests).

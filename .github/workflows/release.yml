@@ -13,11 +13,11 @@ name: release
 
 on:
   push:
-    tags: ['v*.*.*']
+    tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to (re)create a release for'
+        description: "Existing tag to (re)create a release for"
         required: true
 
 permissions:
@@ -70,7 +70,7 @@ jobs:
           echo "path=/tmp/release-body.md" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           name: ${{ steps.tag.outputs.name }}

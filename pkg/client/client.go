@@ -195,7 +195,7 @@ func (c *Client) Get(ctx context.Context, key string) ([]byte, error) {
 // returns the JSON envelope instead of raw bytes.
 func (c *Client) GetItem(ctx context.Context, key string) (*Item, error) {
 	resp, err := c.do(ctx, http.MethodGet, "/v1/cache/"+url.PathEscape(key), nil, map[string]string{
-		"Accept": "application/json",
+		"Accept": contentTypeJSON,
 	})
 	if err != nil {
 		return nil, err
