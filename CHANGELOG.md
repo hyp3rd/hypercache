@@ -286,6 +286,34 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Fixed
 
+- **Remove path no longer silently succeeds when the primary is unreachable.**
+  Symmetric audit-fix to the Set-forward change: [`removeImpl`](pkg/backend/dist_memory.go) used to
+  swallow the `ForwardRemove` error with `_ = transport.ForwardRemove(...)` and return `nil`, so a
+  Remove against a downed primary "succeeded" while the stale value lingered on every owner. Promotion
+  is now extracted into `forwardOrPromoteRemove`, mirroring `handleForwardPrimary`'s contract: on any
+  non-nil error, if the local node is a replica owner, apply the remove locally + fan out to peer
+  replicas via the existing `applyRemove(replicate=true)` path; otherwise return the error. The
+  promotion path bumps the shared `dist.write.forward_promotion` counter, so operators see Set + Remove
+  promotions on the same observable instrument. The dead primary catches up via merkle anti-entropy on
+  restart — the same convergence mechanism that already handles replica-side tombstones in
+  `replicateRemoveWithSpan`. New test [`TestDistRemove_PromotesOnGenericForwardError`](tests/hypercache_distmemory_audit_fixes_test.go)
+  drives chaos at `DropRate=1.0` and asserts the Remove returns `nil` (promotion succeeded), the local
+  copy is cleared, and the promotion counter bumped.
+- **Hint replay retains the queue on any transient transport error.**
+  [`processHint`](pkg/backend/dist_memory.go) used to drop the hint unless the in-process
+  `errors.Is(err, sentinel.ErrBackendNotFound)` matched. Production HTTP/gRPC transports surface
+  `net.OpError` / `io.EOF` / `context.DeadlineExceeded` for a peer that's mid-restart or briefly
+  unreachable — none of which matched the gate, so the hint was abandoned on its very first replay
+  attempt instead of being retained through the outage. The exact failure mode behind the
+  `recovery on :8083 timed out after 60s: pre=50/50, during=43/50` symptom in the cluster-resilience
+  workflow: even with the Set-forward promotion in place, the hint queue lost the writes to the dead
+  primary before it came back. Now any non-nil error retains the hint; the configured `WithDistHintTTL`
+  bounds total retry time, so a permanently-broken target still drains. The deprecated `HintedDropped`
+  / `MigrationHintDropped` OTel counters remain registered for stability but now only bump on
+  queue-capacity overflow, not replay errors. New test
+  [`TestDistHintReplay_RetainsOnGenericReplayError`](tests/hypercache_distmemory_audit_fixes_test.go)
+  forces a 150ms window of failed replays under chaos, heals chaos, and asserts the hint still replays
+  onto the recovered peer.
 - **Set-forward promotion no longer requires the in-process `ErrBackendNotFound` sentinel, and the dead
   primary now converges via the hint queue (not just the next merkle tick).**
   [`handleForwardPrimary`](pkg/backend/dist_memory.go) used to gate "primary unreachable → promote to

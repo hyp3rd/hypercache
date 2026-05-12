@@ -53,6 +53,7 @@ words:
   - benchstat
   - benchtime
   - bitnami
+  - blackholed
   - bodyclose
   - bufbuild
   - buildx

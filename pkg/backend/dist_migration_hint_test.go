@@ -213,12 +213,17 @@ func TestMigrationHint_ExpiredBumpsPerSourceCounter(t *testing.T) {
 	}
 }
 
-// TestMigrationHint_TransportErrorBumpsDroppedCounter pins the drop
-// path: when the transport returns a non-NotFound error (auth failure,
-// 5xx, parse error), the hint is removed and the per-source counter
-// bumps. ErrBackendNotFound stays "keep" — that path is exercised in
-// the next test.
-func TestMigrationHint_TransportErrorBumpsDroppedCounter(t *testing.T) {
+// TestMigrationHint_TransportErrorKeepsEntry pins the new
+// retain-on-any-error contract: when a hint replay fails with any
+// non-nil transport error (e.g. net.OpError, io.EOF, a scripted
+// generic error like here), the hint stays queued for the next
+// replay tick. Pre-fix this branch dropped the hint and bumped
+// hintedDropped / migrationHintDropped, but that only matched the
+// in-process ErrBackendNotFound sentinel — production HTTP/gRPC
+// transports surfaced a different error class and lost the hint on
+// the first replay attempt. TTL bounds total retry time, so a
+// permanently-broken target still drains.
+func TestMigrationHint_TransportErrorKeepsEntry(t *testing.T) {
 	t.Parallel()
 
 	dm, transport := newMigrationHintTestDM(t)
@@ -234,16 +239,16 @@ func TestMigrationHint_TransportErrorBumpsDroppedCounter(t *testing.T) {
 		source:   hintSourceMigration,
 	}
 
-	if action := dm.processHint(context.Background(), "peer-B", migEntry, now); action != 1 {
-		t.Errorf("transport error: want action=1 (remove), got %d", action)
+	if action := dm.processHint(context.Background(), "peer-B", migEntry, now); action != 0 {
+		t.Errorf("transport error: want action=0 (keep for retry), got %d", action)
 	}
 
-	if got := dm.metrics.hintedDropped.Load(); got != 1 {
-		t.Errorf("aggregate hintedDropped: want 1, got %d", got)
+	if got := dm.metrics.hintedDropped.Load(); got != 0 {
+		t.Errorf("aggregate hintedDropped on retainable error: want 0 (no longer bumped on replay failures), got %d", got)
 	}
 
-	if got := dm.metrics.migrationHintDropped.Load(); got != 1 {
-		t.Errorf("migrationHintDropped: want 1, got %d", got)
+	if got := dm.metrics.migrationHintDropped.Load(); got != 0 {
+		t.Errorf("migrationHintDropped on retainable error: want 0, got %d", got)
 	}
 }
 
