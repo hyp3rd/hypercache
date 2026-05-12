@@ -81,7 +81,7 @@ test-cluster: stop-dev-cluster
 		exit $$rc
 
 # ci aggregates the gates required before declaring a task done (see AGENTS.md).
-ci: lint typecheck test-race sec build
+ci: lint typecheck test-race pre-commit sec build
 	@echo "All CI gates passed."
 
 # bench runs the benchmark tests in the benchmark subpackage of the tests package.
@@ -214,6 +214,14 @@ docs-publish: docs-build
 
 docs-serve: docs-build
 	PYENV_VERSION=mkdocs mkdocs serve
+
+pre-commit:
+	pre-commit run -a trailing-whitespace && \
+	pre-commit run -a end-of-file-fixer && \
+	pre-commit run -a markdownlint && \
+	pre-commit run -a yamllint && \
+	pre-commit run -a cspell && \
+	pre-commit run -a cspell
 
 # check_command_exists is a helper function that checks if a command exists.
 define check_command_exists
