@@ -274,6 +274,43 @@ paths:
                 $ref: "#/components/schemas/IdentityResponse"
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /v1/me/can:
+    get:
+      operationId: canPerform
+      tags: [ meta ]
+      summary: Per-capability authorization probe.
+      description: |
+        Returns whether the resolved identity holds the requested
+        capability. Cheaper than the speculative-write pattern
+        (try the action, catch the 403) and stable across future
+        scope-to-capability refactors — clients should key off the
+        capability string, not the internal scope shape.
+
+        Unknown capability values return 400 BAD_REQUEST so typos
+        don't silently answer "not allowed" when the real issue
+        is the caller's spelling.
+
+        Requires the `read` scope — same threshold as `/v1/me`.
+      parameters:
+        - in: query
+          name: capability
+          required: true
+          schema:
+            type: string
+            enum: [ cache.read, cache.write, cache.admin ]
+          description: |
+            The capability string to probe. Must be one of the
+            three values in the closed `cache.*` namespace.
+      responses:
+        "200":
+          description: Probe result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CanResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /v1/cache/batch/get:
     post:
       operationId: batchGet
@@ -521,6 +558,19 @@ components:
             capabilities.
           items:
             type: string
+
+    CanResponse:
+      type: object
+      required: [ capability, allowed ]
+      properties:
+        capability:
+          type: string
+          description: Echoes the queried capability string.
+        allowed:
+          type: boolean
+          description: |
+            True when the resolved identity holds the requested
+            capability; false otherwise.
 
     ItemEnvelope:
       type: object

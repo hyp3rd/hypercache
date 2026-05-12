@@ -102,6 +102,15 @@ func (i Identity) Capabilities() []string {
 	return out
 }
 
+// HasCapability reports whether the identity carries the given
+// capability string. Used by the /v1/me/can probe endpoint and by
+// the client SDK's mirror method — both want a single
+// authoritative check rather than reinventing the
+// scope-prefix-to-capability mapping at each call site.
+func (i Identity) HasCapability(name string) bool {
+	return slices.Contains(i.Capabilities(), name)
+}
+
 // TokenIdentity is one bearer-token grant in a Policy. The Token
 // field is the raw secret; never log it. ID is what shows up in
 // audit logs / Identity.ID after a successful match.

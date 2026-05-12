@@ -250,6 +250,7 @@ if errors.Is(err, client.ErrAllEndpointsFailed) {
 | `BatchGet(ctx, keys)`       | `[]BatchGetResult, error`    | Per-key `Found` flag; misses are not errors     |
 | `BatchDelete(ctx, keys)`    | `[]BatchDeleteResult, error` | Per-item `Err`; idempotent                      |
 | `Identity(ctx)`             | `*Identity, error`           | `ErrUnauthorized` if the token is invalid       |
+| `Can(ctx, capability)`      | `bool, error`                | `ErrBadRequest` on unknown capability strings   |
 | `Endpoints()`               | `[]string`                   | Current view (post-refresh)                     |
 | `RefreshTopology(ctx)`      | `error`                      | Manual refresh — usually called by the loop     |
 | `Close()`                   | `error`                      | Stops the refresh loop; idempotent              |
@@ -271,6 +272,54 @@ if !id.HasCapability("cache.write") {
 
 Prefer `HasCapability("cache.write")` over `slices.Contains(id.Scopes, "write")` — capability strings stay
 stable if a scope is later split across multiple capabilities, while raw scope checks break on the rename.
+
+### Probing a single capability with `Can`
+
+When a caller just needs "does this credential have write?" — and not the full scopes/capabilities slice —
+`Client.Can` is the focused probe:
+
+```go
+canWrite, err := c.Can(ctx, "cache.write")
+if err != nil {
+    return err
+}
+if !canWrite {
+    return fmt.Errorf("this credential cannot write to the cluster")
+}
+```
+
+The method maps to `GET /v1/me/can?capability=<name>`. Denial (`allowed=false`) returns `(false, nil)` —
+a successful probe, not an error. Spelling mistakes (an unknown capability string) come back as
+`errors.Is(err, ErrBadRequest)` so the typo surfaces rather than silently degrading to "I guess I can't".
+Use this for at-startup gating; use `Identity` when you need the full picture.
+
+## Token-refresh visibility
+
+With `WithOIDCClientCredentials`, the underlying `oauth2/clientcredentials` source rotates tokens silently
+before expiry. Without instrumentation, "why are my requests suddenly 401?" is a hard debug — by the time
+the operator looks, the token's already been refreshed.
+
+The SDK wraps the source so every rotation surfaces as an Info log via `WithLogger`:
+
+```text
+{"time":"...","level":"INFO","msg":"oidc token rotated","expires_at":"2026-05-12T15:42:01Z","token_type":"Bearer"}
+```
+
+One line per rotation — the wrapper compares the new token's `Expiry` against the previous one and only
+emits when they differ. Cached returns (the typical happy path between rotations) stay silent.
+
+Apply `WithLogger` so the rotations are visible:
+
+```go
+c, _ := client.New(
+    endpoints,
+    client.WithLogger(slog.Default()),
+    client.WithOIDCClientCredentials(cfg),
+)
+```
+
+`WithLogger` order doesn't matter — the wrapper reads the client's logger at rotation time, not at
+construction. Late-bound `WithLogger` calls still reach the OIDC log surface.
 
 ## Batch operations
 

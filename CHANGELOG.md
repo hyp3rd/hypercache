@@ -8,6 +8,27 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
+- **Token-refresh visibility for the OIDC source.** Closes RFC 0003 open question 6: the
+  `WithOIDCClientCredentials` source now wraps its `oauth2.TokenSource` with a logger that emits one
+  `"oidc token rotated"` Info line per real rotation (expiry change), staying silent on cached returns.
+  Operators debugging "why are my requests suddenly 401?" now see token age in the structured log alongside
+  the other lifecycle events. The wrapper holds the `*Client` by reference rather than capturing
+  `c.logger` at construction time, so `WithLogger` applied AFTER `WithOIDCClientCredentials` still reaches
+  the rotation log surface. Three unit tests in [`pkg/client/oidc_logging_test.go`](pkg/client/oidc_logging_test.go)
+  cover the rotation-logs case, the cached-returns-stay-silent case, and the nil-Client defensive path.
+- **`GET /v1/me/can` capability probe + `Client.Can(ctx, capability)` SDK method.** Closes RFC 0003 open
+  question 5: callers can now check "do I have write?" without the speculative-write pattern (try the
+  action, catch the 403). The server endpoint validates against a closed set of capability strings
+  (`cache.read` / `cache.write` / `cache.admin`); unknown values return 400 BAD_REQUEST so typos surface as
+  client errors rather than silently degrading to allowed=false. The SDK method mirrors this:
+  `(true, nil)` / `(false, nil)` for the allow/deny answers; `errors.Is(err, ErrBadRequest)` for the
+  spelling-mistake path. `Identity.HasCapability` added to [`pkg/httpauth/policy.go`](pkg/httpauth/policy.go)
+  as the single authoritative check used by both the server handler and the SDK. Three handler tests in
+  [`cmd/hypercache-server/me_test.go`](cmd/hypercache-server/me_test.go) cover allowed/denied/unknown;
+  three SDK tests in [`pkg/client/client_test.go`](pkg/client/client_test.go) cover the parallel surface.
+  OpenAPI spec ([`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml)) gains the
+  `/v1/me/can` operation + `CanResponse` schema. New "Probing a single capability with `Can`" and
+  "Token-refresh visibility" sections in [`docs/client-sdk.md`](docs/client-sdk.md).
 - **Chaos hooks for resilience testing (Phase 7).** New
   [`backend.WithDistChaos(*Chaos)`](pkg/backend/dist_chaos.go) option transparently wraps the dist transport
   with configurable fault injection — drop rate and latency injection, both with per-call probability rolls

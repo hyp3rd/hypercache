@@ -97,6 +97,7 @@ func declaredMethodsForPath() map[string]map[string]struct{} {
 		"/v1/cache/:key":         {fiber.MethodPut: {}, fiber.MethodGet: {}, fiber.MethodHead: {}, fiber.MethodDelete: {}},
 		"/v1/owners/:key":        {fiber.MethodGet: {}},
 		"/v1/me":                 {fiber.MethodGet: {}},
+		"/v1/me/can":             {fiber.MethodGet: {}},
 		"/v1/cache/batch/get":    {fiber.MethodPost: {}},
 		"/v1/cache/batch/put":    {fiber.MethodPost: {}},
 		"/v1/cache/batch/delete": {fiber.MethodPost: {}},

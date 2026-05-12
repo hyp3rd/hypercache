@@ -465,6 +465,7 @@ func registerClientRoutes(app *fiber.App, policy httpauth.Policy, nodeCtx *nodeC
 	app.Delete("/v1/cache/:key", write, func(c fiber.Ctx) error { return handleDelete(c, nodeCtx) })
 	app.Get("/v1/owners/:key", read, func(c fiber.Ctx) error { return handleOwners(c, nodeCtx) })
 	app.Get("/v1/me", read, handleMe)
+	app.Get("/v1/me/can", read, handleCan)
 
 	app.Post("/v1/cache/batch/get", read, func(c fiber.Ctx) error { return handleBatchGet(c, nodeCtx) })
 	app.Post("/v1/cache/batch/put", write, func(c fiber.Ctx) error { return handleBatchPut(c, nodeCtx) })
@@ -1332,6 +1333,74 @@ func handleMe(c fiber.Ctx) error {
 		ID:           identity.ID,
 		Scopes:       scopes,
 		Capabilities: identity.Capabilities(),
+	})
+}
+
+// canResponse is the body of GET /v1/me/can?capability=<name>.
+// `Allowed` is the discrimination result; `Capability` echoes the
+// caller's input so log scraping ties allow/deny to the asked
+// capability without parsing the query string again.
+type canResponse struct {
+	Capability string `json:"capability"`
+	Allowed    bool   `json:"allowed"`
+}
+
+// capability strings — closed set in the `cache.` namespace.
+// Unknown values return 400 rather than silently false so callers
+// detect typos instead of shipping broken authz logic to prod.
+const (
+	capabilityCacheRead  = "cache.read"
+	capabilityCacheWrite = "cache.write"
+	capabilityCacheAdmin = "cache.admin"
+)
+
+// isKnownCapability reports whether s is one of the three
+// recognized capability strings. Switch-based so a future
+// capability is one named const + one case.
+func isKnownCapability(s string) bool {
+	switch s {
+	case capabilityCacheRead, capabilityCacheWrite, capabilityCacheAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
+// handleCan implements GET /v1/me/can?capability=cache.write —
+// per-capability authorization probe. Caller passes a capability
+// string; the response says whether the resolved identity holds
+// it. Cheaper than the speculative-write pattern (try the write,
+// catch the 403), and stable across future scope-to-capability
+// refactors (clients key off the capability string, not the
+// internal scope shape).
+//
+// Requires the `read` scope — same threshold as /v1/me. Unknown
+// capability values fail BAD_REQUEST so typos don't silently
+// answer "not allowed" when the real issue is the caller's
+// spelling.
+func handleCan(c fiber.Ctx) error {
+	capability := c.Query("capability")
+	if capability == "" {
+		return jsonErr(c, fiber.StatusBadRequest, codeBadRequest, "missing 'capability' query parameter")
+	}
+
+	if !isKnownCapability(capability) {
+		return jsonErr(c, fiber.StatusBadRequest, codeBadRequest, "unknown capability '"+capability+"'")
+	}
+
+	identity, ok := c.Locals(httpauth.IdentityKey).(httpauth.Identity)
+	if !ok {
+		return jsonErr(
+			c,
+			fiber.StatusInternalServerError,
+			codeInternal,
+			"identity not resolved by middleware (wiring bug)",
+		)
+	}
+
+	return c.JSON(canResponse{
+		Capability: capability,
+		Allowed:    identity.HasCapability(capability),
 	})
 }
 
