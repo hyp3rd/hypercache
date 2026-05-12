@@ -8,8 +8,8 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/goccy/go-json v0.10.6
 	github.com/gofiber/fiber/v3 v3.2.0
-	github.com/hyp3rd/ewrap v1.5.0
-	github.com/hyp3rd/sectools v1.2.5
+	github.com/hyp3rd/ewrap v1.5.1
+	github.com/hyp3rd/sectools v1.2.6
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/stretchr/testify v1.11.1
 	github.com/ugorji/go/codec v1.3.1
@@ -18,6 +18,8 @@ require (
 	go.opentelemetry.io/otel/sdk v1.43.0
 	go.opentelemetry.io/otel/sdk/metric v1.43.0
 	go.opentelemetry.io/otel/trace v1.43.0
+	golang.org/x/crypto v0.51.0
+	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -39,9 +41,7 @@ require (
 	github.com/valyala/fasthttp v1.71.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )

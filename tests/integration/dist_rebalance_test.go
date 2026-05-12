@@ -30,19 +30,51 @@ func rebalanceTestOpts() []backend.DistMemoryOption {
 	}
 }
 
-// populateKeys writes n test keys to node — used to seed the cluster before
-// triggering a rebalance.
-func populateKeys(ctx context.Context, t *testing.T, node *backend.DistMemory, n int) {
+// populateKeys seeds n test keys onto node's local shard via the
+// DebugInject test bypass — no replication, no quorum check. We use
+// the bypass deliberately: every rebalance test asserts post-state
+// of the ring + migration metrics, not the pre-rebalance
+// replication path. Going through Set would force a quorum write
+// for every key against the brand-new two-node cluster, which is
+// flake-prone (~1 in 50 runs under -shuffle in CI) when a single
+// fan-out transport call misses its deadline.
+//
+// Tests that specifically want to exercise the replication path
+// during populate should call Set directly with appropriate
+// assertions; this helper is for "shape the ring, then test what
+// happens next." Use populateKeysOnAll when the test needs the
+// keys present on multiple nodes (e.g. replica-diff scenarios that
+// assume replication has already drained).
+func populateKeys(_ context.Context, t *testing.T, node *backend.DistMemory, n int) {
 	t.Helper()
 
 	for i := range n {
 		k := cacheKey(i)
-
 		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
 
-		err := node.Set(ctx, it)
-		if err != nil {
-			t.Fatalf("set %s: %v", k, err)
+		node.DebugInject(it)
+	}
+}
+
+// populateKeysOnAll injects n keys on every supplied node via the
+// DebugInject bypass — simulates "replication has already drained
+// across these nodes" without going through the quorum-write path
+// that flakes under -shuffle. Use this for replica-diff and
+// leave-migration tests where the post-topology assertion requires
+// keys to be present on multiple nodes pre-change.
+//
+// Over-replication (a key landing on a node that isn't its actual
+// owner per the ring) is harmless: the rebalance loop sheds keys
+// from nodes that aren't owners after each tick.
+func populateKeysOnAll(_ context.Context, t *testing.T, n int, nodes ...*backend.DistMemory) {
+	t.Helper()
+
+	for i := range n {
+		k := cacheKey(i)
+		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
+
+		for _, node := range nodes {
+			node.DebugInject(it)
 		}
 	}
 }
@@ -124,17 +156,11 @@ func TestDistRebalanceThrottle(t *testing.T) {
 
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
-	// Populate many keys on A.
-	for i := range 400 {
-		k := cacheKey(i)
-
-		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
-
-		err := nodeA.Set(ctx, it)
-		if err != nil {
-			t.Fatalf("set %s: %v", k, err)
-		}
-	}
+	// Populate many keys on A via DebugInject (test bypass — see
+	// populateKeys' doc for why). We need keys on A's primary
+	// shards so the post-join rebalance has work to do; the
+	// pre-join replication path is not under test here.
+	populateKeys(ctx, t, nodeA, 400)
 
 	// Add third node to force migrations while concurrency=1, which should queue batches.
 	addrC := allocatePort(t)

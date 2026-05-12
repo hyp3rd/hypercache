@@ -8,27 +8,95 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
-- **Migration-source observability for the hint queue.** Hints produced by rebalance migrations are now
-  tagged at queue time and tracked in a dedicated set of counters alongside the existing aggregate
-  metrics. Five new OTel metrics: `dist.migration.queued`, `dist.migration.replayed`,
-  `dist.migration.expired`, `dist.migration.dropped`, and `dist.migration.last_age_ns` (queue residency of
-  the most-recently-replayed migration hint — direct signal of new-primary reachability during rolling
-  deploys). Existing `dist.hinted.*` counters keep their meaning as the aggregate across both sources, so
-  operators can derive replication-only as `aggregate - migration`. Implementation reuses the proven hint
-  queue infrastructure (TTL, caps, replay, drop logic) — no second queue, no second drain loop.
-  Tests in [`pkg/backend/dist_migration_hint_test.go`](pkg/backend/dist_migration_hint_test.go) cover
-  source-tag preservation through queue→replay, per-source counter increments on every terminal path
-  (replay success, expired, transport drop, global-cap drop), and the not-found keep-in-queue path.
+- **Batch operations on the client SDK.** `BatchSet`, `BatchGet`, `BatchDelete` close the v1 SDK gap PR3's
+  stopping conditions called out — the raw OIDC example demonstrated batch round-trips but the SDK had no
+  equivalent. Each method takes a slice and returns per-item results so a single HTTP call can carry
+  mixed-outcome batches (some stored, some draining) without forcing the caller to either fail-the-whole-batch
+  or parse the wire envelope by hand. Per-item `Err` is the standard `*StatusError`, so
+  `errors.Is(result.Err, client.ErrDraining)` works inside per-item handling the same way it does for
+  single-key calls. Empty input short-circuits to an empty result slice without dispatching an HTTP request.
+  Eight new test cases in [`pkg/client/batch_test.go`](pkg/client/batch_test.go) cover the happy path for each
+  verb, per-item failures, mixed found/missing in `BatchGet`, empty-input no-op, and the HTTP-level
+  failure-wraps-`ErrAllEndpointsFailed` regression guard. The OIDC example
+  ([`__examples/distributed-oidc-client/main.go`](__examples/distributed-oidc-client/main.go)) gains a final
+  `BatchSet` step demonstrating the surface, and [`docs/client-sdk.md`](docs/client-sdk.md) grows a dedicated
+  "Batch operations" section explaining the per-item granularity contract.
+- **Client SDK reference + example migration.** New [`docs/client-sdk.md`](docs/client-sdk.md) is the
+  recommended starting point for Go consumers — covers every auth mode (bearer / Basic / OIDC client
+  credentials / custom mTLS via `WithHTTPClient`), the multi-endpoint failover policy, topology refresh
+  semantics with the 1s floor and seed fallback, the full sentinel + `*StatusError` recipe set, and the
+  production caveats (connection pooling, retry policy, OTel propagation, OIDC refresh visibility). The
+  existing hand-rolled HTTP demo at `__examples/distributed-oidc-client/` was renamed to
+  [`__examples/distributed-oidc-client-raw/`](__examples/distributed-oidc-client-raw/) — kept in-tree as the
+  "what the SDK does under the hood" reference and for non-Go consumers reading along — while
+  [`__examples/distributed-oidc-client/`](__examples/distributed-oidc-client/) is now the ~150-line SDK
+  consumer that collapses the prior 480 lines down by ~70%. Top-level
+  [`__examples/README.md`](__examples/README.md) lists both with the SDK version flagged as recommended. The
+  SDK page is registered under Reference in [`mkdocs.yml`](mkdocs.yml) alongside the API reference and
+  changelog.
+- **`pkg/client` — Go SDK for hypercache-server clusters.** Closes the three operational gaps the OIDC-client
+  example surfaced: - **Multi-endpoint HA without an external LB.** `client.New([]string{...}, opts...)`
+  accepts a slice of seed endpoints. Each request picks one at random; on transport failure / 5xx / 503
+  (draining) the client walks to the next. 4xx (auth, scope, not-found, bad-request) are deterministic and do
+  NOT trigger failover. See [RFC 0003](docs/rfcs/0003-client-sdk-and-redis-style-affordances.md) for the
+  failover policy rationale (F2 random with crypto-seeded math/rand). - **Optional topology refresh.**
+  `WithTopologyRefresh(interval)` enables a background loop that pulls `/cluster/members` and updates the
+  in-memory endpoint view, so nodes added or removed after deploy become visible without redeploying
+  consumers. The original seeds remain as a permanent fallback when the live view ever empties. - **Four auth
+  modes coexisting in one API.** `WithBearerAuth`, `WithBasicAuth`, `WithOIDCClientCredentials` (full OAuth2
+  client-credentials flow with auto-refresh), and `WithHTTPClient` (bring your own mTLS-configured client).
+  Mutually exclusive: the last applied wins. - **Stable, typed error surface.** Sentinels (`ErrNotFound`,
+  `ErrUnauthorized`, `ErrForbidden`, `ErrDraining`, `ErrBadRequest`, `ErrInternal`, `ErrAllEndpointsFailed`,
+  `ErrNoEndpoints`) compose with `errors.Is`. `*StatusError` carries the cache's canonical
+  `{ code, error, details }` envelope for callers that need finer discrimination via `errors.As`. - **Typed
+  command surface.** `Set`, `Get` (raw bytes), `GetItem` (full envelope with version/owners), `Delete`,
+  `Identity` (the `/v1/me` canary including the new capabilities field), `Endpoints` (the current view),
+  `RefreshTopology` (manual refresh for tests/operators), `Close`. - **Full test coverage** in
+  [`pkg/client/client_test.go`](pkg/client/client_test.go): happy-path round-trip, JSON-envelope decode, every
+  auth mode against httptest stubs, 5xx failover, 4xx no-failover (regression guard), exhaustive-failure
+  wrapping, every sentinel's `errors.Is` mapping, topology refresh, partition-survives-empty-refresh failsafe,
+  and constructor input validation.
+- **HTTP Basic auth as a first-class credential class (Redis-style `AUTH user pass`).** New top-level `users:`
+  block in `HYPERCACHE_AUTH_CONFIG` accepts bcrypt-hashed passwords. Each user resolves to the same
+  `Identity{ID, Scopes}` shape as every other auth mode, so all four mechanisms (static bearer → Basic → mTLS
+  → OIDC) coexist in one cluster with consistent downstream behavior. Fail-closed posture: Basic over
+  plaintext is refused by default; operators opt into dev-only plaintext via `allow_basic_without_tls: true`.
+  Implementation in [`pkg/httpauth/policy.go`](pkg/httpauth/policy.go) with bcrypt verification via
+  `golang.org/x/crypto/bcrypt`. Threat note: bcrypt-per-request is CPU-bound; rate-limiting is left to a
+  fronting LB (see [RFC 0003](docs/rfcs/0003-client-sdk-and-redis-style-affordances.md) open question 3).
+- **`/v1/me` now returns a `capabilities` field.** Stable capability strings derived 1:1 from scopes (`read` →
+  `cache.read`, etc.). Clients should prefer `capabilities` over `scopes` for forward-compatibility: if a
+  scope is later split into multiple capabilities, scope-keyed clients break but capability-keyed clients keep
+  working. OpenAPI spec ([`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml)) updated
+  to reflect the new required field; the binary's embedded spec is the contract.
+- **Tests pinning the new auth contract.** [`pkg/httpauth/policy_test.go`](pkg/httpauth/policy_test.go) covers
+  Basic resolves on correct credentials, rejects on wrong passwords/users/malformed headers, refuses plaintext
+  by default, and documents the bearer-wins-over-Basic chain order via a Locals-introspection test.
+  [`pkg/httpauth/loader_test.go`](pkg/httpauth/loader_test.go) covers the YAML round-trip plus the
+  fail-loud-at-boot guards for malformed bcrypt hashes and empty usernames.
+- **Operator runbook updates.** [`docs/oncall.md`](docs/oncall.md) Auth failures section gains a Basic-auth
+  debugging row covering the `curl -u user:pass /v1/me` canary and the plaintext-refused failure mode.
+- **Migration-source observability for the hint queue.** Hints produced by rebalance migrations are now tagged
+  at queue time and tracked in a dedicated set of counters alongside the existing aggregate metrics. Five new
+  OTel metrics: `dist.migration.queued`, `dist.migration.replayed`, `dist.migration.expired`,
+  `dist.migration.dropped`, and `dist.migration.last_age_ns` (queue residency of the most-recently-replayed
+  migration hint — direct signal of new-primary reachability during rolling deploys). Existing `dist.hinted.*`
+  counters keep their meaning as the aggregate across both sources, so operators can derive replication-only
+  as `aggregate - migration`. Implementation reuses the proven hint queue infrastructure (TTL, caps, replay,
+  drop logic) — no second queue, no second drain loop. Tests in
+  [`pkg/backend/dist_migration_hint_test.go`](pkg/backend/dist_migration_hint_test.go) cover source-tag
+  preservation through queue→replay, per-source counter increments on every terminal path (replay success,
+  expired, transport drop, global-cap drop), and the not-found keep-in-queue path.
 - **Adaptive Merkle anti-entropy scheduling.** New
   [`backend.WithDistMerkleAdaptiveBackoff(maxFactor)`](pkg/backend/dist_memory.go) option lets the auto-sync
   loop double its sleep interval after each tick that finds zero divergence across every peer, capped at
   `maxFactor`. Any tick with at least one dirty peer snaps the factor back to 1× immediately — recovery is
-  never lazy. Disabled by default (factor=0 or 1) so existing deployments see no behavior change. Two new
-  OTel metrics expose the state: `dist.auto_sync.backoff_factor` (gauge) and `dist.auto_sync.clean_ticks`
+  never lazy. Disabled by default (factor=0 or 1) so existing deployments see no behavior change. Two new OTel
+  metrics expose the state: `dist.auto_sync.backoff_factor` (gauge) and `dist.auto_sync.clean_ticks`
   (counter). Each factor change is logged once at Info (`merkle auto-sync backoff factor changed`) — no
   per-tick log spam. Unit tests in
-  [`pkg/backend/dist_adaptive_backoff_test.go`](pkg/backend/dist_adaptive_backoff_test.go) cover the ramp,
-  the cap, the dirty-tick reset, and the disabled-by-default back-compat invariant.
+  [`pkg/backend/dist_adaptive_backoff_test.go`](pkg/backend/dist_adaptive_backoff_test.go) cover the ramp, the
+  cap, the dirty-tick reset, and the disabled-by-default back-compat invariant.
 - **Structured logging for background loops and cluster lifecycle.** HyperCache gained a
   `WithLogger(*slog.Logger)` option ([config.go](config.go)) that wires a structured logger through the
   wrapper. Previously the eviction loop, expiration loop, and HyperCache lifecycle ran fully silent —

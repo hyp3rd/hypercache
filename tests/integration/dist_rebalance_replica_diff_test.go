@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestDistRebalanceReplicaDiff ensures that when a new replica is added (primary unchanged)
@@ -31,18 +30,14 @@ func TestDistRebalanceReplicaDiff(t *testing.T) {
 	nodeB := mustDistNode(ctx, t, "B", addrB, []string{addrA}, baseOpts...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
-	// Insert a set of keys through primary (either node). We'll use A.
-	totalKeys := 200
-	for i := range totalKeys {
-		k := cacheKey(i)
+	// Inject keys on BOTH A and B (the replica-diff path assumes
+	// replication has already drained across the pre-join cluster
+	// — without that, the post-join replica fan-out has nothing to
+	// diff). See populateKeys' doc in dist_rebalance_test.go for
+	// why we use DebugInject instead of Set.
+	const totalKeys = 200
 
-		it := &cache.Item{Key: k, Value: []byte("v"), Version: 1, Origin: "A", LastUpdated: time.Now()}
-
-		err := nodeA.Set(ctx, it)
-		if err != nil {
-			t.Fatalf("set %s: %v", k, err)
-		}
-	}
+	populateKeysOnAll(ctx, t, totalKeys, nodeA, nodeB)
 
 	time.Sleep(300 * time.Millisecond) // allow initial replication
 

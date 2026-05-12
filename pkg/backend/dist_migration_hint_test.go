@@ -2,11 +2,12 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/hyp3rd/ewrap"
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/internal/sentinel"
@@ -14,10 +15,10 @@ import (
 )
 
 // Static sentinels for the scriptedTransport — err113 forbids defining
-// dynamic errors with errors.New inside test bodies.
+// dynamic errors with ewrap.New inside test bodies.
 var (
-	errScriptedNotUsed  = errors.New("scriptedTransport: method not exercised by this test")
-	errScriptedSimulate = errors.New("scriptedTransport: simulated transport error")
+	errScriptedNotUsed  = ewrap.New("scriptedTransport: method not exercised by this test")
+	errScriptedSimulate = ewrap.New("scriptedTransport: simulated transport error")
 )
 
 const migrationHintTestOrigin = "test-A"

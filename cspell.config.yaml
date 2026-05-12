@@ -34,6 +34,10 @@ dictionaryDefinitions: []
 dictionaries: []
 words:
   - acks
+  - Addrs
+  - affordances
+  - Akudx
+  - aliceonly
   - ALPN
   - APITLS
   - APITLSCA
@@ -42,6 +46,7 @@ words:
   - backpressure
   - backpressures
   - baselining
+  - bcrypted
   - benchmarkdist
   - benchmem
   - benchstat
@@ -60,9 +65,11 @@ words:
   - cespare
   - chans
   - cheatsheet
+  - clientcredentials
   - cmap
   - Cmder
   - codacy
+  - codebook
   - codegen
   - codemod
   - containedctx
@@ -74,6 +81,7 @@ words:
   - Decr
   - dels
   - depguard
+  - deprioritize
   - derr
   - disambiguator
   - distconfig
@@ -82,6 +90,8 @@ words:
   - elif
   - Equalf
   - errcheck
+  - errchkjson
+  - Errorf
   - errp
   - eventbus
   - ewrap
@@ -90,6 +100,7 @@ words:
   - exhaustruct
   - Fanout
   - fasthttp
+  - Fatalf
   - fatals
   - fctx
   - ferr
@@ -104,6 +115,7 @@ words:
   - funlen
   - geomean
   - gerr
+  - Getenv
   - gitversion
   - GITVERSION
   - glightbox
@@ -130,10 +142,13 @@ words:
   - honnef
   - hostnames
   - hreq
+  - htpasswd
   - httpauth
+  - httptest
   - HTTPTLS
   - hypercache
   - Hyperd
+  - idempotently
   - idxs
   - Iface
   - ineff
@@ -144,15 +159,19 @@ words:
   - ireturn
   - Itemm
   - journalctl
+  - keepalive
+  - keepalives
   - keyf
   - keypair
   - lamport
+  - lblll
   - LFUDA
   - linenums
   - localmodule
   - logrus
   - longbridgeapp
   - mailtos
+  - mathrand
   - maxmemory
   - memprofile
   - Merkle
@@ -161,6 +180,7 @@ words:
   - mfinal
   - Mgmt
   - microbenchmark
+  - misrouted
   - mkdocs
   - mrand
   - mset
@@ -179,12 +199,14 @@ words:
   - nosec
   - NOVENDOR
   - oapi
+  - oncall
   - paralleltest
   - Pipeliner
   - pluggability
   - podname
   - popd
   - Prealloc
+  - Println
   - productionization
   - protoc
   - pushd
@@ -203,14 +225,17 @@ words:
   - sectools
   - securego
   - sess
+  - SFCKGPQ
   - shamaton
   - shellcheck
+  - singleflight
   - skeys
   - SLRU
   - softprops
   - statefulset
   - staticcheck
   - stdlib
+  - strawman
   - stretchr
   - strfnv
   - stringly
@@ -224,6 +249,7 @@ words:
   - thelper
   - toplevel
   - tparallel
+  - traceparent
   - tracetest
   - traefik
   - trunc
@@ -235,18 +261,22 @@ words:
   - unmarshals
   - unpadded
   - unparam
+  - unparseable
   - unsharded
   - unsub
   - unsubbed
   - upserted
   - upserts
+  - Valkey
   - varnamelen
   - venv
   - vettool
   - vnode
   - vnodes
+  - Warnf
   - wrapcheck
   - Wrapf
   - xxhash
+  - YOLEALR
 ignoreWords: []
 import: []

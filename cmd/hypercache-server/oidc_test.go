@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"encoding/json"
 	"errors"
 	"maps"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/goccy/go-json"
 	fiber "github.com/gofiber/fiber/v3"
 
 	"github.com/hyp3rd/hypercache/pkg/httpauth"

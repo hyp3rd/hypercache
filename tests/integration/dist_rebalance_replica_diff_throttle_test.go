@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/hyp3rd/hypercache/pkg/backend"
-	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
 
 // TestDistRebalanceReplicaDiffThrottle ensures the per-tick limit increments throttle metric.
@@ -31,12 +30,12 @@ func TestDistRebalanceReplicaDiffThrottle(t *testing.T) {
 	nodeB := mustDistNode(ctx, t, "B", addrB, []string{addrA}, base...)
 	defer func() { _ = nodeA.Stop(ctx); _ = nodeB.Stop(ctx) }()
 
-	// Seed multiple keys.
-	for i := range 25 {
-		k := cacheKey(i)
-
-		_ = nodeA.Set(ctx, &cache.Item{Key: k, Value: []byte("x"), Version: 1, Origin: "A", LastUpdated: time.Now()})
-	}
+	// Seed keys on BOTH A and B so the post-join replica-diff has
+	// candidates to push to C (without keys on B, the replica-diff
+	// throttle would never fire because only A would have work).
+	// DebugInject also fixes the prior shape's silently-swallowed
+	// Set error.
+	populateKeysOnAll(ctx, t, 25, nodeA, nodeB)
 
 	time.Sleep(250 * time.Millisecond)
 

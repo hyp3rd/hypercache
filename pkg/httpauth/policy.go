@@ -26,11 +26,14 @@ package httpauth
 import (
 	"crypto/subtle"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"slices"
+	"strings"
 
 	fiber "github.com/gofiber/fiber/v3"
 	"github.com/hyp3rd/ewrap"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/hyp3rd/hypercache/internal/sentinel"
 )
@@ -78,6 +81,27 @@ func (i Identity) HasScope(s Scope) bool {
 	return slices.Contains(i.Scopes, s)
 }
 
+// Capabilities returns the stable capability strings derived from
+// the identity's scopes. Capabilities are the surface clients
+// introspect via GET /v1/me — they describe what the caller can
+// DO rather than what scopes they HAVE. The two are 1:1 today
+// (one capability per scope, prefixed with `cache.`) but the
+// indirection lets us split a scope into multiple capabilities
+// later (e.g. ScopeRead → cache.read + cache.metrics) without
+// breaking clients that key off capability strings.
+func (i Identity) Capabilities() []string {
+	if len(i.Scopes) == 0 {
+		return []string{}
+	}
+
+	out := make([]string, 0, len(i.Scopes))
+	for _, s := range i.Scopes {
+		out = append(out, "cache."+string(s))
+	}
+
+	return out
+}
+
 // TokenIdentity is one bearer-token grant in a Policy. The Token
 // field is the raw secret; never log it. ID is what shows up in
 // audit logs / Identity.ID after a successful match.
@@ -97,6 +121,32 @@ type CertIdentity struct {
 	Scopes    []Scope
 }
 
+// BasicIdentity is one HTTP-Basic-auth grant in a Policy. PasswordBcrypt
+// stores the bcrypt-hashed form of the operator's chosen password
+// (`bcrypt.GenerateFromPassword` at cost ≥ 10); raw passwords NEVER
+// appear in the config file or in process memory beyond the per-
+// request verification step.
+//
+// Username is the wire identifier (sent client-side in
+// `Authorization: Basic <base64(username:password)>`); ID is the
+// audit identifier that shows up in Identity.ID and downstream logs.
+// They MAY be the same string but are kept distinct so operators can
+// rename machine-facing usernames without rewriting log queries.
+//
+// Threat note: bcrypt verification runs on every request that
+// presents a Basic header. This is intentionally CPU-bound (default
+// cost 10 ≈ 60ms on contemporary hardware). A malicious actor with a
+// stream of wrong passwords can therefore burn server CPU; mitigate
+// via a fronting rate-limiter or an LB-level connection cap. The
+// auth layer does NOT itself rate-limit (see RFC 0003 open
+// question 3 for the trade-offs).
+type BasicIdentity struct {
+	Username       string
+	PasswordBcrypt []byte // bcrypt-hashed; raw passwords never live here
+	ID             string
+	Scopes         []Scope
+}
+
 // Policy is the authoritative auth configuration for an HTTP
 // listener. Build via the loader in this package or construct
 // in-process for tests; pass the same value to every route via
@@ -110,6 +160,10 @@ type Policy struct {
 	// Tokens are the bearer-token identities. Constant-time
 	// compared against the Authorization header.
 	Tokens []TokenIdentity
+	// BasicIdentities are the HTTP-Basic-auth identities.
+	// Verified by bcrypt-comparing the password presented in
+	// `Authorization: Basic ...` against PasswordBcrypt.
+	BasicIdentities []BasicIdentity
 	// CertIdentities are the mTLS-cert identities. Resolved
 	// from the verified peer cert when TLS is enabled with
 	// client-cert verification.
@@ -127,6 +181,13 @@ type Policy struct {
 	// dev-mode deployments; production should always require
 	// at least one credential class.
 	AllowAnonymous bool
+	// AllowBasicWithoutTLS lets Basic auth verify even when the
+	// connection is plaintext. Defaults to false (fails closed:
+	// Basic over plaintext leaks the password to every network
+	// observer). Operators set this to true ONLY for local dev
+	// stacks where TLS termination happens elsewhere or is
+	// intentionally skipped. Production must leave this false.
+	AllowBasicWithoutTLS bool
 }
 
 // IdentityKey is the fiber.Ctx.Locals key under which the resolved
@@ -148,7 +209,10 @@ const IdentityKey = "httpauth.identity"
 // it to gate security checks — Middleware already handles the
 // no-credentials-configured fall-through correctly.
 func (p Policy) IsConfigured() bool {
-	return len(p.Tokens) > 0 || len(p.CertIdentities) > 0 || p.ServerVerify != nil
+	return len(p.Tokens) > 0 ||
+		len(p.BasicIdentities) > 0 ||
+		len(p.CertIdentities) > 0 ||
+		p.ServerVerify != nil
 }
 
 // Validate enforces coherence at load time. Returns nil for the
@@ -172,10 +236,47 @@ func (p Policy) Validate() error {
 		}
 	}
 
+	for _, b := range p.BasicIdentities {
+		err := validateBasicIdentity(b)
+		if err != nil {
+			return err
+		}
+	}
+
 	for _, c := range p.CertIdentities {
 		if c.SubjectCN == "" {
 			return fmt.Errorf("%w: cert identity has empty subject_cn", sentinel.ErrInsecureAuthConfig)
 		}
+	}
+
+	return nil
+}
+
+// validateBasicIdentity enforces the per-row invariants on one
+// BasicIdentity. Extracted from Validate so the parent stays under
+// the cognitive-complexity cap; the cap exists for reviewer comfort
+// and the split happens to align with one credential class per
+// helper.
+func validateBasicIdentity(b BasicIdentity) error {
+	if b.Username == "" {
+		return fmt.Errorf("%w: basic identity has empty username (id redacted)", sentinel.ErrInsecureAuthConfig)
+	}
+
+	if b.ID == "" {
+		return fmt.Errorf("%w: basic identity %q has empty ID", sentinel.ErrInsecureAuthConfig, b.Username)
+	}
+
+	if len(b.PasswordBcrypt) == 0 {
+		return fmt.Errorf("%w: basic identity %q has empty password_bcrypt", sentinel.ErrInsecureAuthConfig, b.Username)
+	}
+
+	// Cost extraction validates the hash is structurally well-formed
+	// (a proper $2a$/$2b$/$2y$ string with a parseable cost field).
+	// Caught here so a typo in the YAML fails loudly at boot rather
+	// than silently rejecting every Basic auth attempt at runtime.
+	_, err := bcrypt.Cost(b.PasswordBcrypt)
+	if err != nil {
+		return fmt.Errorf("%w: basic identity %q password_bcrypt is not a valid bcrypt hash", sentinel.ErrInsecureAuthConfig, b.Username)
 	}
 
 	return nil
@@ -265,6 +366,10 @@ func (p Policy) resolve(c fiber.Ctx) (Identity, bool) {
 		return id, true
 	}
 
+	if id, ok := p.resolveBasic(c); ok {
+		return id, true
+	}
+
 	if id, ok := p.resolveCert(c); ok {
 		return id, true
 	}
@@ -331,6 +436,103 @@ func (p Policy) resolveBearer(authHeader string) (Identity, bool) {
 	t := p.Tokens[matched]
 
 	return Identity{ID: t.ID, Scopes: t.Scopes}, true
+}
+
+// resolveBasic matches the Authorization header against every
+// configured BasicIdentity. Returns (zero, false) when:
+//
+//   - The header is absent or not a Basic scheme.
+//   - The base64 payload is malformed or has no `:` separator.
+//   - The connection is plaintext AND Policy.AllowBasicWithoutTLS
+//     is false (the default, fail-closed posture).
+//   - No configured username matches.
+//   - The configured username matches but the bcrypt comparison
+//     against the presented password fails.
+//
+// Timing considerations: the bcrypt comparison runs in time
+// proportional to bcrypt's cost factor independent of password
+// length, which is the property bcrypt is designed for. We do NOT
+// iterate the BasicIdentities list to completion (unlike bearer
+// tokens) because the username acts as a public selector — leaking
+// "this username exists" via timing is not worse than the username
+// itself being chosen by the operator and rotated less frequently
+// than tokens. Compare against bearer-token's constant-time loop,
+// which protects the token VALUE (the secret).
+//
+// Threat note: bcrypt verification is intentionally CPU-bound
+// (cost 10 ≈ 60ms). An attacker presenting a stream of wrong
+// passwords burns server CPU; mitigation belongs in a fronting
+// rate-limiter or LB connection cap. See RFC 0003 open question 3.
+func (p Policy) resolveBasic(c fiber.Ctx) (Identity, bool) {
+	if len(p.BasicIdentities) == 0 {
+		return Identity{}, false
+	}
+
+	creds, ok := parseBasicHeader(c.Get("Authorization"))
+	if !ok {
+		return Identity{}, false
+	}
+
+	// Fail-closed on plaintext unless the operator explicitly opted
+	// in. The protocol check happens AFTER header parsing so a
+	// caller can never use header presence alone to probe the TLS
+	// posture; both paths return the same false.
+	if !p.AllowBasicWithoutTLS && tlsConnectionState(c) == nil {
+		return Identity{}, false
+	}
+
+	for _, b := range p.BasicIdentities {
+		if b.Username != creds.Username {
+			continue
+		}
+
+		err := bcrypt.CompareHashAndPassword(b.PasswordBcrypt, []byte(creds.Password))
+		if err != nil {
+			return Identity{}, false
+		}
+
+		return Identity{ID: b.ID, Scopes: b.Scopes}, true
+	}
+
+	return Identity{}, false
+}
+
+// basicCreds is the result of parseBasicHeader. Kept as a struct
+// rather than two same-typed return values so reviewers don't have
+// to remember which positional argument is which (the linter is
+// vocal about this — see revive's confusing-results rule).
+type basicCreds struct {
+	Username string
+	Password string
+}
+
+// parseBasicHeader decodes an `Authorization: Basic <base64>` header
+// into its `username:password` halves. The second return is false
+// for any shape problem (missing prefix, bad base64, no colon
+// separator) — never panics, never logs, never returns partial data.
+func parseBasicHeader(authHeader string) (basicCreds, bool) {
+	const prefix = "Basic "
+
+	if !strings.HasPrefix(authHeader, prefix) {
+		return basicCreds{}, false
+	}
+
+	encoded := strings.TrimSpace(authHeader[len(prefix):])
+	if encoded == "" {
+		return basicCreds{}, false
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return basicCreds{}, false
+	}
+
+	user, pass, found := strings.Cut(string(decoded), ":")
+	if !found {
+		return basicCreds{}, false
+	}
+
+	return basicCreds{Username: user, Password: pass}, true
 }
 
 // resolveCert maps a verified peer certificate to a CertIdentity by
