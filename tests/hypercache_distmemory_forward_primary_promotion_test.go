@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/hyp3rd/hypercache/internal/cluster"
 	"github.com/hyp3rd/hypercache/pkg/backend"
@@ -35,11 +36,15 @@ func TestDistSet_PromotesOnGenericForwardError(t *testing.T) {
 
 	// 3 nodes, RF=3, ConsistencyOne. Chaos is wired onto every
 	// node's transport; we only ever Set from one node, so only
-	// that node's forwards exercise the promotion path.
+	// that node's forwards exercise the promotion path. Short
+	// hint-replay interval so the recovery assertion runs in
+	// well under a second.
 	dc := SetupInProcessClusterRF(
 		t, 3, 3,
 		backend.WithDistChaos(chaos),
 		backend.WithDistWriteConsistency(backend.ConsistencyOne),
+		backend.WithDistHintTTL(time.Minute),
+		backend.WithDistHintReplayInterval(20*time.Millisecond),
 	)
 
 	a := dc.Nodes[0]
@@ -71,4 +76,43 @@ func TestDistSet_PromotesOnGenericForwardError(t *testing.T) {
 	if chaos.Drops() == 0 {
 		t.Errorf("chaos.Drops: got 0, want > 0 (chaos didn't see the forward attempt)")
 	}
+
+	if got := a.Metrics().WriteForwardPromotion; got == 0 {
+		t.Errorf("WriteForwardPromotion: got 0, want > 0 (counter should bump on every promotion)")
+	}
+
+	// The defense-in-depth contract: when we promote, the failed
+	// forward to the dead primary queues a hint via replicateTo's
+	// existing best-effort logic. Without this, the original
+	// primary would only see the write at the next merkle tick.
+	if got := a.Metrics().HintedQueued; got == 0 {
+		t.Errorf("HintedQueued: got 0, want > 0 (replicateTo should have queued a hint for the dead primary)")
+	}
+
+	// End-to-end recovery: heal chaos and wait for the natural
+	// hint-replay tick (20ms interval, configured above). This
+	// proves the hint queued during promotion actually carries
+	// the write back to the primary once it's reachable again.
+	chaos.SetDropRate(0)
+
+	if !waitForLocalContains(b, key, 2*time.Second) {
+		t.Errorf("primary did not receive the write via hint replay after chaos cleared")
+	}
+}
+
+// waitForLocalContains polls node.LocalContains(key) until it returns
+// true or the timeout elapses. Returns the final state. Used by the
+// promotion test to absorb the hint-replay tick's scheduling jitter
+// without busy-waiting the whole 2s deadline on the happy path.
+func waitForLocalContains(node *backend.DistMemory, key string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if node.LocalContains(key) {
+			return true
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return node.LocalContains(key)
 }
