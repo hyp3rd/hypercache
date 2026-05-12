@@ -9,7 +9,7 @@ require (
 	github.com/goccy/go-json v0.10.6
 	github.com/gofiber/fiber/v3 v3.2.0
 	github.com/hyp3rd/ewrap v1.5.0
-	github.com/hyp3rd/sectools v1.2.5
+	github.com/hyp3rd/sectools v1.2.6
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/stretchr/testify v1.11.1
 	github.com/ugorji/go/codec v1.3.1
