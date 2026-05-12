@@ -99,6 +99,16 @@ run-example:
 update-deps:
 	go get -u -t ./... && go mod tidy -v && go mod verify
 
+# check_command_exists expands to a recipe line that succeeds if the
+# given command resolves on PATH, otherwise prints "<cmd> command not
+# found" and exits non-zero. Used by prepare-base-tools' chain of
+# `$(call check_command_exists,X) || install-fallback` lines: the
+# first failure message above is the developer-facing hint; the
+# install fallback fires when the tool itself is genuinely missing.
+define check_command_exists
+@which $(1) > /dev/null 2>&1 || (echo "$(1) command not found" && exit 1)
+endef
+
 prepare-toolchain: prepare-base-tools
 
 prepare-base-tools:

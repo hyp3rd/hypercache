@@ -3622,7 +3622,21 @@ func (dm *DistMemory) repairRemoteReplica(
 	dm.metrics.readRepair.Add(1)
 }
 
-// handleForwardPrimary tries to forward a Set to the primary; returns (proceedAsPrimary,false) if promotion required.
+// handleForwardPrimary tries to forward a Set to the primary; returns
+// (proceedAsPrimary, err). On any non-nil forward error — not just
+// ErrBackendNotFound — the function attempts to promote to a replica
+// owner if the local node is in the replica list. This is the correct
+// resilience contract: the in-process transport surfaces unreachable
+// peers as ErrBackendNotFound, but HTTP/gRPC transports against a
+// stopped container surface net.OpError / io.EOF /
+// context.DeadlineExceeded. Gating promotion on the in-process-only
+// sentinel meant production forwarding failures dropped writes to keys
+// whose primary had just been killed, until the next merkle tick.
+//
+// A spurious promotion (primary was healthy but the call hit a
+// transient blip) is benign: applySet on the receiver version-compares,
+// and `chooseNewer` / merkle anti-entropy reconcile any divergent
+// `(version, origin)` pair through the existing last-write-wins rule.
 func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster.NodeID, item *cache.Item) (bool, error) {
 	transport := dm.loadTransport()
 	if transport == nil {
@@ -3632,26 +3646,23 @@ func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster
 	dm.metrics.forwardSet.Add(1)
 
 	errFwd := transport.ForwardSet(ctx, string(owners[0]), item, true)
-	switch {
-	case errFwd == nil:
-		return false, nil // forwarded successfully
-	case errors.Is(errFwd, sentinel.ErrBackendNotFound) && len(owners) > 1:
-		// primary missing: promote if this node is a listed replica
-		for _, oid := range owners[1:] {
-			if oid == dm.localNode.ID { // we can promote
-				if !dm.ownsKeyInternal(item.Key) { // still not recognized locally (ring maybe outdated)
-					return false, errFwd
-				}
+	if errFwd == nil {
+		return false, nil
+	}
 
-				return true, nil // proceed as primary path
+	// Primary unreachable for any reason — try to promote to a replica
+	// owner. The local node must be in owners[1:] AND still recognize
+	// itself as an owner (defensive against a stale ring snapshot
+	// mid-membership-change).
+	if len(owners) > 1 {
+		for _, oid := range owners[1:] {
+			if oid == dm.localNode.ID && dm.ownsKeyInternal(item.Key) {
+				return true, nil
 			}
 		}
-
-		return false, errFwd // not promotable
-
-	default:
-		return false, errFwd
 	}
+
+	return false, errFwd
 }
 
 // initStandaloneMembership initializes membership & ring for standalone mode with optional seeds.

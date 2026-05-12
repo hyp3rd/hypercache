@@ -286,6 +286,23 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Fixed
 
+- **Set-forward promotion no longer requires the in-process `ErrBackendNotFound` sentinel.**
+  [`handleForwardPrimary`](pkg/backend/dist_memory.go) used to gate "primary unreachable → promote to
+  replica" on `errors.Is(errFwd, sentinel.ErrBackendNotFound)`, the error the in-process transport returns
+  for an unregistered peer. HTTP/gRPC transports against a stopped container surface
+  `net.OpError` / `io.EOF` / `context.DeadlineExceeded` instead — none of which matched the condition.
+  Result: when a cluster node was killed (e.g. `docker stop` in
+  [`scripts/tests/20-test-cluster-resilience.sh`](scripts/tests/20-test-cluster-resilience.sh)), writes for
+  keys whose primary was the dead node failed immediately at the forwarding hop, no hint was queued, and
+  the data never landed anywhere — the same 7 of 50 "during-*" writes failed reproducibly in CI's cluster
+  workflow. Promotion now triggers on **any** non-nil forward error when the local node is in `owners[1:]`,
+  matching the in-process and production transport behavior under the same resilience contract. Spurious
+  promotion on a transient blip is benign — `applySet` version-compares on the receiver, and merkle
+  anti-entropy / `chooseNewer` reconcile any divergent `(version, origin)` pair via the existing
+  last-write-wins rule. New test [`TestDistSet_PromotesOnGenericForwardError`](tests/hypercache_distmemory_forward_primary_promotion_test.go)
+  uses the chaos hooks at `DropRate=1.0` to deterministically force a generic forward error and asserts the
+  Set succeeds via promotion; the existing `TestDistFailureRecovery` continues to pass byte-identical (the
+  change widens the promotion gate, doesn't narrow it).
 - **`TestDistRebalanceReplicaDiffThrottle` no longer flakes under `make test-race`.** The test's 900ms hard
   sleep wasn't enough wall-clock budget for the rebalancer's 80ms-tick loop to actually fire 11 ticks under
   `-race` + `-shuffle=on`'s scheduler pressure. Replaced the sleep with a 5-second polling loop that exits as
