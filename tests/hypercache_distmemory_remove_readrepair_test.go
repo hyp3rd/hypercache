@@ -20,7 +20,7 @@ func TestDistMemoryRemoveReplication(t *testing.T) {
 		t.Fatalf("no owners")
 	}
 
-	item := &cache.Item{Key: key, Value: "val"}
+	item := &cache.Item{Key: key, Value: testRepairItemValue}
 
 	err := item.Valid()
 	if err != nil {
@@ -72,7 +72,7 @@ func TestDistMemoryReadRepair(t *testing.T) {
 		t.Fatalf("expected >=2 owners with RF=2 setup, got %d", len(owners))
 	}
 
-	item := &cache.Item{Key: key, Value: "val"}
+	item := &cache.Item{Key: key, Value: testRepairItemValue}
 
 	err := item.Valid()
 	if err != nil {

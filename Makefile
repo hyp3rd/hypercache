@@ -216,23 +216,18 @@ docs-serve: docs-build
 	PYENV_VERSION=mkdocs mkdocs serve
 
 pre-commit:
-	@eval "$$(pyenv init -)" && \
-	pyenv activate pre-commit && \
-	pre-commit run -a trailing-whitespace && \
-	pre-commit run -a end-of-file-fixer && \
-	pre-commit run -a markdownlint && \
-	pre-commit run -a yamllint && \
-	pre-commit run -a cspell && \
-	pre-commit run -a cspell
-
-# check_command_exists is a helper function that checks if a command exists.
-define check_command_exists
-@which $(1) > /dev/null 2>&1 || (echo "$(1) command not found" && exit 1)
-endef
-
-ifeq ($(call check_command_exists,$(1)),false)
-  $(error "$(1) command not found")
-endif
+	@if command -v pyenv >/dev/null 2>&1; then \
+		eval "$$(pyenv init -)" && \
+		pyenv activate pre-commit && \
+		pre-commit run -a trailing-whitespace && \
+		pre-commit run -a end-of-file-fixer && \
+		pre-commit run -a markdownlint && \
+		pre-commit run -a yamllint && \
+		pre-commit run -a cspell && \
+		pre-commit run -a cspell; \
+	else \
+		echo "pyenv command not found"; \
+	fi
 
 # help prints a list of available targets and their descriptions.
 help:

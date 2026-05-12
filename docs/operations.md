@@ -123,6 +123,44 @@ otherwise mark a healthy peer suspect. `dist.heartbeat.indirect_probe.refuted` r
 probes are saving you from spurious flapping; rising `dist.heartbeat.indirect_probe.failure` indicates the
 peer is genuinely unreachable from multiple vantage points.
 
+## Tuning — read-repair batching
+
+Quorum reads (`ConsistencyQuorum` / `ConsistencyAll`) issue best-effort read-repair to every owner of the
+chosen item — one `ForwardSet` per owner per read. Under read-heavy workloads on hot keys with stale replicas,
+this fan-out becomes the dominant network cost on the dist transport.
+
+`backend.WithDistReadRepairBatch(interval, maxBatchSize)` opts into async coalescing: repairs are queued by
+destination peer + key (last-write-wins by `(version, origin)`) and dispatched by a background flusher on the
+configured interval or when a per-peer batch hits `maxBatchSize`. Concurrent reads of the same hot key
+produce one repair through the queue, not N.
+
+```go
+dm, _ := backend.NewDistMemory(ctx,
+    backend.WithDistReadConsistency(backend.ConsistencyQuorum),
+    backend.WithDistReadRepairBatch(100*time.Millisecond, 64),
+)
+```
+
+**Trade-off.** Batched mode introduces a divergence window of up to `interval` where a stale replica stays
+stale. Merkle anti-entropy (`WithDistMerkleAutoSync`) is the safety net for any repair the queue drops on
+crash exit; clean shutdown drains the queue inside `Stop()`. Disabled by default — the existing synchronous
+read-repair path is preserved when the option is not set.
+
+**Detection.** Two new metrics quantify the amortisation:
+
+- `dist.read_repair.batched` — repairs dispatched via the queue's flusher (one bump per actual `ForwardSet`).
+- `dist.read_repair.coalesced` — repairs short-circuited because a same-version-or-higher entry was already
+  queued for the same `(peer, key)`. Every concurrent same-key read past the first bumps this.
+
+The aggregate `dist.read_repair` counter still bumps per repair attempt (sync dispatch or enqueue). Operators
+read `dist.read_repair.batched / dist.read_repair` for the fraction routed through the queue, and
+`dist.read_repair.coalesced` as the saved-wire-call counter.
+
+**When to enable.** High read-amplification with stable hot keys; the typical pattern is a partitioned
+workload where a small set of keys takes the majority of reads and one of the owners drops out briefly. Not
+useful for write-heavy paths (which don't go through read-repair) or for workloads with a flat key
+distribution (the coalescer has little to collapse).
+
 ## Operational tasks
 
 ### Drain a node
