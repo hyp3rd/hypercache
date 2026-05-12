@@ -76,6 +76,7 @@ words:
   - contextcheck
   - cpuprofile
   - cret
+  - cryptorand
   - cyclop
   - daixiang
   - Decr
@@ -112,6 +113,7 @@ words:
   - Fprintln
   - freqs
   - frontmatter
+  - funcorder
   - funlen
   - geomean
   - gerr

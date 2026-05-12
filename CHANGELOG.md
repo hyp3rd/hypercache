@@ -8,6 +8,26 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
+- **Chaos hooks for resilience testing (Phase 7).** New
+  [`backend.WithDistChaos(*Chaos)`](pkg/backend/dist_chaos.go) option transparently wraps the dist transport
+  with configurable fault injection — drop rate and latency injection, both with per-call probability rolls
+  off a crypto-seeded math/rand source. The wrapper is automatic for both the explicit
+  `WithDistTransport` path and the auto-wired HTTP transport, so chaos covers every dist call uniformly.
+  Disabled by default (zero overhead) and opt-in by design — the doc comment is explicit that this is a
+  test-only surface with no production safety net. Atomic mutators (`SetDropRate`, `SetLatency`) let tests
+  enable chaos mid-run, drive the cluster, then heal — exactly the shape the rebalance flake we caught in
+  May 2026 needed to be surfaced deterministically. Two new OTel metrics:
+  `dist.chaos.drops` (calls dropped) and `dist.chaos.latencies` (calls with latency injected). Eight unit
+  tests in [`pkg/backend/dist_chaos_test.go`](pkg/backend/dist_chaos_test.go) cover every branch
+  (DropRate=1 always drops, DropRate=0 never drops, latency injection fires + delays the call, nil-Chaos
+  passes through unchanged, the disabled-but-installed wrapper is a pass-through, concurrent calls are
+  race-free under -race, boundary clamping for out-of-range probabilities, nil-receiver safety on the
+  Metrics() snapshot path). Two integration tests in
+  [`tests/integration/dist_chaos_test.go`](tests/integration/dist_chaos_test.go) drive the canonical
+  resilience scenario — 80% drops force the hint queue to absorb replica fan-out failures; disabling chaos
+  lets the replay loop drain the queue. New "Chaos hooks (resilience testing)" section in
+  [`docs/operations.md`](docs/operations.md) with the usage shape and the "what this catches that CI flake
+  hunting won't" rationale.
 - **Batch operations on the client SDK.** `BatchSet`, `BatchGet`, `BatchDelete` close the v1 SDK gap PR3's
   stopping conditions called out — the raw OIDC example demonstrated batch round-trips but the SDK had no
   equivalent. Each method takes a slice and returns per-item results so a single HTTP call can carry

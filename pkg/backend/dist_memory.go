@@ -77,6 +77,11 @@ type DistMemory struct {
 	transport  atomic.Pointer[distTransportSlot]
 	httpServer *distHTTPServer // optional internal HTTP server
 	metrics    distMetrics
+	// chaos (optional) wraps the configured transport with fault injection
+	// for resilience testing. Set via WithDistChaos; nil in production.
+	// storeTransport applies the wrapper transparently when chaos is set,
+	// so the rest of the code path is unaware of the chaos surface.
+	chaos *Chaos
 	// configuration (static for now, future: dynamic membership/gossip)
 	replication  int
 	virtualNodes int
@@ -1271,6 +1276,8 @@ type DistMetrics struct {
 	LastAutoSyncError            string
 	AutoSyncCleanTicks           int64 // cumulative ticks where every peer returned no divergence
 	AutoSyncBackoffFactor        int64 // current adaptive-backoff multiplier (1 when disabled or freshly reset)
+	ChaosDrops                   int64 // transport calls dropped by configured Chaos (test-only; zero in prod)
+	ChaosLatencies               int64 // transport calls that had latency injected by Chaos (test-only)
 	TombstonesActive             int64
 	TombstonesPurged             int64
 	WriteQuorumFailures          int64
@@ -1342,6 +1349,8 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		LastAutoSyncError:            lastErr,
 		AutoSyncCleanTicks:           dm.autoSyncCleanTicks.Load(),
 		AutoSyncBackoffFactor:        dm.autoSyncBackoffFactor.Load(),
+		ChaosDrops:                   dm.chaos.Drops(),
+		ChaosLatencies:               dm.chaos.Latencies(),
 		TombstonesActive:             dm.metrics.tombstonesActive.Load(),
 		TombstonesPurged:             dm.metrics.tombstonesPurged.Load(),
 		WriteQuorumFailures:          dm.metrics.writeQuorumFailures.Load(),
@@ -1719,7 +1728,20 @@ func (dm *DistMemory) loadTransport() DistTransport {
 
 // storeTransport replaces the active transport. Safe to call concurrently
 // with loadTransport.
+//
+// When a Chaos is configured via WithDistChaos, the supplied transport is
+// transparently wrapped before being stored — every chaos roll happens
+// inside the wrapper so callers (Forward*, Health, Gossip, FetchMerkle)
+// don't have to know chaos exists. Double-wrapping is detected and
+// short-circuited, so this is safe to call from option appliers in any
+// order.
 func (dm *DistMemory) storeTransport(t DistTransport) {
+	if dm.chaos != nil && t != nil {
+		if _, already := t.(*chaosTransport); !already {
+			t = newChaosTransport(t, dm.chaos)
+		}
+	}
+
 	dm.transport.Store(&distTransportSlot{t: t})
 }
 
@@ -4021,6 +4043,16 @@ var distMetricSpecs = []distMetricSpec{
 		name: "dist.auto_sync.backoff_factor", unit: unitTick, counter: false,
 		desc: "Current adaptive auto-sync backoff multiplier (1 when disabled or reset)",
 		get:  func(m DistMetrics) int64 { return m.AutoSyncBackoffFactor },
+	},
+	{
+		name: "dist.chaos.drops", unit: unitEvent, counter: true,
+		desc: "Transport calls dropped by configured Chaos (test-only; zero in production)",
+		get:  func(m DistMetrics) int64 { return m.ChaosDrops },
+	},
+	{
+		name: "dist.chaos.latencies", unit: unitEvent, counter: true,
+		desc: "Transport calls that had latency injected by Chaos (test-only; zero in production)",
+		get:  func(m DistMetrics) int64 { return m.ChaosLatencies },
 	},
 
 	// --- Tombstones ---
