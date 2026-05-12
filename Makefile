@@ -99,6 +99,16 @@ run-example:
 update-deps:
 	go get -u -t ./... && go mod tidy -v && go mod verify
 
+# check_command_exists expands to a recipe line that succeeds if the
+# given command resolves on PATH, otherwise prints "<cmd> command not
+# found" and exits non-zero. Used by prepare-base-tools' chain of
+# `$(call check_command_exists,X) || install-fallback` lines: the
+# first failure message above is the developer-facing hint; the
+# install fallback fires when the tool itself is genuinely missing.
+define check_command_exists
+@which $(1) > /dev/null 2>&1 || (echo "$(1) command not found" && exit 1)
+endef
+
 prepare-toolchain: prepare-base-tools
 
 prepare-base-tools:
@@ -216,23 +226,18 @@ docs-serve: docs-build
 	PYENV_VERSION=mkdocs mkdocs serve
 
 pre-commit:
-	@eval "$$(pyenv init -)" && \
-	pyenv activate pre-commit && \
-	pre-commit run -a trailing-whitespace && \
-	pre-commit run -a end-of-file-fixer && \
-	pre-commit run -a markdownlint && \
-	pre-commit run -a yamllint && \
-	pre-commit run -a cspell && \
-	pre-commit run -a cspell
-
-# check_command_exists is a helper function that checks if a command exists.
-define check_command_exists
-@which $(1) > /dev/null 2>&1 || (echo "$(1) command not found" && exit 1)
-endef
-
-ifeq ($(call check_command_exists,$(1)),false)
-  $(error "$(1) command not found")
-endif
+	@if command -v pyenv >/dev/null 2>&1; then \
+		eval "$$(pyenv init -)" && \
+		pyenv activate pre-commit && \
+		pre-commit run -a trailing-whitespace && \
+		pre-commit run -a end-of-file-fixer && \
+		pre-commit run -a markdownlint && \
+		pre-commit run -a yamllint && \
+		pre-commit run -a cspell && \
+		pre-commit run -a cspell; \
+	else \
+		echo "pyenv command not found"; \
+	fi
 
 # help prints a list of available targets and their descriptions.
 help:

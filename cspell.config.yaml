@@ -39,6 +39,7 @@ words:
   - Akudx
   - aliceonly
   - ALPN
+  - amortisation
   - APITLS
   - APITLSCA
   - assertable
@@ -68,6 +69,7 @@ words:
   - clientcredentials
   - cmap
   - Cmder
+  - coalescer
   - codacy
   - codebook
   - codegen
@@ -86,12 +88,14 @@ words:
   - derr
   - disambiguator
   - distconfig
+  - distmemory
   - distroless
   - EDITMSG
   - elif
   - Equalf
   - errcheck
   - errchkjson
+  - errgroup
   - Errorf
   - errp
   - eventbus
@@ -164,6 +168,7 @@ words:
   - keepalive
   - keepalives
   - keyf
+  - keyfmt
   - keypair
   - lamport
   - lblll
@@ -216,6 +221,7 @@ words:
   - pygments
   - pymdownx
   - reaad
+  - readrepair
   - recvcheck
   - rediscluster
   - Redocly

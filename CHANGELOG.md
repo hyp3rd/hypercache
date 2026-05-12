@@ -8,6 +8,34 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
+- **Async read-repair batching (Phase 4) + unconditional `ForwardSet`-only repair.** Two composing changes
+  in the same PR that together cut the wire-call cost of read-repair under quorum reads. (1) The defensive
+  `ForwardGet` probe in `repairRemoteReplica` is gone — every repair is now exactly one `ForwardSet`,
+  because the receiver's `applySet` already version-compares and noops downgrades, so the probe was pure
+  duplication. ~50% wire-call reduction per repair regardless of batching. (2) New opt-in
+  [`backend.WithDistReadRepairBatch(interval, maxBatchSize)`](pkg/backend/dist_memory.go) option queues
+  repairs by destination peer + key (last-write-wins by `(version, origin)`) and dispatches per-peer batches
+  on the interval or when a peer's pending count hits `maxBatchSize`. Concurrent reads of the same hot key
+  produce ONE repair through the queue, not N — the coalescer collapses duplicate `(peer, key)` entries
+  and bumps the new `dist.read_repair.coalesced` counter per collapsed enqueue. Disabled by default
+  (`interval == 0` = current synchronous behavior preserved, so `TestDistMemoryReadRepair` and
+  `TestDistMemoryRemoveReplication` pass byte-identical). Clean shutdown drains the queue inside `Stop()`;
+  crash exit loses queued repairs by design, with merkle anti-entropy as the convergence safety net.
+  New [`pkg/backend/dist_read_repair.go`](pkg/backend/dist_read_repair.go) hosts the `repairQueue` type
+  with errgroup-driven per-peer parallel `ForwardSet` dispatch. Eight unit tests in
+  [`pkg/backend/dist_read_repair_test.go`](pkg/backend/dist_read_repair_test.go) cover the coalesce rule
+  (same `(peer, key)` keeps the higher version, distinct peers stay independent), the size-threshold
+  inline flush, the nil-transport noop path, the `Stop()` drain semantics, the `(version, origin)`
+  tie-break rule, and concurrent-enqueue race-safety. Three integration tests in
+  [`tests/hypercache_distmemory_readrepair_batch_test.go`](tests/hypercache_distmemory_readrepair_batch_test.go)
+  drive the end-to-end shape — a 3-node RF=3 ConsistencyQuorum cluster, one node's local copy dropped,
+  N concurrent Gets from a third node — and assert the batched flush heals the dropped node, parallel
+  reads coalesce to ≤2 dispatches (one per remote owner) regardless of N, and `Stop()` drains queued
+  repairs before returning. Two new OTel metrics:
+  `dist.read_repair.batched` (per actual `ForwardSet` dispatched by the queue's flusher) and
+  `dist.read_repair.coalesced` (per duplicate-enqueue collapsed). New "Tuning — read-repair batching"
+  section in [`docs/operations.md`](docs/operations.md) covers the option shape, the divergence-window
+  trade-off, the two metrics, and when to enable it (high read-amplification with stable hot keys).
 - **Token-refresh visibility for the OIDC source.** Closes RFC 0003 open question 6: the
   `WithOIDCClientCredentials` source now wraps its `oauth2.TokenSource` with a logger that emits one
   `"oidc token rotated"` Info line per real rotation (expiry change), staying silent on cached returns.
@@ -258,6 +286,23 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Fixed
 
+- **Set-forward promotion no longer requires the in-process `ErrBackendNotFound` sentinel.**
+  [`handleForwardPrimary`](pkg/backend/dist_memory.go) used to gate "primary unreachable → promote to
+  replica" on `errors.Is(errFwd, sentinel.ErrBackendNotFound)`, the error the in-process transport returns
+  for an unregistered peer. HTTP/gRPC transports against a stopped container surface
+  `net.OpError` / `io.EOF` / `context.DeadlineExceeded` instead — none of which matched the condition.
+  Result: when a cluster node was killed (e.g. `docker stop` in
+  [`scripts/tests/20-test-cluster-resilience.sh`](scripts/tests/20-test-cluster-resilience.sh)), writes for
+  keys whose primary was the dead node failed immediately at the forwarding hop, no hint was queued, and
+  the data never landed anywhere — the same 7 of 50 "during-*" writes failed reproducibly in CI's cluster
+  workflow. Promotion now triggers on **any** non-nil forward error when the local node is in `owners[1:]`,
+  matching the in-process and production transport behavior under the same resilience contract. Spurious
+  promotion on a transient blip is benign — `applySet` version-compares on the receiver, and merkle
+  anti-entropy / `chooseNewer` reconcile any divergent `(version, origin)` pair via the existing
+  last-write-wins rule. New test [`TestDistSet_PromotesOnGenericForwardError`](tests/hypercache_distmemory_forward_primary_promotion_test.go)
+  uses the chaos hooks at `DropRate=1.0` to deterministically force a generic forward error and asserts the
+  Set succeeds via promotion; the existing `TestDistFailureRecovery` continues to pass byte-identical (the
+  change widens the promotion gate, doesn't narrow it).
 - **`TestDistRebalanceReplicaDiffThrottle` no longer flakes under `make test-race`.** The test's 900ms hard
   sleep wasn't enough wall-clock budget for the rebalancer's 80ms-tick loop to actually fire 11 ticks under
   `-race` + `-shuffle=on`'s scheduler pressure. Replaced the sleep with a 5-second polling loop that exits as

@@ -82,6 +82,18 @@ type DistMemory struct {
 	// storeTransport applies the wrapper transparently when chaos is set,
 	// so the rest of the code path is unaware of the chaos surface.
 	chaos *Chaos
+	// repairQueue (optional) coalesces read-repair fan-out across the
+	// read path. Set via WithDistReadRepairBatch with interval > 0;
+	// nil means repairs dispatch synchronously inline (the historical
+	// behavior). repairRemoteReplica checks this field on every call
+	// and routes accordingly.
+	repairQueue *repairQueue
+	// repairBatchInterval + repairBatchSize hold the option values
+	// captured at construction so the queue is built once with the
+	// final config after all options have been applied. Zero
+	// interval means batching is disabled.
+	repairBatchInterval time.Duration
+	repairBatchSize     int
 	// configuration (static for now, future: dynamic membership/gossip)
 	replication  int
 	virtualNodes int
@@ -785,6 +797,40 @@ func WithDistLogger(logger *slog.Logger) DistMemoryOption {
 	}
 }
 
+// WithDistReadRepairBatch enables async coalescing of read-repair
+// fan-out. When interval > 0, repairs from the read path are
+// queued by destination peer; the queue flushes periodically OR
+// when a peer's pending count hits maxBatchSize. Repairs to the
+// same (peer, key) collapse to the highest-version entry —
+// concurrent reads of the same hot key produce one repair, not N.
+//
+// Default (interval = 0 or maxBatchSize <= 0): repairs dispatch
+// synchronously inside the Get path. Existing callers asserting
+// "replica healed by the time Get returns" see byte-identical
+// behavior.
+//
+// Trade-off: batched mode introduces a window (up to `interval`)
+// where a divergent replica stays divergent. Merkle anti-entropy
+// is the convergence safety net; the read-repair path is and
+// always was best-effort. Stop() drains pending entries before
+// returning so a clean shutdown doesn't lose queued repairs.
+func WithDistReadRepairBatch(interval time.Duration, maxBatchSize int) DistMemoryOption {
+	return func(dm *DistMemory) {
+		if interval <= 0 || maxBatchSize <= 0 {
+			// Out-of-range values disable batching rather than
+			// silently coercing to a tiny non-zero value the caller
+			// didn't intend.
+			dm.repairBatchInterval = 0
+			dm.repairBatchSize = 0
+
+			return
+		}
+
+		dm.repairBatchInterval = interval
+		dm.repairBatchSize = maxBatchSize
+	}
+}
+
 // WithDistTracerProvider supplies an OpenTelemetry TracerProvider for
 // the dist backend. When set, every public Get/Set/Remove call opens a
 // span (`dist.get` / `dist.set` / `dist.remove`) carrying consistency
@@ -894,6 +940,7 @@ func NewDistMemory(ctx context.Context, opts ...DistMemoryOption) (IBackend[Dist
 	dm.startAutoSyncIfEnabled(lifeCtx)
 	dm.startTombstoneSweeper()
 	dm.startRebalancerIfEnabled(lifeCtx)
+	dm.startRepairQueueIfEnabled(lifeCtx)
 
 	return dm, nil
 }
@@ -1190,6 +1237,8 @@ type distMetrics struct {
 	replicaFanoutSet             atomic.Int64
 	replicaFanoutRemove          atomic.Int64
 	readRepair                   atomic.Int64
+	readRepairBatched            atomic.Int64 // repairs dispatched via the batched flush path
+	readRepairCoalesced          atomic.Int64 // repairs short-circuited because a queued entry already covered the (peer, key)
 	replicaGetMiss               atomic.Int64
 	heartbeatSuccess             atomic.Int64
 	heartbeatFailure             atomic.Int64
@@ -1242,6 +1291,8 @@ type DistMetrics struct {
 	ReplicaFanoutSet             int64
 	ReplicaFanoutRemove          int64
 	ReadRepair                   int64
+	ReadRepairBatched            int64 // subset of ReadRepair dispatched via the async coalescer
+	ReadRepairCoalesced          int64 // repairs short-circuited by the coalescer (duplicate same-version entries)
 	ReplicaGetMiss               int64
 	HeartbeatSuccess             int64
 	HeartbeatFailure             int64
@@ -1315,6 +1366,8 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		ReplicaFanoutSet:             dm.metrics.replicaFanoutSet.Load(),
 		ReplicaFanoutRemove:          dm.metrics.replicaFanoutRemove.Load(),
 		ReadRepair:                   dm.metrics.readRepair.Load(),
+		ReadRepairBatched:            dm.metrics.readRepairBatched.Load(),
+		ReadRepairCoalesced:          dm.metrics.readRepairCoalesced.Load(),
 		ReplicaGetMiss:               dm.metrics.replicaGetMiss.Load(),
 		HeartbeatSuccess:             dm.metrics.heartbeatSuccess.Load(),
 		HeartbeatFailure:             dm.metrics.heartbeatFailure.Load(),
@@ -1413,40 +1466,16 @@ func (dm *DistMemory) Stop(ctx context.Context) error {
 		dm.lifeCancel()
 	}
 
-	if dm.stopCh != nil {
-		close(dm.stopCh)
+	dm.closeBackgroundLoops()
 
-		dm.stopCh = nil
-	}
+	if dm.repairQueue != nil {
+		// Drain pending entries before returning so a clean shutdown
+		// dispatches in-flight repairs rather than dropping them.
+		// stop() blocks until the flusher goroutine emits its final
+		// flushAll and exits.
+		dm.repairQueue.stop()
 
-	if dm.hintStopCh != nil {
-		close(dm.hintStopCh)
-
-		dm.hintStopCh = nil
-	}
-
-	if dm.gossipStopCh != nil {
-		close(dm.gossipStopCh)
-
-		dm.gossipStopCh = nil
-	}
-
-	if dm.autoSyncStopCh != nil {
-		close(dm.autoSyncStopCh)
-
-		dm.autoSyncStopCh = nil
-	}
-
-	if dm.tombStopCh != nil { // stop tomb sweeper
-		close(dm.tombStopCh)
-
-		dm.tombStopCh = nil
-	}
-
-	if dm.rebalanceStopCh != nil { // stop rebalance loop (was leaking pre-fix)
-		close(dm.rebalanceStopCh)
-
-		dm.rebalanceStopCh = nil
+		dm.repairQueue = nil
 	}
 
 	// Unregister the OTel metric callback before tearing down the HTTP
@@ -1561,6 +1590,55 @@ func (dm *DistMemory) RemovePeer(address string) {
 			)
 
 			return
+		}
+	}
+}
+
+// startRepairQueueIfEnabled builds + starts the read-repair queue
+// when WithDistReadRepairBatch was set with a non-zero interval +
+// batch size. The queue holds a closure over loadTransport so it
+// always sees the currently-active transport (including chaos-wrapped
+// or post-Stop nil transports).
+func (dm *DistMemory) startRepairQueueIfEnabled(ctx context.Context) {
+	if dm.repairBatchInterval <= 0 || dm.repairBatchSize <= 0 {
+		return
+	}
+
+	dm.repairQueue = newRepairQueue(
+		dm.repairBatchInterval,
+		dm.repairBatchSize,
+		dm.loadTransport,
+		&dm.metrics,
+		dm.logger,
+	)
+	dm.repairQueue.start(ctx)
+
+	dm.logger.Info(
+		"read-repair batching enabled",
+		slog.Duration("interval", dm.repairBatchInterval),
+		slog.Int("max_batch_size", dm.repairBatchSize),
+	)
+}
+
+// closeBackgroundLoops closes every stopCh wired into a background
+// goroutine launched by NewDistMemory. Extracted from Stop to keep
+// that method under the function-length budget; ordering is not
+// load-bearing (each loop's select handles its own teardown).
+func (dm *DistMemory) closeBackgroundLoops() {
+	stopChs := []*chan struct{}{
+		&dm.stopCh,
+		&dm.hintStopCh,
+		&dm.gossipStopCh,
+		&dm.autoSyncStopCh,
+		&dm.tombStopCh,
+		&dm.rebalanceStopCh,
+	}
+
+	for _, ch := range stopChs {
+		if *ch != nil {
+			close(*ch)
+
+			*ch = nil
 		}
 	}
 }
@@ -2696,21 +2774,16 @@ func (dm *DistMemory) repairStaleOwners(
 		return
 	}
 
+	// Route through repairRemoteReplica so this path benefits from
+	// the same probe-drop + opt-in batching as the primary
+	// read-repair path. The send-and-let-receiver-noop pattern
+	// is safe because applySet on the receiver version-compares.
 	for _, oid := range staleOwners {
 		if oid == dm.localNode.ID { // local handled in repairReplicas
 			continue
 		}
 
-		it, ok, err := transport.ForwardGet(ctx, string(oid), key)
-		if err != nil { // skip unreachable
-			continue
-		}
-
-		if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) {
-			_ = transport.ForwardSet(ctx, string(oid), chosen, false)
-
-			dm.metrics.readRepair.Add(1)
-		}
+		dm.repairRemoteReplica(ctx, key, chosen, oid)
 	}
 }
 
@@ -3514,27 +3587,56 @@ func (dm *DistMemory) repairLocalReplica(ctx context.Context, key string, chosen
 	}
 }
 
-// repairRemoteReplica updates a remote replica if stale (best-effort).
+// repairRemoteReplica dispatches a stale-replica repair to a remote owner.
+//
+// We send the chosen item unconditionally — no probe-then-write dance — because
+// the receiver's applySet already version-compares and noops a write older or
+// equal to what it holds. The previous shape did a defensive ForwardGet first;
+// dropping it cuts every repair from two transport calls to one, with the
+// receiver's version logic providing the same staleness gate it always did.
+//
+// If WithDistReadRepairBatch was set, the repair is enqueued for coalescing
+// instead of dispatching synchronously; the read path returns without waiting
+// for the wire call. The async window is bounded by the configured interval
+// and drained on Stop.
 func (dm *DistMemory) repairRemoteReplica(
 	ctx context.Context,
-	key string,
+	_ string,
 	chosen *cache.Item,
 	oid cluster.NodeID,
-) { // separated to reduce cyclomatic complexity
+) {
 	transport := dm.loadTransport()
 	if transport == nil { // cannot repair remote
 		return
 	}
 
-	it, ok, _ := transport.ForwardGet(ctx, string(oid), key)
-	if !ok || it.Version < chosen.Version || (it.Version == chosen.Version && it.Origin > chosen.Origin) { // stale
-		_ = transport.ForwardSet(ctx, string(oid), chosen, false)
-
+	if dm.repairQueue != nil {
+		dm.repairQueue.enqueue(ctx, oid, chosen)
 		dm.metrics.readRepair.Add(1)
+
+		return
 	}
+
+	_ = transport.ForwardSet(ctx, string(oid), chosen, false)
+
+	dm.metrics.readRepair.Add(1)
 }
 
-// handleForwardPrimary tries to forward a Set to the primary; returns (proceedAsPrimary,false) if promotion required.
+// handleForwardPrimary tries to forward a Set to the primary; returns
+// (proceedAsPrimary, err). On any non-nil forward error — not just
+// ErrBackendNotFound — the function attempts to promote to a replica
+// owner if the local node is in the replica list. This is the correct
+// resilience contract: the in-process transport surfaces unreachable
+// peers as ErrBackendNotFound, but HTTP/gRPC transports against a
+// stopped container surface net.OpError / io.EOF /
+// context.DeadlineExceeded. Gating promotion on the in-process-only
+// sentinel meant production forwarding failures dropped writes to keys
+// whose primary had just been killed, until the next merkle tick.
+//
+// A spurious promotion (primary was healthy but the call hit a
+// transient blip) is benign: applySet on the receiver version-compares,
+// and `chooseNewer` / merkle anti-entropy reconcile any divergent
+// `(version, origin)` pair through the existing last-write-wins rule.
 func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster.NodeID, item *cache.Item) (bool, error) {
 	transport := dm.loadTransport()
 	if transport == nil {
@@ -3544,26 +3646,23 @@ func (dm *DistMemory) handleForwardPrimary(ctx context.Context, owners []cluster
 	dm.metrics.forwardSet.Add(1)
 
 	errFwd := transport.ForwardSet(ctx, string(owners[0]), item, true)
-	switch {
-	case errFwd == nil:
-		return false, nil // forwarded successfully
-	case errors.Is(errFwd, sentinel.ErrBackendNotFound) && len(owners) > 1:
-		// primary missing: promote if this node is a listed replica
-		for _, oid := range owners[1:] {
-			if oid == dm.localNode.ID { // we can promote
-				if !dm.ownsKeyInternal(item.Key) { // still not recognized locally (ring maybe outdated)
-					return false, errFwd
-				}
+	if errFwd == nil {
+		return false, nil
+	}
 
-				return true, nil // proceed as primary path
+	// Primary unreachable for any reason — try to promote to a replica
+	// owner. The local node must be in owners[1:] AND still recognize
+	// itself as an owner (defensive against a stale ring snapshot
+	// mid-membership-change).
+	if len(owners) > 1 {
+		for _, oid := range owners[1:] {
+			if oid == dm.localNode.ID && dm.ownsKeyInternal(item.Key) {
+				return true, nil
 			}
 		}
-
-		return false, errFwd // not promotable
-
-	default:
-		return false, errFwd
 	}
+
+	return false, errFwd
 }
 
 // initStandaloneMembership initializes membership & ring for standalone mode with optional seeds.
@@ -3870,6 +3969,16 @@ var distMetricSpecs = []distMetricSpec{
 		name: "dist.read.repair", unit: unitOp, counter: true,
 		desc: "Read-repair operations triggered by stale-replica reads",
 		get:  func(m DistMetrics) int64 { return m.ReadRepair },
+	},
+	{
+		name: "dist.read.repair.batched", unit: unitOp, counter: true,
+		desc: "Read-repair operations dispatched via the async coalescer (subset of dist.read.repair)",
+		get:  func(m DistMetrics) int64 { return m.ReadRepairBatched },
+	},
+	{
+		name: "dist.read.repair.coalesced", unit: unitOp, counter: true,
+		desc: "Read-repair operations short-circuited by the coalescer because a queued entry already covered the (peer, key)",
+		get:  func(m DistMetrics) int64 { return m.ReadRepairCoalesced },
 	},
 	{
 		name: "dist.replica.get.miss", unit: unitOp, counter: true,
