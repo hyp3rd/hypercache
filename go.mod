@@ -8,7 +8,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/goccy/go-json v0.10.6
 	github.com/gofiber/fiber/v3 v3.2.0
-	github.com/hyp3rd/ewrap v1.5.0
+	github.com/hyp3rd/ewrap v1.5.1
 	github.com/hyp3rd/sectools v1.2.5
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/stretchr/testify v1.11.1
