@@ -248,6 +248,85 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /v1/cache/keys:
+    get:
+      operationId: listCacheKeys
+      tags: [ cluster ]
+      summary: Cluster-wide key browser.
+      description: |
+        Enumerates cache keys across every alive peer, deduplicates
+        replicas, sorts, and returns a paged slice. Intended for
+        operator-debug workflows (refining a search, sampling the
+        cluster) — *not* a primary data-access path.
+
+        The `q` filter follows two modes:
+        - **Prefix:** patterns with no glob metacharacters (`*`,
+          `?`, `[`) match via `strings.HasPrefix`. Example: `first-`
+          matches every key starting with `first-`.
+        - **Glob:** patterns containing any of `*`, `?`, `[` match
+          via Go's `path.Match`. Example: `first-*` matches every
+          key with that prefix; `first-?` matches `first-` plus one
+          character; `[ab]*` matches keys starting with `a` or `b`.
+
+        Caps:
+        - `max` bounds the full deduplicated result set held in
+          memory (default 10000, hard 50000). Hitting it surfaces
+          `truncated: true`.
+        - `limit` bounds the page size (default 100, hard 500).
+
+        Peer fan-out is best-effort: a failed peer is recorded in
+        `partial_nodes` rather than failing the whole call.
+
+        Returns 501 when the underlying backend isn't distributed
+        (single-node DistMemory in test fixtures included — this
+        endpoint requires a cluster).
+
+        Requires the `cache.read` scope.
+      parameters:
+        - in: query
+          name: q
+          required: false
+          schema: { type: string }
+          description: |
+            Optional pattern. Prefix when no glob metacharacter is
+            present; glob via path.Match otherwise. Empty means no
+            filter.
+        - in: query
+          name: cursor
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: |
+            Offset into the deduplicated, sorted result set returned
+            by a previous page's `next_cursor`. Past-end cursors
+            return an empty page rather than an error.
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+          description: Page size. Hard-capped at 500.
+        - in: query
+          name: max
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50000, default: 10000 }
+          description: |
+            Total deduplicated result-set cap. Hard-capped at 50000.
+            Reaching it surfaces `truncated: true`.
+      responses:
+        "200":
+          description: Page of cluster-wide matching keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListKeysResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501":
+          description: Backend does not support cluster-wide enumeration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/me:
     get:
       operationId: getIdentity
@@ -530,6 +609,39 @@ components:
           description: Ring owners — primary first, replicas after.
           items: { type: string }
         node: { type: string }
+
+    ListKeysResponse:
+      type: object
+      required: [ keys, next_cursor, total_matched, truncated, node ]
+      properties:
+        keys:
+          type: array
+          description: Sorted, deduplicated page of matching keys.
+          items: { type: string }
+        next_cursor:
+          type: string
+          description: |
+            Cursor for the next page, or empty string when this was
+            the final page.
+        total_matched:
+          type: integer
+          description: |
+            Total matching keys across the cluster (capped by `max`).
+            Use this together with `limit` to compute total pages.
+        truncated:
+          type: boolean
+          description: |
+            True when the result set was capped at `max`. The
+            operator should refine the pattern.
+        node:
+          type: string
+          description: The node that handled the fan-out.
+        partial_nodes:
+          type: array
+          description: |
+            Peer IDs whose key fetch failed during fan-out. Their
+            keys may be missing from `keys`; the operator can retry.
+          items: { type: string }
 
     IdentityResponse:
       type: object

@@ -459,6 +459,12 @@ func registerClientRoutes(app *fiber.App, policy httpauth.Policy, nodeCtx *nodeC
 		return c.Send(openapiSpec)
 	})
 
+	// /v1/cache/keys must be registered BEFORE the parameterized
+	// /v1/cache/:key — Fiber matches in registration order and the
+	// literal-path route would otherwise be shadowed by the
+	// param-bound handler (handleGet would be invoked with
+	// `key="keys"` and return 404).
+	app.Get("/v1/cache/keys", read, func(c fiber.Ctx) error { return handleListKeys(c, nodeCtx) })
 	app.Put("/v1/cache/:key", write, func(c fiber.Ctx) error { return handlePut(c, nodeCtx) })
 	app.Get("/v1/cache/:key", read, func(c fiber.Ctx) error { return handleGet(c, nodeCtx) })
 	app.Head("/v1/cache/:key", read, func(c fiber.Ctx) error { return handleHead(c, nodeCtx) })
@@ -645,6 +651,33 @@ type ownersResponse struct {
 	Owners []string `json:"owners"`
 	Node   string   `json:"node"`
 }
+
+// listKeysResponse is the body of GET /v1/cache/keys — operator-
+// facing key browser. `NextCursor` is empty on the last page;
+// `TotalMatched` is the full deduplicated matched set (capped by
+// `max`). `Truncated` reports that the cluster-wide cap was hit
+// and the operator should refine the pattern. `PartialNodes`
+// lists peers whose fan-out failed; their keys may be missing.
+type listKeysResponse struct {
+	Keys         []string `json:"keys"`
+	NextCursor   string   `json:"next_cursor"`
+	TotalMatched int      `json:"total_matched"`
+	Truncated    bool     `json:"truncated"`
+	Node         string   `json:"node"`
+	PartialNodes []string `json:"partial_nodes,omitempty"`
+}
+
+// list-keys query-parameter bounds. Defaults match the operator
+// "browse / refine" workflow; the hard caps bound the worst-case
+// memory and response size — operators needing a larger sweep
+// script against the per-node /internal/keys path with their own
+// paging instead of lifting these.
+const (
+	listKeysDefaultLimit = 100
+	listKeysMaxLimit     = 500
+	listKeysDefaultMax   = 10000
+	listKeysHardMax      = 50000
+)
 
 // handlePut implements PUT /v1/cache/:key.
 // Body is the raw value (any content type). Optional ?ttl=<dur>
@@ -1286,6 +1319,126 @@ func handleOwners(c fiber.Ctx, nodeCtx *nodeContext) error {
 		Key:    key,
 		Owners: nodeCtx.hc.ClusterOwners(key),
 		Node:   nodeCtx.nodeID,
+	})
+}
+
+// listKeysParams is the parsed-and-validated form of the
+// /v1/cache/keys query string. Returned as a struct so
+// parseListKeysQuery stays under the function-result-limit and
+// the call site reads fields by name rather than position.
+type listKeysParams struct {
+	Pattern    string
+	Cursor     int
+	Limit      int
+	MaxResults int
+}
+
+// parseBoundedPositiveInt reads a query parameter as a positive int
+// with a default fallback and a hard ceiling. Empty value → default.
+// Out-of-range or non-numeric → caller-visible error (must surface
+// as 400 BAD_REQUEST).
+func parseBoundedPositiveInt(c fiber.Ctx, name string, def, hardMax int) (int, error) {
+	v := c.Query(name)
+	if v == "" {
+		return def, nil
+	}
+
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0, ewrap.New("invalid " + name + ": must be a positive integer")
+	}
+
+	if n > hardMax {
+		n = hardMax
+	}
+
+	return n, nil
+}
+
+// parseListKeysQuery extracts and validates the query parameters
+// for GET /v1/cache/keys. Defaults and hard caps are applied here
+// so handleListKeys keeps a single response-shape concern.
+func parseListKeysQuery(c fiber.Ctx) (listKeysParams, error) {
+	out := listKeysParams{Pattern: c.Query("q")}
+
+	if cursorStr := c.Query("cursor"); cursorStr != "" {
+		n, err := strconv.Atoi(cursorStr)
+		if err != nil || n < 0 {
+			return listKeysParams{}, ewrap.New("invalid cursor: must be a non-negative integer")
+		}
+
+		out.Cursor = n
+	}
+
+	limit, err := parseBoundedPositiveInt(c, "limit", listKeysDefaultLimit, listKeysMaxLimit)
+	if err != nil {
+		return listKeysParams{}, err
+	}
+
+	out.Limit = limit
+
+	maxResults, err := parseBoundedPositiveInt(c, "max", listKeysDefaultMax, listKeysHardMax)
+	if err != nil {
+		return listKeysParams{}, err
+	}
+
+	out.MaxResults = maxResults
+
+	return out, nil
+}
+
+// handleListKeys implements GET /v1/cache/keys — operator-facing
+// cluster-wide key browser. Fans out across every alive peer,
+// merges + dedupes + sorts the result, then slices the page via
+// cursor/limit. The full deduplicated set is held in memory for
+// one request (bounded by `max`); paging re-fans out — fine for
+// the operator-debug workflow this endpoint serves.
+//
+// Returns 501 when the underlying backend isn't a DistMemory
+// (in-memory / Redis): the surface only makes sense in cluster
+// mode and surfacing that explicitly is friendlier than a
+// silently empty page.
+func handleListKeys(c fiber.Ctx, nodeCtx *nodeContext) error {
+	params, err := parseListKeysQuery(c)
+	if err != nil {
+		return jsonErr(c, fiber.StatusBadRequest, codeBadRequest, err.Error())
+	}
+
+	res, err := nodeCtx.hc.ClusterKeys(c.Context(), params.Pattern, params.MaxResults)
+	if err != nil {
+		return jsonErr(c, fiber.StatusBadRequest, codeBadRequest, err.Error())
+	}
+
+	if res == nil {
+		return jsonErr(
+			c,
+			fiber.StatusNotImplemented,
+			codeInternal,
+			"list-keys requires a distributed backend",
+		)
+	}
+
+	total := len(res.Keys)
+
+	// Cursor past the end is a valid terminal state (last page +
+	// 1): respond with an empty page rather than 400. Mirrors how
+	// SQL OFFSET past the row count returns an empty result set.
+	start := min(params.Cursor, total)
+	end := min(start+params.Limit, total)
+	page := res.Keys[start:end]
+
+	nextCursor := ""
+	if end < total {
+		nextCursor = strconv.Itoa(end)
+	}
+
+	return c.JSON(listKeysResponse{
+		Keys:         page,
+		NextCursor:   nextCursor,
+		TotalMatched: total,
+		Truncated:    res.Truncated,
+		Node:         nodeCtx.nodeID,
+		PartialNodes: res.PartialNodes,
 	})
 }
 

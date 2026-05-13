@@ -283,6 +283,15 @@ func (t *chaosTransport) Gossip(ctx context.Context, targetNodeID string, member
 	return t.inner.Gossip(ctx, targetNodeID, members)
 }
 
+func (t *chaosTransport) ListKeys(ctx context.Context, nodeID, pattern string) ([]string, error) {
+	err := t.applyFault()
+	if err != nil {
+		return nil, err
+	}
+
+	return t.inner.ListKeys(ctx, nodeID, pattern)
+}
+
 func (t *chaosTransport) FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error) {
 	err := t.applyFault()
 	if err != nil {

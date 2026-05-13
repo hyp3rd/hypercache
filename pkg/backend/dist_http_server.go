@@ -602,6 +602,16 @@ func handleKeys(fctx fiber.Ctx, dm *DistMemory) error {
 		limit = parsed
 	}
 
+	// Optional filter: empty `q` keeps the pre-existing
+	// return-everything semantic for callers that haven't been
+	// upgraded (notably the merkle anti-entropy path). A non-empty
+	// pattern containing glob metacharacters (* ? [) is matched via
+	// path.Match; anything else is treated as a literal prefix.
+	matcher, mErr := buildKeyMatcher(fctx.Query("q"))
+	if mErr != nil {
+		return fctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{constants.ErrorLabel: mErr.Error()})
+	}
+
 	if cursor >= len(dm.shards) {
 		return fctx.JSON(fiber.Map{"keys": []string{}, "next_cursor": ""})
 	}
@@ -611,7 +621,7 @@ func handleKeys(fctx fiber.Ctx, dm *DistMemory) error {
 		return fctx.JSON(fiber.Map{"keys": []string{}, "next_cursor": strconv.Itoa(cursor + 1)})
 	}
 
-	keys, truncated := collectShardKeys(shard, limit)
+	keys, truncated := collectShardKeys(shard, limit, matcher)
 
 	nextCursor := ""
 
@@ -637,15 +647,25 @@ func handleKeys(fctx fiber.Ctx, dm *DistMemory) error {
 	})
 }
 
-// collectShardKeys reads up to `limit` keys from shard. limit<=0
-// returns the full shard. The truncated bool reports whether the
-// shard had more keys than `limit` allowed.
-func collectShardKeys(shard *distShard, limit int) ([]string, bool) {
+// collectShardKeys reads up to `limit` keys from shard that match
+// `matcher`. limit<=0 returns every matching key. The truncated
+// bool reports whether the shard had more matching keys than
+// `limit` allowed.
+//
+// Matcher is applied during iteration so non-matching keys never
+// count against the limit — a `limit=10, q="first-*"` request
+// returns the first 10 keys that match the prefix/glob, not
+// "the first 10 keys, of which some happen to match.".
+func collectShardKeys(shard *distShard, limit int, matcher func(string) bool) ([]string, bool) {
 	out := make([]string, 0, shard.items.Count())
 
 	truncated := false
 
 	for k := range shard.items.All() {
+		if !matcher(k) {
+			continue
+		}
+
 		if limit > 0 && len(out) >= limit {
 			truncated = true
 

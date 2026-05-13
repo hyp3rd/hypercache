@@ -8,6 +8,39 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
+- **Cluster-wide key browser (`GET /v1/cache/keys`).** New v1 client-API endpoint that fans out across
+  every alive peer, dedupes replicas, sorts, and returns a paged slice — designed for the operator-debug
+  workflow of "browse / refine a search" rather than as a primary data-access path. The `q` parameter
+  switches between two modes via a small classifier:
+  patterns containing any of `*`, `?`, `[` go through Go's `path.Match` (platform-agnostic glob —
+  `filepath.Match`'s OS-specific separator semantics are wrong for arbitrary string keys);
+  everything else is treated as a literal prefix via `strings.HasPrefix`. Two hard caps bound the
+  worst case: `max` (default 10000, ceiling 50000) for the full deduplicated result set held in memory,
+  and `limit` (default 100, ceiling 500) for the page size — `cursor` paging is offset-based against the
+  sorted set so successive pages are stable across requests. Per-peer fan-out failures are best-effort:
+  the failed peer ID lands in `partial_nodes` rather than failing the whole call, mirroring the
+  read-repair and hint-replay contracts elsewhere in the cluster. Returns 501 when the underlying
+  backend isn't `DistMemory` (this endpoint requires a cluster). The new method
+  [`(*DistMemory).ListKeys`](pkg/backend/dist_keys.go) drives the fan-out via `errgroup` with a
+  `listKeysAccumulator` merge struct keyed by a single mutex; the self-peer slice walks local shards
+  directly (no HTTP self-hop). The `DistTransport` interface grows a new method
+  `ListKeys(ctx, nodeID, pattern)` with implementations in `InProcessTransport` (direct shard scan),
+  `DistHTTPTransport` (extends the existing `/internal/keys` path with an optional `q` query param —
+  backward compatible; cursor semantics unchanged), and `chaosTransport` (pass-through with the same
+  drop/latency injection hooks as the other verbs). Unit tests in
+  [`pkg/backend/dist_keys_test.go`](pkg/backend/dist_keys_test.go) pin the
+  prefix-vs-glob classifier across twelve table cases and the malformed-glob → `path.ErrBadPattern`
+  surface; HTTP smoke tests in [`cmd/hypercache-server/handlers_test.go`](cmd/hypercache-server/handlers_test.go)
+  drive seed → paged walk → assert union and no cross-page duplicates, plus 400 surfaces for invalid
+  cursor and malformed glob; five integration tests in
+  [`tests/hypercache_distmemory_listkeys_test.go`](tests/hypercache_distmemory_listkeys_test.go)
+  cover cluster-wide dedup at RF=3 across 5 nodes (50 unique seeds → 50 keys, not 150 = 50 × RF=3),
+  prefix vs glob filters, and `max`-triggered truncation. Route registration order matters in Fiber's
+  trie router: `/v1/cache/keys` must come before `/v1/cache/:key`, otherwise the parameterized handler
+  shadows it with `key="keys"`. OpenAPI spec entry (`ListKeysResponse` schema + operation) added to
+  [`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml); the drift-detector test
+  in [`cmd/hypercache-server/openapi_test.go`](cmd/hypercache-server/openapi_test.go) catches future
+  spec / route mismatches.
 - **Async read-repair batching (Phase 4) + unconditional `ForwardSet`-only repair.** Two composing changes
   in the same PR that together cut the wire-call cost of read-repair under quorum reads. (1) The defensive
   `ForwardGet` probe in `repairRemoteReplica` is gone — every repair is now exactly one `ForwardSet`,

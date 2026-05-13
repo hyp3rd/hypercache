@@ -100,7 +100,7 @@ func TestDistHTTPClient_RejectsOversizedResponse(t *testing.T) {
 		func(_ string) (string, bool) { return srv.URL, true },
 	)
 
-	_, err := transport.ListKeys(context.Background(), "ignored")
+	_, err := transport.ListKeys(context.Background(), "ignored", "")
 	if err == nil {
 		t.Fatalf("expected ListKeys to fail when response exceeds limit, got nil")
 	}

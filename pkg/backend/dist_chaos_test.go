@@ -48,6 +48,10 @@ func (*recordingTransport) FetchMerkle(_ context.Context, _ string) (*MerkleTree
 	return nil, nil //nolint:nilnil // stub never invoked by chaos unit tests
 }
 
+func (*recordingTransport) ListKeys(_ context.Context, _, _ string) ([]string, error) {
+	return nil, nil
+}
+
 // TestChaos_DropRateOneAlwaysDrops pins that DropRate=1.0 short-
 // circuits every transport call with ErrChaosDrop. The inner
 // transport must NOT be invoked.

@@ -64,6 +64,10 @@ func (*captureTransport) FetchMerkle(_ context.Context, _ string) (*MerkleTree, 
 	return nil, nil //nolint:nilnil // stub never invoked by these unit tests
 }
 
+func (*captureTransport) ListKeys(_ context.Context, _, _ string) ([]string, error) {
+	return nil, nil
+}
+
 func (c *captureTransport) callCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
