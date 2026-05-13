@@ -171,8 +171,11 @@ cleanup() {
 	if ! docker compose -f "$COMPOSE_FILE" ps "$KILL_NODE" --format '{{.State}}' 2>/dev/null | grep -q running; then
 		echo ""
 		echo "[cleanup] restarting $KILL_NODE so the stack returns to a healthy state"
-		docker compose -f "$COMPOSE_FILE" start "$KILL_NODE" >/dev/null 2>&1 || true
+		sleep 2
+		docker compose -f "$COMPOSE_FILE" start "$KILL_NODE" >/dev/null 2>&1 || sleep 2 || exit 1
 	fi
+
+	exit 0
 }
 
 trap cleanup EXIT

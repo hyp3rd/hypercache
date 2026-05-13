@@ -139,8 +139,10 @@ func (t *InProcessTransport) ForwardSet(ctx context.Context, nodeID string, item
 		return sentinel.ErrBackendNotFound
 	}
 
-	// direct apply bypasses ownership check (already routed)
-	b.applySet(ctx, item, replicate)
+	// Forwarded arrival: ownership guard fires if the receiver's
+	// ring view says this node isn't an owner of the key. Stops
+	// divergent-view senders from planting stuck keys.
+	b.applyForwardedSet(ctx, item, replicate)
 
 	return nil
 }

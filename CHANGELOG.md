@@ -286,6 +286,81 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Fixed
 
+- **applySet now clones the key string before storing it as the shard's map key.** Under HTTP traffic
+  (Fiber + the v1 cache API), path parameters returned by `c.Params("key")` are backed by a pooled
+  request buffer that the framework reuses for the next request. The original `applySet` stored the
+  caller's string directly as the `ConcurrentMap` key; when the next request landed, the buffer's
+  bytes mutated, and so did every map key (and `Item.Key` field) we'd previously stored. The
+  immediate symptom: the same logical key drifted across multiple shards (`first-24` showing up in
+  shards 2, 3, 4, and twice in shard 6), and phantom keys like `first-479` materialized in the
+  iteration (a "first-4" buffer overlaid with "79" from the next URL). The rebalance loop, scanning
+  `sh.items.All()`, kept re-flagging these phantoms — `RebalancedPrimary` climbed at ~60/s on a
+  5-node cluster after a single 100-key write batch, even though MembershipVersion, hint queues,
+  merkle counters, and the `WriteApplyRefused` guard were all quiet. The fix is one
+  `strings.Clone(item.Key)` call in [`applySet`](pkg/backend/dist_memory.go) before recording the
+  originalPrimary and storing: the cloned key has its own backing array, fully detached from the
+  caller's pooled buffer. The `Item.Key` field on the stored clone gets the same stable value so
+  any downstream code observes a coherent shard entry. Post-fix the cluster's rebalance counters
+  stay at exactly zero in steady state across all 5 nodes.
+- **Receiver-side ownership guard breaks the divergent-ring-view rebalance loop.** After the
+  `migrateIfNeeded`-side fix (one migration per stuck key, then release) shipped, operators on a 5-node
+  cluster running [`scripts/tests/30-test-cluster-writes.sh`](scripts/tests/30-test-cluster-writes.sh)
+  still saw `RebalancedPrimary` climb at ~60/s post-script with no membership, hint, or merkle activity.
+  Root cause: when the migration target's ring view still treated the original source as a replica, the
+  target's `applySet` fan-out re-planted the key on the source. The source released it (per the earlier
+  fix), then received it back on the next gossip tick, then migrated again — perpetual cycle even though
+  no state was actually transitioning. New [`applyForwardedSet`](pkg/backend/dist_memory.go) is the entry
+  point used by the transport-receiver paths (`InProcessTransport.ForwardSet` and the HTTP
+  `/internal/set` handler) and applies an ownership guard: if the receiver's ring view says it isn't an
+  owner of the key, the write is silently dropped. The sender's transport call still returns nil (no
+  behavioral break — best-effort semantics already governed the hot path), but the receiver's shard
+  stays clean. Merkle anti-entropy is the convergence safety net for any write refused here. The guard
+  is deliberately NOT in `applySet` itself: legitimate internal callers (setImpl primary path,
+  `migrateIfNeeded` forwarder, merkle pull, read-repair) have either already verified ownership or
+  explicitly want to plant regardless — moving the guard would have broken `TestHTTPFetchMerkle`. New
+  `dist.write.apply_refused` counter exposes how often the guard fires (zero on healthy views;
+  non-zero indicates divergence operators may want to investigate). New test
+  [`TestDistRebalance_ApplyOwnershipGuardRefusesForeignWrites`](tests/hypercache_distmemory_rebalance_steady_test.go)
+  drives a direct `ForwardSet` to a non-owner and asserts the shard stays clean and the refused-counter
+  ticks up.
+- **Rebalance counters no longer climb in a steady-state cluster.** When a key was no longer owned by the
+  current node — because the ring had shifted away from it (typical after a node joins or a singleton
+  cluster gains peers) — [`migrateIfNeeded`](pkg/backend/dist_memory.go) forwarded the value to the new
+  primary but only scheduled the LOCAL copy for deletion when `WithDistRemovalGrace > 0`. The default
+  removal-grace setting is zero, which meant the local item was never released; on every subsequent
+  rebalance tick `shouldRebalance` re-flagged the same key via its `!ownsKeyInternal` branch, and
+  `migrateIfNeeded` re-emitted the migration. Operators saw `RebalancedKeys` and `RebalancedPrimary`
+  climb at the scan-tick rate forever — e.g. 5,326 keys / 5,102 primary migrations on a 5-node cluster
+  with ~14 stuck keys and a 100ms ticker, even though no membership had actually changed. Migration now
+  releases the local copy immediately when `removalGracePeriod == 0` (and continues to schedule a
+  deferred delete via `shedRemovedKeys` when a grace period is configured), so each stuck key produces
+  exactly one migration and the loop quiesces. Two new integration tests in
+  [`tests/hypercache_distmemory_rebalance_steady_test.go`](tests/hypercache_distmemory_rebalance_steady_test.go)
+  pin both contracts: `TestDistRebalance_IdleClusterIsSilent` asserts a 5-node RF=3 cluster with no
+  out-of-place keys produces zero counter bumps across many ticks, and
+  `TestDistRebalance_LostOwnershipDrainsOnce` plants one stuck key per node via `DebugInject` and asserts
+  the counters reach exactly one bump per stuck key and never advance after that.
+- **Incarnation and MembershipVersion no longer churn on every heartbeat.** SWIM-style incarnation
+  numbers and the membership version vector were both inflating roughly in lock-step with elapsed-probes —
+  a 5-node cluster running for a few hours showed incarnations near 2,378 per peer and a MembershipVersion
+  past 4,800, even though no nodes had actually changed state. [`Membership.Mark`](internal/cluster/membership.go)
+  was unconditionally incrementing incarnation, advancing the version counter, AND firing observers on
+  every call; the heartbeat-success path in `evaluateLiveness` calls `Mark(peer, NodeAlive)` once per probe
+  per peer. Three downstream effects: (i) operators couldn't read incarnation as a state-change signal,
+  (ii) gossip-merge fanned out spurious "version went up" deltas, (iii) SSE consumers received constant
+  no-op `members` events. Mark now treats same-state as a full no-op — LastSeen still refreshes (the
+  suspect-after timeout machinery needs that), but incarnation, version, and observers all stay quiet.
+  Genuine state transitions (Alive↔Suspect) still bump all three, so the "higher incarnation wins" gossip
+  merge continues to propagate real changes. New [`Membership.Refute`](internal/cluster/membership.go) is
+  the explicit SWIM self-refute primitive: it always bumps incarnation and sets state to NodeAlive, even
+  when the local view is already Alive — the one path that legitimately needs to publish a
+  higher-incarnation refutation packet regardless of local-view state. `refuteIfSuspected` in
+  [`pkg/backend/dist_memory.go`](pkg/backend/dist_memory.go) switched from `Mark(localID, NodeAlive)` to
+  `Refute(localID)` so the divergent semantic is obvious at the call site. Five new unit tests in
+  [`internal/cluster/membership_test.go`](internal/cluster/membership_test.go) pin: no-incarnation-bump on
+  same-state Mark, no-version-bump and no-observer-fire on same-state Mark, bump-on-transition, refute
+  always bumps, and the ghost-node guard. The existing `TestDistSWIM_SelfRefute` integration test
+  continues to pass byte-identical.
 - **Remove path no longer silently succeeds when the primary is unreachable.**
   Symmetric audit-fix to the Set-forward change: [`removeImpl`](pkg/backend/dist_memory.go) used to
   swallow the `ForwardRemove` error with `_ = transport.ForwardRemove(...)` and return `nil`, so a

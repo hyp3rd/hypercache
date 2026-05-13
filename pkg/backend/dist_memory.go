@@ -1275,6 +1275,7 @@ type distMetrics struct {
 	writeAcks                    atomic.Int64 // cumulative replica write acks (includes primary)
 	writeAttempts                atomic.Int64 // total write operations attempted (Set)
 	writeForwardPromotion        atomic.Int64 // times a Set forward to primary failed and the local replica self-promoted
+	writeApplyRefused            atomic.Int64 // applySet calls that the ownership guard refused (sender had divergent ring view)
 	rebalancedKeys               atomic.Int64 // keys migrated during rebalancing
 	rebalanceBatches             atomic.Int64 // number of batches processed
 	rebalanceThrottle            atomic.Int64 // times rebalance was throttled due to concurrency limits
@@ -1336,6 +1337,7 @@ type DistMetrics struct {
 	WriteAcks                    int64
 	WriteAttempts                int64
 	WriteForwardPromotion        int64
+	WriteApplyRefused            int64
 	RebalancedKeys               int64
 	RebalanceBatches             int64
 	RebalanceThrottle            int64
@@ -1412,6 +1414,7 @@ func (dm *DistMemory) Metrics() DistMetrics {
 		WriteAcks:                    dm.metrics.writeAcks.Load(),
 		WriteAttempts:                dm.metrics.writeAttempts.Load(),
 		WriteForwardPromotion:        dm.metrics.writeForwardPromotion.Load(),
+		WriteApplyRefused:            dm.metrics.writeApplyRefused.Load(),
 		RebalancedKeys:               dm.metrics.rebalancedKeys.Load(),
 		RebalanceBatches:             dm.metrics.rebalanceBatches.Load(),
 		RebalanceThrottle:            dm.metrics.rebalanceThrottle.Load(),
@@ -2382,7 +2385,8 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) {
 		dm.queueHint(string(owners[0]), item, hintSourceMigration)
 	}
 
-	// Update originalPrimary so we don't recount repeatedly.
+	// Update originalPrimary so a future primary-shift comparison
+	// (the second branch of shouldRebalance) sees the new owner.
 	sh := dm.shardFor(item.Key)
 	if sh.originalPrimary != nil {
 		sh.originalPrimaryMu.Lock()
@@ -2391,15 +2395,30 @@ func (dm *DistMemory) migrateIfNeeded(ctx context.Context, item *cache.Item) {
 		sh.originalPrimaryMu.Unlock()
 	}
 
-	// Record removal timestamp for potential shedding if we are no longer owner at all.
-	if dm.removalGracePeriod > 0 && !dm.ownsKeyInternal(item.Key) && sh.removedAt != nil {
-		sh.removedAtMu.Lock()
+	// If this node is no longer an owner of the key (the migration
+	// was driven by the "lost ownership" branch of shouldRebalance,
+	// not just a primary shift among owners), the local copy MUST
+	// be released so the next rebalance tick doesn't re-flag the
+	// same key and re-emit the migration on every tick forever.
+	// Pre-fix this only scheduled a deferred delete when
+	// `removalGracePeriod > 0` — the default of zero meant the
+	// local item stayed, the key kept failing `ownsKeyInternal`,
+	// and a steady-state cluster saw RebalancedKeys climb at the
+	// scan-tick rate (e.g. ~50/s on a 100ms ticker with ~14 stuck
+	// keys). When grace is configured, schedule deferred deletion
+	// via shedRemovedKeys; otherwise release immediately.
+	if !dm.ownsKeyInternal(item.Key) {
+		if dm.removalGracePeriod > 0 && sh.removedAt != nil {
+			sh.removedAtMu.Lock()
 
-		if _, exists := sh.removedAt[item.Key]; !exists {
-			sh.removedAt[item.Key] = time.Now()
+			if _, exists := sh.removedAt[item.Key]; !exists {
+				sh.removedAt[item.Key] = time.Now()
+			}
+
+			sh.removedAtMu.Unlock()
+		} else {
+			sh.items.Remove(item.Key)
 		}
-
-		sh.removedAtMu.Unlock()
 	}
 }
 
@@ -3515,7 +3534,7 @@ func (dm *DistMemory) refuteIfSuspected(claim *cluster.Node) {
 		return
 	}
 
-	dm.membership.Mark(dm.localNode.ID, cluster.NodeAlive)
+	dm.membership.Refute(dm.localNode.ID)
 
 	dm.logger.Info(
 		"self-refuted suspect/dead claim from peer",
@@ -4255,6 +4274,11 @@ var distMetricSpecs = []distMetricSpec{
 		desc: "Set forwards that promoted the local replica because the primary was unreachable",
 		get:  func(m DistMetrics) int64 { return m.WriteForwardPromotion },
 	},
+	{
+		name: "dist.write.apply_refused", unit: unitOp, counter: true,
+		desc: "applySet calls the ownership guard refused (sender had a divergent ring view)",
+		get:  func(m DistMetrics) int64 { return m.WriteApplyRefused },
+	},
 
 	// --- Rebalance ---
 	{
@@ -4436,12 +4460,64 @@ func (dm *DistMemory) setupOTelMetrics() {
 	dm.metricRegistration = reg
 }
 
+// applyForwardedSet is the entry point used by the transport-receiver
+// paths (InProcessTransport.ForwardSet, HTTP /internal/set handler)
+// to apply a write that arrived from a peer. Unlike `applySet`, this
+// path enforces an ownership guard: if the local ring view says this
+// node is not an owner of the key, the write is silently dropped
+// (sender's transport call still returns nil — best-effort semantics
+// are already the contract on the hot path). Merkle anti-entropy is
+// the convergence safety net for any write refused here.
+//
+// Why the guard belongs here and not in applySet itself: legitimate
+// internal callers (setImpl primary path, migrateIfNeeded forwarder,
+// merkle pull, read-repair) have already verified ownership or
+// explicitly want to plant regardless. Only forwarded arrivals can
+// originate from a peer with a divergent ring view; that's the path
+// that produced the persistent "stuck key created → migrated →
+// re-fanned-back → stuck again" loop on a 5-node cluster, even
+// though MembershipVersion was stable (views were merely diverged,
+// not actively churning).
+func (dm *DistMemory) applyForwardedSet(ctx context.Context, item *cache.Item, replicate bool) {
+	if dm.ring != nil && !dm.ownsKeyInternal(item.Key) {
+		dm.metrics.writeApplyRefused.Add(1)
+
+		return
+	}
+
+	dm.applySet(ctx, item, replicate)
+}
+
 // applySet stores item locally and optionally replicates to other owners.
 // replicate indicates whether replication fan-out should occur (false for replica writes).
+//
+// Callers that receive a forwarded write from a peer (transport-side
+// arrivals) MUST go through `applyForwardedSet` instead so the
+// ownership guard fires; direct callers (primary write, migration,
+// merkle pull, read-repair) bypass the guard because they've already
+// verified ownership or explicitly want to plant regardless.
 func (dm *DistMemory) applySet(ctx context.Context, item *cache.Item, replicate bool) {
 	sh := dm.shardFor(item.Key)
-	dm.recordOriginalPrimary(sh, item.Key)
-	sh.items.Set(item.Key, item)
+
+	// Clone the key STRING data (not just the Item struct) before
+	// using it as a map key. Fiber and similar HTTP frameworks back
+	// path-parameter strings with pooled buffers that get reused on
+	// the next request; if we stored the original string, the map
+	// key would silently mutate to whatever the next request wrote,
+	// landing duplicate entries under shifted keys across shards and
+	// causing the rebalance loop to flag phantom keys indefinitely.
+	// strings.Clone allocates a fresh backing array, decoupling the
+	// stored key from the caller's buffer lifetime. The Item.Key
+	// field also gets the cloned key so any downstream code that
+	// reads cloned.Key sees the stable value.
+	stableKey := strings.Clone(item.Key)
+
+	dm.recordOriginalPrimary(sh, stableKey)
+
+	cloned := *item
+
+	cloned.Key = stableKey
+	sh.items.Set(stableKey, &cloned)
 
 	if !replicate || dm.ring == nil {
 		return
