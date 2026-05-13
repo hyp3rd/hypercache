@@ -95,6 +95,7 @@ func declaredMethodsForPath() map[string]map[string]struct{} {
 		"/healthz":               {fiber.MethodGet: {}},
 		"/v1/openapi.yaml":       {fiber.MethodGet: {}},
 		"/v1/cache/:key":         {fiber.MethodPut: {}, fiber.MethodGet: {}, fiber.MethodHead: {}, fiber.MethodDelete: {}},
+		"/v1/cache/keys":         {fiber.MethodGet: {}},
 		"/v1/owners/:key":        {fiber.MethodGet: {}},
 		"/v1/me":                 {fiber.MethodGet: {}},
 		"/v1/me/can":             {fiber.MethodGet: {}},

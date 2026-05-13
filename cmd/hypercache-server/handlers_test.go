@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -47,6 +49,10 @@ func newTestServer(t *testing.T) *fiber.App {
 	app := fiber.New()
 	nodeCtx := &nodeContext{hc: hc, nodeID: "test-node"}
 
+	// Match production ordering: literal /v1/cache/keys before the
+	// parameterized /v1/cache/:key so the router picks handleListKeys
+	// for the literal path.
+	app.Get("/v1/cache/keys", func(c fiber.Ctx) error { return handleListKeys(c, nodeCtx) })
 	app.Get("/v1/cache/:key", func(c fiber.Ctx) error { return handleGet(c, nodeCtx) })
 	app.Head("/v1/cache/:key", func(c fiber.Ctx) error { return handleHead(c, nodeCtx) })
 	app.Put("/v1/cache/:key", func(c fiber.Ctx) error { return handlePut(c, nodeCtx) })
@@ -350,5 +356,136 @@ func TestHandleBatchDelete_BasicFlow(t *testing.T) {
 	got := doRequest(t, app, http.MethodPost, "/v1/cache/batch/get", `{"keys":["k"]}`, nil)
 	if !strings.Contains(got.body, `"found":false`) {
 		t.Fatalf("batch-get post-delete should report found:false; got %s", got.body)
+	}
+}
+
+// seedListKeysFixture seeds `count` keys prefixed `first-NN` plus a
+// `second-1` decoy via PUT. Returns the test app so the caller can
+// drive the list-keys endpoint against the populated cache. Kept
+// here rather than in newTestServer so the test bodies stay
+// declarative.
+func seedListKeysFixture(t *testing.T, count int) *fiber.App {
+	t.Helper()
+
+	app := newTestServer(t)
+
+	for i := range count {
+		n := strconv.Itoa(i + 1)
+		key := "first-" + strings.Repeat("0", 2-len(n)) + n
+
+		put := doRequest(t, app, http.MethodPut, "/v1/cache/"+key, "v", nil)
+		if put.status != http.StatusOK {
+			t.Fatalf("seed put %s: %d", key, put.status)
+		}
+	}
+
+	put := doRequest(t, app, http.MethodPut, "/v1/cache/second-1", "v", nil)
+	if put.status != http.StatusOK {
+		t.Fatalf("seed second put: %d", put.status)
+	}
+
+	return app
+}
+
+// fetchListKeysPage drives one /v1/cache/keys request and decodes
+// the response, failing the test on transport or parse errors.
+// Extracted so the test body can focus on the cursor walk.
+func fetchListKeysPage(t *testing.T, app *fiber.App, cursor string) listKeysResponse {
+	t.Helper()
+
+	target := "/v1/cache/keys?q=first-&limit=10"
+	if cursor != "" {
+		target += "&cursor=" + cursor
+	}
+
+	got := doRequest(t, app, http.MethodGet, target, "", nil)
+	if got.status != http.StatusOK {
+		t.Fatalf("cursor=%q: status %d body=%s", cursor, got.status, got.body)
+	}
+
+	var resp listKeysResponse
+
+	err := json.Unmarshal([]byte(got.body), &resp)
+	if err != nil {
+		t.Fatalf("cursor=%q decode: %v", cursor, err)
+	}
+
+	return resp
+}
+
+// TestHandleListKeys_PrefixAndPaging drives the v1 list-keys
+// endpoint end-to-end: seed via PUT, filter by prefix, walk the
+// cursor across multiple pages, assert the union matches the seed
+// set and no key appears twice.
+func TestHandleListKeys_PrefixAndPaging(t *testing.T) {
+	t.Parallel()
+
+	const seedCount = 25
+
+	app := seedListKeysFixture(t, seedCount)
+
+	collected := make(map[string]struct{}, seedCount)
+	cursor := ""
+
+	for range 10 {
+		resp := fetchListKeysPage(t, app, cursor)
+
+		if resp.TotalMatched != seedCount {
+			t.Fatalf("total_matched=%d, want %d", resp.TotalMatched, seedCount)
+		}
+
+		for _, k := range resp.Keys {
+			if !strings.HasPrefix(k, "first-") {
+				t.Fatalf("non-prefix key in result: %s", k)
+			}
+
+			if _, dup := collected[k]; dup {
+				t.Fatalf("duplicate key across pages: %s", k)
+			}
+
+			collected[k] = struct{}{}
+		}
+
+		if resp.NextCursor == "" {
+			break
+		}
+
+		cursor = resp.NextCursor
+	}
+
+	if len(collected) != seedCount {
+		t.Fatalf("collected %d keys across pages, want %d", len(collected), seedCount)
+	}
+}
+
+// TestHandleListKeys_InvalidCursor pins that a malformed cursor
+// surfaces 400, not 500 — the cursor field is operator-controlled
+// and must be validated at the boundary.
+func TestHandleListKeys_InvalidCursor(t *testing.T) {
+	t.Parallel()
+
+	app := newTestServer(t)
+
+	got := doRequest(t, app, http.MethodGet, "/v1/cache/keys?cursor=not-a-number", "", nil)
+	if got.status != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed cursor, got %d body=%s", got.status, got.body)
+	}
+}
+
+// TestHandleListKeys_InvalidGlob surfaces malformed glob patterns
+// as 400, matching the same validate-at-boundary contract as
+// cursor.
+func TestHandleListKeys_InvalidGlob(t *testing.T) {
+	t.Parallel()
+
+	app := newTestServer(t)
+
+	// "[unclosed" is a malformed character class — URL-encoded so
+	// the literal `[` is preserved through fiber's query parser.
+	target := "/v1/cache/keys?q=" + url.QueryEscape("[unclosed")
+
+	got := doRequest(t, app, http.MethodGet, target, "", nil)
+	if got.status != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed glob, got %d body=%s", got.status, got.body)
 	}
 }

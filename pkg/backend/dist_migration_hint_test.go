@@ -68,6 +68,10 @@ func (*scriptedTransport) FetchMerkle(_ context.Context, _ string) (*MerkleTree,
 	return nil, errScriptedNotUsed
 }
 
+func (*scriptedTransport) ListKeys(_ context.Context, _, _ string) ([]string, error) {
+	return nil, errScriptedNotUsed
+}
+
 // newMigrationHintTestDM builds a DistMemory with just enough wiring to
 // drive queueHint + processHint directly. We bypass NewDistMemory to
 // avoid spinning a real cluster — the goal is to exercise the

@@ -30,6 +30,15 @@ type DistTransport interface {
 	// short-circuit to a direct method call instead.
 	Gossip(ctx context.Context, targetNodeID string, members []GossipMember) error
 	FetchMerkle(ctx context.Context, nodeID string) (*MerkleTree, error)
+	// ListKeys enumerates keys held on the remote node's shards,
+	// optionally filtered by `pattern`. Empty pattern returns all
+	// keys; a pattern containing any glob meta-character (* ? [) is
+	// matched via path.Match, otherwise treated as a prefix.
+	// Implementations walk the per-shard cursor pagination internally
+	// and return the materialized key set to the caller; safe for
+	// node-scale enumeration, capped at DistMemory.listKeysMax to
+	// bound memory.
+	ListKeys(ctx context.Context, nodeID, pattern string) ([]string, error)
 }
 
 // GossipMember is the wire-friendly snapshot of a cluster.Node used
@@ -225,6 +234,24 @@ func (t *InProcessTransport) FetchMerkle(_ context.Context, nodeID string) (*Mer
 	}
 
 	return b.BuildMerkleTree(), nil
+}
+
+// ListKeys enumerates the remote node's local shards, optionally
+// filtered by pattern. In-process means we have direct access to
+// the target's shards — no HTTP roundtrip, no cursor walking, just
+// a synchronous in-memory scan.
+func (t *InProcessTransport) ListKeys(_ context.Context, nodeID, pattern string) ([]string, error) {
+	b, ok := t.lookup(nodeID)
+	if !ok {
+		return nil, sentinel.ErrBackendNotFound
+	}
+
+	matcher, err := buildKeyMatcher(pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	return b.localMatchingKeys(matcher), nil
 }
 
 func (t *InProcessTransport) lookup(nodeID string) (*DistMemory, bool) {

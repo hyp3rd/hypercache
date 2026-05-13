@@ -1752,7 +1752,7 @@ func (dm *DistMemory) resolveMissingKeys(ctx context.Context, nodeID string, ent
 		return missing
 	}
 
-	keys, kerr := httpT.ListKeys(ctx, nodeID)
+	keys, kerr := httpT.ListKeys(ctx, nodeID, "")
 	if kerr != nil || len(keys) == 0 {
 		return missing
 	}

@@ -53,6 +53,35 @@ func (hyperCache *HyperCache[T]) ClusterOwners(key string) []string {
 	return nil
 }
 
+// ClusterKeys enumerates keys across the whole cluster, optionally
+// filtered by `pattern` (prefix when no glob metacharacters are
+// present, glob via path.Match otherwise — see backend.ListKeys for
+// the canonical semantics). `maxResults` caps the merged-and-deduped
+// result set; 0 picks the backend default. Returns a passthrough
+// pointer-typed result, or nil when the backend isn't a DistMemory
+// (callers treat nil as "feature unsupported" and surface 501/404).
+//
+// Best-effort: peer fan-out failures populate `PartialNodes` rather
+// than failing the whole call, mirroring read-repair / hint-replay
+// semantics elsewhere.
+func (hyperCache *HyperCache[T]) ClusterKeys(
+	ctx context.Context,
+	pattern string,
+	maxResults int,
+) (*backend.ListKeysResult, error) {
+	dm, ok := any(hyperCache.backend).(*backend.DistMemory)
+	if !ok {
+		return nil, nil //nolint:nilnil // explicit "feature unsupported" sentinel for callers to detect
+	}
+
+	res, err := dm.ListKeys(ctx, pattern, maxResults)
+	if err != nil {
+		return nil, err
+	}
+
+	return &res, nil
+}
+
 // DistMembershipSnapshot returns a snapshot of membership if distributed backend; otherwise nil slice.
 //
 //nolint:nonamedreturns

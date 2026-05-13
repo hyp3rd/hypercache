@@ -463,11 +463,17 @@ func (t *DistHTTPTransport) FetchMerkle(ctx context.Context, nodeID string) (*Me
 	return &MerkleTree{Root: body.Root, LeafHashes: body.LeafHashes, ChunkSize: body.ChunkSize}, nil
 }
 
-// ListKeys returns all keys from a remote node (expensive; used for
-// tests / anti-entropy fallback). Walks the cursor-paginated
-// `/internal/keys` endpoint introduced in Phase C.2 — callers
-// continue to receive the full key set unchanged.
-func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]string, error) {
+// ListKeys returns keys held on a remote node, optionally filtered
+// by `pattern` (forwarded server-side as the `q` query parameter on
+// `/internal/keys`). An empty pattern returns the full key set
+// (expensive; used for tests / anti-entropy fallback). Patterns
+// containing glob metacharacters (* ? [) are matched server-side
+// via path.Match; non-glob patterns are treated as prefix.
+//
+// Walks the cursor-paginated `/internal/keys` endpoint to assemble
+// the full result. Callers that need to bound the result-set size
+// should layer their own cap on top.
+func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID, pattern string) ([]string, error) {
 	var (
 		all    []string
 		cursor string
@@ -476,7 +482,7 @@ func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]stri
 	const safetyLimit = 1024 // upper bound to prevent infinite loop on a buggy server
 
 	for range safetyLimit {
-		page, err := t.listKeysPage(ctx, nodeID, cursor)
+		page, err := t.listKeysPage(ctx, nodeID, cursor, pattern)
 		if err != nil {
 			return nil, err
 		}
@@ -504,11 +510,19 @@ func (t *DistHTTPTransport) ListKeys(ctx context.Context, nodeID string) ([]stri
 
 // listKeysPage is the per-page fetch for ListKeys; broken out so the
 // pagination loop above stays readable.
-func (t *DistHTTPTransport) listKeysPage(ctx context.Context, nodeID, cursor string) (keysPageResp, error) {
-	var query url.Values
+func (t *DistHTTPTransport) listKeysPage(ctx context.Context, nodeID, cursor, pattern string) (keysPageResp, error) {
+	query := url.Values{}
 
 	if cursor != "" {
-		query = url.Values{"cursor": []string{cursor}}
+		query.Set("cursor", cursor)
+	}
+
+	if pattern != "" {
+		query.Set("q", pattern)
+	}
+
+	if len(query) == 0 {
+		query = nil
 	}
 
 	hreq, err := t.newNodeRequest(ctx, http.MethodGet, nodeID, "/internal/keys", query, nil)

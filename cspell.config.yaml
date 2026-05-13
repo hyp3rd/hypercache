@@ -83,6 +83,7 @@ words:
   - cyclop
   - daixiang
   - Decr
+  - dedup
   - dels
   - depguard
   - deprioritize
@@ -120,6 +121,7 @@ words:
   - frontmatter
   - funcorder
   - funlen
+  - gctx
   - geomean
   - gerr
   - Getenv
@@ -175,6 +177,7 @@ words:
   - lblll
   - LFUDA
   - linenums
+  - listkeys
   - localmodule
   - logrus
   - longbridgeapp
@@ -183,6 +186,9 @@ words:
   - maxmemory
   - memprofile
   - Merkle
+  - metachar
+  - metacharacter
+  - metacharacters
   - metricdata
   - metricnoop
   - mfinal
