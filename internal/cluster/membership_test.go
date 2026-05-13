@@ -211,3 +211,184 @@ func TestMembership_OnStateChange_DoesNotBlockMutation(t *testing.T) {
 	close(releaseObserver)
 	wg.Wait()
 }
+
+// TestMembership_Mark_NoBumpOnSameState pins the
+// transition-only-bump contract: Mark() must NOT increment a node's
+// incarnation when the requested state matches the current state.
+// Without this rule, steady-state heartbeat success paths
+// (evaluateLiveness → Mark(peer, Alive)) inflate the counter once
+// per probe — operators saw incarnation values in the thousands
+// after a few hours of normal operation. Incarnation is owned by
+// the node itself in SWIM; observers should not churn it.
+func TestMembership_Mark_NoBumpOnSameState(t *testing.T) {
+	t.Parallel()
+
+	m := NewMembership(NewRing())
+	m.Upsert(NewNode("n1", "127.0.0.1:7946"))
+
+	before := m.List()[0].Incarnation
+
+	// Repeat the same Mark a few times — this models the
+	// "successful probe every second" pattern that drove the bug.
+	for range 50 {
+		m.Mark("n1", NodeAlive)
+	}
+
+	after := m.List()[0].Incarnation
+	if after != before {
+		t.Errorf("incarnation churned on same-state Mark: before=%d after=%d (want stable)",
+			before, after)
+	}
+}
+
+// TestMembership_Mark_SameStateIsFullNoOp pins the rest of the
+// no-op-Mark contract beyond just incarnation: when state matches
+// the current value, the membership version vector must NOT
+// advance and registered observers must NOT fire. Without this
+// rule, every successful heartbeat probe bumps the version
+// counter once per peer per interval — a 5-node cluster running
+// for a few hours showed MembershipVersion past 4,800 even though
+// no nodes had actually changed state. Cascading effects: gossip
+// fans out spurious "version went up" deltas, SSE consumers see
+// constant "members" event spam, and the metric stops being
+// useful as a real-membership-change indicator.
+func TestMembership_Mark_SameStateIsFullNoOp(t *testing.T) {
+	t.Parallel()
+
+	m := NewMembership(NewRing())
+	m.Upsert(NewNode("n1", "127.0.0.1:7946"))
+
+	var fired atomic.Int32
+
+	m.OnStateChange(func(_ NodeID, _ NodeState, _ uint64) {
+		fired.Add(1)
+	})
+
+	// Capture the version baseline after the Upsert above.
+	versionBefore := m.Version()
+
+	// Pound on Mark with the existing state. Models the steady
+	// "probe succeeded again" pattern that drove the bug.
+	for range 100 {
+		m.Mark("n1", NodeAlive)
+	}
+
+	if got := m.Version(); got != versionBefore {
+		t.Errorf("Version drifted on same-state Mark: before=%d after=%d (want stable)",
+			versionBefore, got)
+	}
+
+	if got := fired.Load(); got != 0 {
+		t.Errorf("observer fired %d times for same-state Mark, want 0", got)
+	}
+
+	// Sanity: LastSeen still refreshes so the suspect-timeout
+	// machinery sees probes. We can't assert exact wall-clock
+	// values cleanly here, but we can assert it advanced past the
+	// Upsert moment by being non-zero.
+	if m.List()[0].LastSeen.IsZero() {
+		t.Errorf("LastSeen wasn't refreshed by same-state Mark")
+	}
+}
+
+// TestMembership_Mark_BumpsOnTransition guards the other side of the
+// contract: a genuine state transition (Alive→Suspect, Suspect→Alive,
+// etc.) MUST bump incarnation so the gossip-merge rule
+// "higher incarnation wins" propagates the change cluster-wide. If we
+// over-suppress, transitions would silently fail to propagate and a
+// peer briefly marked Suspect would stay Suspect on neighbouring
+// nodes forever.
+func TestMembership_Mark_BumpsOnTransition(t *testing.T) {
+	t.Parallel()
+
+	m := NewMembership(NewRing())
+	m.Upsert(NewNode("n1", "127.0.0.1:7946"))
+
+	v0 := m.List()[0].Incarnation
+
+	m.Mark("n1", NodeSuspect)
+
+	v1 := m.List()[0].Incarnation
+	if v1 != v0+1 {
+		t.Errorf("Alive→Suspect: got incarnation %d, want %d", v1, v0+1)
+	}
+
+	m.Mark("n1", NodeAlive)
+
+	v2 := m.List()[0].Incarnation
+	if v2 != v1+1 {
+		t.Errorf("Suspect→Alive: got incarnation %d, want %d", v2, v1+1)
+	}
+
+	// Same-state again — must NOT bump even after recent transitions.
+	m.Mark("n1", NodeAlive)
+	m.Mark("n1", NodeAlive)
+
+	v3 := m.List()[0].Incarnation
+	if v3 != v2 {
+		t.Errorf("Alive→Alive after a transition burst: got %d, want stable at %d", v3, v2)
+	}
+}
+
+// TestMembership_Refute_AlwaysBumps pins the SWIM self-refute
+// primitive: Refute() unconditionally increments incarnation, even
+// when the local view of the node is already Alive. Without this,
+// the refutation packet a node sends back to a peer that suspected
+// it would carry the SAME incarnation as the suspect claim — and
+// "higher incarnation wins" would refuse to overwrite, so the
+// suspect claim would stick even though the node refuted it.
+func TestMembership_Refute_AlwaysBumps(t *testing.T) {
+	t.Parallel()
+
+	m := NewMembership(NewRing())
+	m.Upsert(NewNode("self", "127.0.0.1:7946"))
+
+	v0 := m.List()[0].Incarnation
+
+	// Local state is Alive — a transition-only rule would no-op
+	// here, which would silently break refutation propagation.
+	m.Refute("self")
+
+	v1 := m.List()[0].Incarnation
+	if v1 != v0+1 {
+		t.Errorf("first Refute: got incarnation %d, want %d", v1, v0+1)
+	}
+
+	// Each subsequent refute climbs one more — chained suspect
+	// claims from different peers must each be answerable with a
+	// strictly-higher incarnation.
+	m.Refute("self")
+	m.Refute("self")
+
+	v2 := m.List()[0].Incarnation
+	if v2 != v1+2 {
+		t.Errorf("chained Refute: got incarnation %d, want %d", v2, v1+2)
+	}
+
+	// State must end Alive regardless of intermediate values.
+	if got := m.List()[0].State; got != NodeAlive {
+		t.Errorf("Refute state: got %v, want NodeAlive", got)
+	}
+}
+
+// TestMembership_Refute_GhostReturnsFalse mirrors the
+// non-existent-node guard already present on Mark/Remove.
+func TestMembership_Refute_GhostReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	m := NewMembership(NewRing())
+
+	var fired atomic.Int32
+
+	m.OnStateChange(func(_ NodeID, _ NodeState, _ uint64) {
+		fired.Add(1)
+	})
+
+	if m.Refute("ghost") {
+		t.Fatal("Refute on non-existent node returned true")
+	}
+
+	if got := fired.Load(); got != 0 {
+		t.Errorf("observer fired %d times for ghost Refute, want 0", got)
+	}
+}

@@ -387,7 +387,9 @@ func (s *distHTTPServer) handleSet(fctx fiber.Ctx, dm *DistMemory) error {
 		LastAccess:  time.Now(),
 	}
 
-	dm.applySet(s.ctx, it, req.Replicate)
+	// Forwarded arrival from a peer: ownership guard fires if this
+	// node disagrees with the sender's view about K's owners.
+	dm.applyForwardedSet(s.ctx, it, req.Replicate)
 
 	return fctx.JSON(httpSetResponse{})
 }

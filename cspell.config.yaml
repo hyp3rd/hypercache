@@ -194,6 +194,7 @@ words:
   - mset
   - msgpack
   - mvdan
+  - neighbouring
   - nestif
   - Newf
   - nilnil
@@ -221,6 +222,7 @@ words:
   - pyenv
   - pygments
   - pymdownx
+  - quiesces
   - reaad
   - readrepair
   - recvcheck
