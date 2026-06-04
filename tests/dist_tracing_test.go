@@ -49,7 +49,7 @@ func spanAttr(span sdktrace.ReadOnlySpan, key string) string {
 
 	for _, a := range span.Attributes() {
 		if string(a.Key) == key {
-			return a.Value.Emit()
+			return a.Value.String()
 		}
 	}
 
