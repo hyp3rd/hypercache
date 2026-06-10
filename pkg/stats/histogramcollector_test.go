@@ -225,9 +225,8 @@ func TestHistogramStatsCollector_ConcurrentRecord(t *testing.T) {
 	readerWG.Wait()
 
 	stat := c.GetStats()[constants.StatIncr.String()]
-	if stat == nil {
-		t.Fatalf("missing stat after concurrent recording")
-	}
+
+	assert.NotNil(t, stat, "missing stat after concurrent recording")
 
 	wantCount := int64(writers * perWriter)
 	if int64(stat.Count) != wantCount {
@@ -352,9 +351,8 @@ func TestHistogramStatsCollector_AtomicMinMaxRace(t *testing.T) {
 	wg.Wait()
 
 	stat := c.GetStats()[constants.StatIncr.String()]
-	if stat == nil {
-		t.Fatalf("missing stat")
-	}
+
+	assert.NotNil(t, stat, "missing stat")
 
 	if stat.Min != 0 {
 		t.Errorf("Min = %d, want 0", stat.Min)

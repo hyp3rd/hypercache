@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/hyp3rd/hypercache/pkg/backend"
 )
 
@@ -135,9 +137,7 @@ func TestDistMemory_LoggerEmitsListenerStart(t *testing.T) {
 		}
 	}
 
-	if startRec == nil {
-		t.Fatalf("expected `dist HTTP listener started` record; got %d records", len(records))
-	}
+	assert.NotNilf(t, startRec, "expected `dist HTTP listener started` record; got %d records", len(records))
 
 	if startRec.Level != slog.LevelInfo {
 		t.Fatalf("expected Info level, got %v", startRec.Level)
