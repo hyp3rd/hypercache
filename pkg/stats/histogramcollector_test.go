@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/hyp3rd/hypercache/internal/constants"
 )
 
@@ -156,9 +158,8 @@ func TestHistogramStatsCollector_BoundedSamples(t *testing.T) {
 	}
 
 	stat := c.GetStats()[constants.StatHistogram.String()]
-	if stat == nil {
-		t.Fatalf("missing stat")
-	}
+
+	assert.NotNil(t, stat, "missing stat")
 
 	if stat.Count != 100 {
 		t.Errorf("lifetime Count = %d, want 100", stat.Count)
