@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
@@ -57,9 +59,8 @@ func TestMerkleSingleMissingKey(t *testing.T) {
 	}
 
 	got, _ := db.Get(ctx, "k1")
-	if got == nil {
-		t.Fatalf("expected key pulled")
-	}
+
+	assert.NotNil(t, got, "expected key pulled")
 
 	if bs, ok := got.Value.([]byte); !ok || string(bs) != "v1" {
 		t.Fatalf("unexpected value %v", got.Value)
