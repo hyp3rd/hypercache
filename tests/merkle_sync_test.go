@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/hyp3rd/hypercache/pkg/backend"
 	cache "github.com/hyp3rd/hypercache/pkg/cache/v2"
 )
@@ -42,9 +44,9 @@ func TestMerkleSyncConvergence(t *testing.T) {
 		itA, _ := dmA.Get(ctx, k)
 
 		itB, _ := dmB.Get(ctx, k)
-		if itA == nil || itB == nil {
-			t.Fatalf("missing key %s after sync", k)
-		}
+
+		assert.NotNil(t, itA, "missing key %s after sync", k)
+		assert.NotNil(t, itB, "missing key %s after sync", k)
 
 		if itB.Version < itA.Version {
 			t.Fatalf("expected B version >= A version for %s", k)

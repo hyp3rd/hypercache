@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/hyp3rd/hypercache/internal/constants"
 )
 
@@ -156,9 +158,8 @@ func TestHistogramStatsCollector_BoundedSamples(t *testing.T) {
 	}
 
 	stat := c.GetStats()[constants.StatHistogram.String()]
-	if stat == nil {
-		t.Fatalf("missing stat")
-	}
+
+	assert.NotNil(t, stat, "missing stat")
 
 	if stat.Count != 100 {
 		t.Errorf("lifetime Count = %d, want 100", stat.Count)
@@ -224,9 +225,8 @@ func TestHistogramStatsCollector_ConcurrentRecord(t *testing.T) {
 	readerWG.Wait()
 
 	stat := c.GetStats()[constants.StatIncr.String()]
-	if stat == nil {
-		t.Fatalf("missing stat after concurrent recording")
-	}
+
+	assert.NotNil(t, stat, "missing stat after concurrent recording")
 
 	wantCount := int64(writers * perWriter)
 	if int64(stat.Count) != wantCount {
@@ -351,9 +351,8 @@ func TestHistogramStatsCollector_AtomicMinMaxRace(t *testing.T) {
 	wg.Wait()
 
 	stat := c.GetStats()[constants.StatIncr.String()]
-	if stat == nil {
-		t.Fatalf("missing stat")
-	}
+
+	assert.NotNil(t, stat, "missing stat")
 
 	if stat.Min != 0 {
 		t.Errorf("Min = %d, want 0", stat.Min)

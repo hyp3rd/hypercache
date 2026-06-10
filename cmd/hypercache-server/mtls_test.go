@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // writeTestCertPair generates a self-signed cert + key and writes
@@ -121,9 +123,7 @@ func assertStandardTLSConfig(t *testing.T, cfg envConfig) {
 		t.Fatalf("err = %v", err)
 	}
 
-	if got == nil {
-		t.Fatalf("got nil, want *tls.Config")
-	}
+	assert.NotNil(t, got, "got nil, want *tls.Config")
 
 	if got.ClientAuth != tls.NoClientCert {
 		t.Errorf("ClientAuth = %v, want NoClientCert (no CA was configured)", got.ClientAuth)
