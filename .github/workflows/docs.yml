@@ -25,7 +25,7 @@ on:
       - "cmd/hypercache-server/README.md"
       - ".github/workflows/docs.yml"
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - "docs/**"
       - "mkdocs.yml"
@@ -54,9 +54,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
-          fetch-depth: 0  # docs/ may reference files via relative paths
+          # docs/ may reference files via relative paths
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v6
