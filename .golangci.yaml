@@ -42,7 +42,7 @@ run:
   # Define the Go version limit.
   # Mainly related to generics support since go1.18.
   # Default: use Go version from the go.mod file, fallback on the env var `GOVERSION`, fallback on 1.17
-  go: "1.26.4"
+  go: "1.26.5"
 
 linters:
   # Enable specific linter
@@ -161,16 +161,16 @@ linters:
         - name: cognitive-complexity
           severity: warning
           disabled: false
-          arguments: [ 15 ]
+          arguments: [15]
 
         - name: cyclomatic
-          arguments: [ 15 ]
+          arguments: [15]
 
         # - name: function-length
         #   arguments: [80, 0]
 
         - name: max-public-structs
-          arguments: [ 10 ]
+          arguments: [10]
 
         - name: nested-structs
           disabled: true
@@ -179,7 +179,7 @@ linters:
           disabled: true
 
         - name: line-length-limit
-          arguments: [ 150 ]
+          arguments: [150]
 
         - name: var-naming
           disabled: true
