@@ -4,14 +4,14 @@ name: lint
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches: [main]
 permissions:
   contents: read
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Load project settings
         id: settings
         run: |
@@ -55,7 +55,8 @@ jobs:
           "./pkg/api/*" -not -path "./vendor/*" -not -path "./.gocache/*" -not
           -path "./.git/*")
       - name: gofumpt
-        run: gofumpt -l -w $(find . -type f -name '*.go' -not -path "./pkg/api/*" -not
+        run:
+          gofumpt -l -w $(find . -type f -name '*.go' -not -path "./pkg/api/*" -not
           -path "./vendor/*" -not -path "./.gocache/*" -not -path "./.git/*")
       - name: staticcheck
         run: staticcheck ./...

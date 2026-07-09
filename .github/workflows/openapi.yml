@@ -22,7 +22,7 @@ on:
       - "cmd/hypercache-server/main.go"
       - ".github/workflows/openapi.yml"
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - "cmd/hypercache-server/openapi.yaml"
       - "cmd/hypercache-server/openapi.go"
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Load project settings
         id: settings
