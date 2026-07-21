@@ -19,7 +19,7 @@ jobs:
           set +a
           echo "go_version=${GO_VERSION}" >> "$GITHUB_OUTPUT"
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "${{ steps.settings.outputs.go_version }}"
           check-latest: true
@@ -40,7 +40,7 @@ jobs:
           go test -race -count=10 -shuffle=on -timeout=15m
           -coverprofile=coverage.out ./...
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.out

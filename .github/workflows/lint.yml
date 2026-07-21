@@ -4,7 +4,7 @@ name: lint
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches: [main]
 permissions:
   contents: read
 jobs:
@@ -23,7 +23,7 @@ jobs:
           echo "golangci_lint_version=${GOLANGCI_LINT_VERSION}" >> "$GITHUB_OUTPUT"
           echo "proto_enabled=${PROTO_ENABLED:-true}" >> "$GITHUB_OUTPUT"
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "${{ steps.settings.outputs.go_version }}"
           check-latest: true
@@ -55,7 +55,8 @@ jobs:
           "./pkg/api/*" -not -path "./vendor/*" -not -path "./.gocache/*" -not
           -path "./.git/*")
       - name: gofumpt
-        run: gofumpt -l -w $(find . -type f -name '*.go' -not -path "./pkg/api/*" -not
+        run:
+          gofumpt -l -w $(find . -type f -name '*.go' -not -path "./pkg/api/*" -not
           -path "./vendor/*" -not -path "./.gocache/*" -not -path "./.git/*")
       - name: staticcheck
         run: staticcheck ./...

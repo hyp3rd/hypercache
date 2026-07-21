@@ -17,8 +17,8 @@ name: image
 on:
   pull_request:
   push:
-    branches: [ main ]
-    tags: [ "v*.*.*" ]
+    branches: [main]
+    tags: ["v*.*.*"]
   workflow_dispatch:
 
 permissions:
@@ -31,7 +31,8 @@ env:
 
 jobs:
   build:
-    name: build${{ github.event_name == 'pull_request' && ' (no push)' || ' + push'
+    name:
+      build${{ github.event_name == 'pull_request' && ' (no push)' || ' + push'
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -51,7 +52,7 @@ jobs:
       # avoids an avoidable failure on those events.
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v4.2.0
+        uses: docker/login-action@v4.4.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -83,7 +84,7 @@ jobs:
             latest=false
 
       - name: Build${{ github.event_name == 'pull_request' && '' || ' + push' }}
-        uses: docker/build-push-action@v7.2.0
+        uses: docker/build-push-action@v7.3.0
         with:
           context: .
           file: cmd/hypercache-server/Dockerfile
