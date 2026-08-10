@@ -10,7 +10,7 @@ require (
 	github.com/gofiber/fiber/v3 v3.4.0
 	github.com/hyp3rd/ewrap v1.5.1
 	github.com/hyp3rd/sectools v1.2.8
-	github.com/redis/go-redis/v9 v9.21.0
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/stretchr/testify v1.11.1
 	github.com/ugorji/go/codec v1.3.1
 	go.opentelemetry.io/otel v1.44.0
