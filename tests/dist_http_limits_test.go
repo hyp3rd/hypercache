@@ -107,9 +107,8 @@ func TestDistHTTPClient_RejectsOversizedResponse(t *testing.T) {
 
 	// http.MaxBytesReader returns *http.MaxBytesError; the transport
 	// wraps the decode error so we just check the error chain.
-	var maxBytesErr *http.MaxBytesError
 
-	if !errors.As(err, &maxBytesErr) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); !ok {
 		t.Fatalf("expected http.MaxBytesError in error chain, got: %v", err)
 	}
 }
