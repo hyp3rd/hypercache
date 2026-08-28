@@ -2,7 +2,7 @@
 
 # Multi-stage build: produce a small, distroless final image.
 # Build stage uses the matching Go toolchain pinned in go.mod.
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.27
 
 FROM golang:${GO_VERSION}-alpine AS build
 
@@ -25,7 +25,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/hypercache-server
 
 # Final stage: distroless static, no shell, no package manager.
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 
 COPY --from=build /out/hypercache-server /hypercache-server
 
