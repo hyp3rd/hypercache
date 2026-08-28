@@ -141,9 +141,7 @@ func isRetryable(err error) bool {
 		return false
 	}
 
-	var se *StatusError
-
-	if errors.As(err, &se) {
+	if se, ok := errors.AsType[*StatusError](err); ok {
 		// 5xx and 503 retry; other 4xx are terminal. 503/draining
 		// is special-cased: even when the server is technically
 		// returning a valid response, the right thing to do is

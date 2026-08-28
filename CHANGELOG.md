@@ -8,106 +8,103 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Added
 
-- **Cluster-wide key browser (`GET /v1/cache/keys`).** New v1 client-API endpoint that fans out across
-  every alive peer, dedupes replicas, sorts, and returns a paged slice — designed for the operator-debug
-  workflow of "browse / refine a search" rather than as a primary data-access path. The `q` parameter
-  switches between two modes via a small classifier:
-  patterns containing any of `*`, `?`, `[` go through Go's `path.Match` (platform-agnostic glob —
-  `filepath.Match`'s OS-specific separator semantics are wrong for arbitrary string keys);
-  everything else is treated as a literal prefix via `strings.HasPrefix`. Two hard caps bound the
-  worst case: `max` (default 10000, ceiling 50000) for the full deduplicated result set held in memory,
-  and `limit` (default 100, ceiling 500) for the page size — `cursor` paging is offset-based against the
-  sorted set so successive pages are stable across requests. Per-peer fan-out failures are best-effort:
-  the failed peer ID lands in `partial_nodes` rather than failing the whole call, mirroring the
-  read-repair and hint-replay contracts elsewhere in the cluster. Returns 501 when the underlying
-  backend isn't `DistMemory` (this endpoint requires a cluster). The new method
-  [`(*DistMemory).ListKeys`](pkg/backend/dist_keys.go) drives the fan-out via `errgroup` with a
-  `listKeysAccumulator` merge struct keyed by a single mutex; the self-peer slice walks local shards
-  directly (no HTTP self-hop). The `DistTransport` interface grows a new method
+- **Cluster-wide key browser (`GET /v1/cache/keys`).** New v1 client-API endpoint that fans out across every
+  alive peer, dedupes replicas, sorts, and returns a paged slice — designed for the operator-debug workflow of
+  "browse / refine a search" rather than as a primary data-access path. The `q` parameter switches between two
+  modes via a small classifier: patterns containing any of `*`, `?`, `[` go through Go's `path.Match`
+  (platform-agnostic glob — `filepath.Match`'s OS-specific separator semantics are wrong for arbitrary string
+  keys); everything else is treated as a literal prefix via `strings.HasPrefix`. Two hard caps bound the worst
+  case: `max` (default 10000, ceiling 50000) for the full deduplicated result set held in memory, and `limit`
+  (default 100, ceiling 500) for the page size — `cursor` paging is offset-based against the sorted set so
+  successive pages are stable across requests. Per-peer fan-out failures are best-effort: the failed peer ID
+  lands in `partial_nodes` rather than failing the whole call, mirroring the read-repair and hint-replay
+  contracts elsewhere in the cluster. Returns 501 when the underlying backend isn't `DistMemory` (this
+  endpoint requires a cluster). The new method [`(*DistMemory).ListKeys`](pkg/backend/dist_keys.go) drives the
+  fan-out via `errgroup` with a `listKeysAccumulator` merge struct keyed by a single mutex; the self-peer
+  slice walks local shards directly (no HTTP self-hop). The `DistTransport` interface grows a new method
   `ListKeys(ctx, nodeID, pattern)` with implementations in `InProcessTransport` (direct shard scan),
-  `DistHTTPTransport` (extends the existing `/internal/keys` path with an optional `q` query param —
-  backward compatible; cursor semantics unchanged), and `chaosTransport` (pass-through with the same
-  drop/latency injection hooks as the other verbs). Unit tests in
-  [`pkg/backend/dist_keys_test.go`](pkg/backend/dist_keys_test.go) pin the
-  prefix-vs-glob classifier across twelve table cases and the malformed-glob → `path.ErrBadPattern`
-  surface; HTTP smoke tests in [`cmd/hypercache-server/handlers_test.go`](cmd/hypercache-server/handlers_test.go)
-  drive seed → paged walk → assert union and no cross-page duplicates, plus 400 surfaces for invalid
-  cursor and malformed glob; five integration tests in
-  [`tests/hypercache_distmemory_listkeys_test.go`](tests/hypercache_distmemory_listkeys_test.go)
-  cover cluster-wide dedup at RF=3 across 5 nodes (50 unique seeds → 50 keys, not 150 = 50 × RF=3),
-  prefix vs glob filters, and `max`-triggered truncation. Route registration order matters in Fiber's
-  trie router: `/v1/cache/keys` must come before `/v1/cache/:key`, otherwise the parameterized handler
-  shadows it with `key="keys"`. OpenAPI spec entry (`ListKeysResponse` schema + operation) added to
-  [`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml); the drift-detector test
-  in [`cmd/hypercache-server/openapi_test.go`](cmd/hypercache-server/openapi_test.go) catches future
-  spec / route mismatches.
-- **Async read-repair batching (Phase 4) + unconditional `ForwardSet`-only repair.** Two composing changes
-  in the same PR that together cut the wire-call cost of read-repair under quorum reads. (1) The defensive
-  `ForwardGet` probe in `repairRemoteReplica` is gone — every repair is now exactly one `ForwardSet`,
-  because the receiver's `applySet` already version-compares and noops downgrades, so the probe was pure
-  duplication. ~50% wire-call reduction per repair regardless of batching. (2) New opt-in
+  `DistHTTPTransport` (extends the existing `/internal/keys` path with an optional `q` query param — backward
+  compatible; cursor semantics unchanged), and `chaosTransport` (pass-through with the same drop/latency
+  injection hooks as the other verbs). Unit tests in
+  [`pkg/backend/dist_keys_test.go`](pkg/backend/dist_keys_test.go) pin the prefix-vs-glob classifier across
+  twelve table cases and the malformed-glob → `path.ErrBadPattern` surface; HTTP smoke tests in
+  [`cmd/hypercache-server/handlers_test.go`](cmd/hypercache-server/handlers_test.go) drive seed → paged walk →
+  assert union and no cross-page duplicates, plus 400 surfaces for invalid cursor and malformed glob; five
+  integration tests in
+  [`tests/hypercache_distmemory_listkeys_test.go`](tests/hypercache_distmemory_listkeys_test.go) cover
+  cluster-wide dedup at RF=3 across 5 nodes (50 unique seeds → 50 keys, not 150 = 50 × RF=3), prefix vs glob
+  filters, and `max`-triggered truncation. Route registration order matters in Fiber's trie router:
+  `/v1/cache/keys` must come before `/v1/cache/:key`, otherwise the parameterized handler shadows it with
+  `key="keys"`. OpenAPI spec entry (`ListKeysResponse` schema + operation) added to
+  [`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml); the drift-detector test in
+  [`cmd/hypercache-server/openapi_test.go`](cmd/hypercache-server/openapi_test.go) catches future spec / route
+  mismatches.
+- **Async read-repair batching (Phase 4) + unconditional `ForwardSet`-only repair.** Two composing changes in
+  the same PR that together cut the wire-call cost of read-repair under quorum reads. (1) The defensive
+  `ForwardGet` probe in `repairRemoteReplica` is gone — every repair is now exactly one `ForwardSet`, because
+  the receiver's `applySet` already version-compares and noops downgrades, so the probe was pure duplication.
+  ~50% wire-call reduction per repair regardless of batching. (2) New opt-in
   [`backend.WithDistReadRepairBatch(interval, maxBatchSize)`](pkg/backend/dist_memory.go) option queues
   repairs by destination peer + key (last-write-wins by `(version, origin)`) and dispatches per-peer batches
   on the interval or when a peer's pending count hits `maxBatchSize`. Concurrent reads of the same hot key
-  produce ONE repair through the queue, not N — the coalescer collapses duplicate `(peer, key)` entries
-  and bumps the new `dist.read_repair.coalesced` counter per collapsed enqueue. Disabled by default
+  produce ONE repair through the queue, not N — the coalescer collapses duplicate `(peer, key)` entries and
+  bumps the new `dist.read_repair.coalesced` counter per collapsed enqueue. Disabled by default
   (`interval == 0` = current synchronous behavior preserved, so `TestDistMemoryReadRepair` and
   `TestDistMemoryRemoveReplication` pass byte-identical). Clean shutdown drains the queue inside `Stop()`;
-  crash exit loses queued repairs by design, with merkle anti-entropy as the convergence safety net.
-  New [`pkg/backend/dist_read_repair.go`](pkg/backend/dist_read_repair.go) hosts the `repairQueue` type
-  with errgroup-driven per-peer parallel `ForwardSet` dispatch. Eight unit tests in
-  [`pkg/backend/dist_read_repair_test.go`](pkg/backend/dist_read_repair_test.go) cover the coalesce rule
-  (same `(peer, key)` keeps the higher version, distinct peers stay independent), the size-threshold
-  inline flush, the nil-transport noop path, the `Stop()` drain semantics, the `(version, origin)`
-  tie-break rule, and concurrent-enqueue race-safety. Three integration tests in
+  crash exit loses queued repairs by design, with merkle anti-entropy as the convergence safety net. New
+  [`pkg/backend/dist_read_repair.go`](pkg/backend/dist_read_repair.go) hosts the `repairQueue` type with
+  errgroup-driven per-peer parallel `ForwardSet` dispatch. Eight unit tests in
+  [`pkg/backend/dist_read_repair_test.go`](pkg/backend/dist_read_repair_test.go) cover the coalesce rule (same
+  `(peer, key)` keeps the higher version, distinct peers stay independent), the size-threshold inline flush,
+  the nil-transport noop path, the `Stop()` drain semantics, the `(version, origin)` tie-break rule, and
+  concurrent-enqueue race-safety. Three integration tests in
   [`tests/hypercache_distmemory_readrepair_batch_test.go`](tests/hypercache_distmemory_readrepair_batch_test.go)
-  drive the end-to-end shape — a 3-node RF=3 ConsistencyQuorum cluster, one node's local copy dropped,
-  N concurrent Gets from a third node — and assert the batched flush heals the dropped node, parallel
-  reads coalesce to ≤2 dispatches (one per remote owner) regardless of N, and `Stop()` drains queued
-  repairs before returning. Two new OTel metrics:
-  `dist.read_repair.batched` (per actual `ForwardSet` dispatched by the queue's flusher) and
-  `dist.read_repair.coalesced` (per duplicate-enqueue collapsed). New "Tuning — read-repair batching"
-  section in [`docs/operations.md`](docs/operations.md) covers the option shape, the divergence-window
-  trade-off, the two metrics, and when to enable it (high read-amplification with stable hot keys).
+  drive the end-to-end shape — a 3-node RF=3 ConsistencyQuorum cluster, one node's local copy dropped, N
+  concurrent Gets from a third node — and assert the batched flush heals the dropped node, parallel reads
+  coalesce to ≤2 dispatches (one per remote owner) regardless of N, and `Stop()` drains queued repairs before
+  returning. Two new OTel metrics: `dist.read_repair.batched` (per actual `ForwardSet` dispatched by the
+  queue's flusher) and `dist.read_repair.coalesced` (per duplicate-enqueue collapsed). New "Tuning —
+  read-repair batching" section in [`docs/operations.md`](docs/operations.md) covers the option shape, the
+  divergence-window trade-off, the two metrics, and when to enable it (high read-amplification with stable hot
+  keys).
 - **Token-refresh visibility for the OIDC source.** Closes RFC 0003 open question 6: the
   `WithOIDCClientCredentials` source now wraps its `oauth2.TokenSource` with a logger that emits one
   `"oidc token rotated"` Info line per real rotation (expiry change), staying silent on cached returns.
   Operators debugging "why are my requests suddenly 401?" now see token age in the structured log alongside
-  the other lifecycle events. The wrapper holds the `*Client` by reference rather than capturing
-  `c.logger` at construction time, so `WithLogger` applied AFTER `WithOIDCClientCredentials` still reaches
-  the rotation log surface. Three unit tests in [`pkg/client/oidc_logging_test.go`](pkg/client/oidc_logging_test.go)
-  cover the rotation-logs case, the cached-returns-stay-silent case, and the nil-Client defensive path.
+  the other lifecycle events. The wrapper holds the `*Client` by reference rather than capturing `c.logger` at
+  construction time, so `WithLogger` applied AFTER `WithOIDCClientCredentials` still reaches the rotation log
+  surface. Three unit tests in [`pkg/client/oidc_logging_test.go`](pkg/client/oidc_logging_test.go) cover the
+  rotation-logs case, the cached-returns-stay-silent case, and the nil-Client defensive path.
 - **`GET /v1/me/can` capability probe + `Client.Can(ctx, capability)` SDK method.** Closes RFC 0003 open
-  question 5: callers can now check "do I have write?" without the speculative-write pattern (try the
-  action, catch the 403). The server endpoint validates against a closed set of capability strings
-  (`cache.read` / `cache.write` / `cache.admin`); unknown values return 400 BAD_REQUEST so typos surface as
-  client errors rather than silently degrading to allowed=false. The SDK method mirrors this:
-  `(true, nil)` / `(false, nil)` for the allow/deny answers; `errors.Is(err, ErrBadRequest)` for the
-  spelling-mistake path. `Identity.HasCapability` added to [`pkg/httpauth/policy.go`](pkg/httpauth/policy.go)
-  as the single authoritative check used by both the server handler and the SDK. Three handler tests in
-  [`cmd/hypercache-server/me_test.go`](cmd/hypercache-server/me_test.go) cover allowed/denied/unknown;
-  three SDK tests in [`pkg/client/client_test.go`](pkg/client/client_test.go) cover the parallel surface.
-  OpenAPI spec ([`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml)) gains the
-  `/v1/me/can` operation + `CanResponse` schema. New "Probing a single capability with `Can`" and
-  "Token-refresh visibility" sections in [`docs/client-sdk.md`](docs/client-sdk.md).
+  question 5: callers can now check "do I have write?" without the speculative-write pattern (try the action,
+  catch the 403). The server endpoint validates against a closed set of capability strings (`cache.read` /
+  `cache.write` / `cache.admin`); unknown values return 400 BAD_REQUEST so typos surface as client errors
+  rather than silently degrading to allowed=false. The SDK method mirrors this: `(true, nil)` / `(false, nil)`
+  for the allow/deny answers; `errors.Is(err, ErrBadRequest)` for the spelling-mistake path.
+  `Identity.HasCapability` added to [`pkg/httpauth/policy.go`](pkg/httpauth/policy.go) as the single
+  authoritative check used by both the server handler and the SDK. Three handler tests in
+  [`cmd/hypercache-server/me_test.go`](cmd/hypercache-server/me_test.go) cover allowed/denied/unknown; three
+  SDK tests in [`pkg/client/client_test.go`](pkg/client/client_test.go) cover the parallel surface. OpenAPI
+  spec ([`cmd/hypercache-server/openapi.yaml`](cmd/hypercache-server/openapi.yaml)) gains the `/v1/me/can`
+  operation + `CanResponse` schema. New "Probing a single capability with `Can`" and "Token-refresh
+  visibility" sections in [`docs/client-sdk.md`](docs/client-sdk.md).
 - **Chaos hooks for resilience testing (Phase 7).** New
   [`backend.WithDistChaos(*Chaos)`](pkg/backend/dist_chaos.go) option transparently wraps the dist transport
   with configurable fault injection — drop rate and latency injection, both with per-call probability rolls
-  off a crypto-seeded math/rand source. The wrapper is automatic for both the explicit
-  `WithDistTransport` path and the auto-wired HTTP transport, so chaos covers every dist call uniformly.
-  Disabled by default (zero overhead) and opt-in by design — the doc comment is explicit that this is a
-  test-only surface with no production safety net. Atomic mutators (`SetDropRate`, `SetLatency`) let tests
-  enable chaos mid-run, drive the cluster, then heal — exactly the shape the rebalance flake we caught in
-  May 2026 needed to be surfaced deterministically. Two new OTel metrics:
-  `dist.chaos.drops` (calls dropped) and `dist.chaos.latencies` (calls with latency injected). Eight unit
-  tests in [`pkg/backend/dist_chaos_test.go`](pkg/backend/dist_chaos_test.go) cover every branch
-  (DropRate=1 always drops, DropRate=0 never drops, latency injection fires + delays the call, nil-Chaos
-  passes through unchanged, the disabled-but-installed wrapper is a pass-through, concurrent calls are
-  race-free under -race, boundary clamping for out-of-range probabilities, nil-receiver safety on the
-  Metrics() snapshot path). Two integration tests in
-  [`tests/integration/dist_chaos_test.go`](tests/integration/dist_chaos_test.go) drive the canonical
-  resilience scenario — 80% drops force the hint queue to absorb replica fan-out failures; disabling chaos
-  lets the replay loop drain the queue. New "Chaos hooks (resilience testing)" section in
+  off a crypto-seeded math/rand source. The wrapper is automatic for both the explicit `WithDistTransport`
+  path and the auto-wired HTTP transport, so chaos covers every dist call uniformly. Disabled by default (zero
+  overhead) and opt-in by design — the doc comment is explicit that this is a test-only surface with no
+  production safety net. Atomic mutators (`SetDropRate`, `SetLatency`) let tests enable chaos mid-run, drive
+  the cluster, then heal — exactly the shape the rebalance flake we caught in May 2026 needed to be surfaced
+  deterministically. Two new OTel metrics: `dist.chaos.drops` (calls dropped) and `dist.chaos.latencies`
+  (calls with latency injected). Eight unit tests in
+  [`pkg/backend/dist_chaos_test.go`](pkg/backend/dist_chaos_test.go) cover every branch (DropRate=1 always
+  drops, DropRate=0 never drops, latency injection fires + delays the call, nil-Chaos passes through
+  unchanged, the disabled-but-installed wrapper is a pass-through, concurrent calls are race-free under -race,
+  boundary clamping for out-of-range probabilities, nil-receiver safety on the Metrics() snapshot path). Two
+  integration tests in [`tests/integration/dist_chaos_test.go`](tests/integration/dist_chaos_test.go) drive
+  the canonical resilience scenario — 80% drops force the hint queue to absorb replica fan-out failures;
+  disabling chaos lets the replay loop drain the queue. New "Chaos hooks (resilience testing)" section in
   [`docs/operations.md`](docs/operations.md) with the usage shape and the "what this catches that CI flake
   hunting won't" rationale.
 - **Batch operations on the client SDK.** `BatchSet`, `BatchGet`, `BatchDelete` close the v1 SDK gap PR3's
@@ -319,119 +316,115 @@ All notable changes to HyperCache are recorded here. The format follows
 
 ### Fixed
 
-- **applySet now clones the key string before storing it as the shard's map key.** Under HTTP traffic
-  (Fiber + the v1 cache API), path parameters returned by `c.Params("key")` are backed by a pooled
-  request buffer that the framework reuses for the next request. The original `applySet` stored the
-  caller's string directly as the `ConcurrentMap` key; when the next request landed, the buffer's
-  bytes mutated, and so did every map key (and `Item.Key` field) we'd previously stored. The
-  immediate symptom: the same logical key drifted across multiple shards (`first-24` showing up in
-  shards 2, 3, 4, and twice in shard 6), and phantom keys like `first-479` materialized in the
-  iteration (a "first-4" buffer overlaid with "79" from the next URL). The rebalance loop, scanning
-  `sh.items.All()`, kept re-flagging these phantoms — `RebalancedPrimary` climbed at ~60/s on a
-  5-node cluster after a single 100-key write batch, even though MembershipVersion, hint queues,
-  merkle counters, and the `WriteApplyRefused` guard were all quiet. The fix is one
-  `strings.Clone(item.Key)` call in [`applySet`](pkg/backend/dist_memory.go) before recording the
-  originalPrimary and storing: the cloned key has its own backing array, fully detached from the
-  caller's pooled buffer. The `Item.Key` field on the stored clone gets the same stable value so
-  any downstream code observes a coherent shard entry. Post-fix the cluster's rebalance counters
-  stay at exactly zero in steady state across all 5 nodes.
+- **applySet now clones the key string before storing it as the shard's map key.** Under HTTP traffic (Fiber +
+  the v1 cache API), path parameters returned by `c.Params("key")` are backed by a pooled request buffer that
+  the framework reuses for the next request. The original `applySet` stored the caller's string directly as
+  the `ConcurrentMap` key; when the next request landed, the buffer's bytes mutated, and so did every map key
+  (and `Item.Key` field) we'd previously stored. The immediate symptom: the same logical key drifted across
+  multiple shards (`first-24` showing up in shards 2, 3, 4, and twice in shard 6), and phantom keys like
+  `first-479` materialized in the iteration (a "first-4" buffer overlaid with "79" from the next URL). The
+  rebalance loop, scanning `sh.items.All()`, kept re-flagging these phantoms — `RebalancedPrimary` climbed at
+  ~60/s on a 5-node cluster after a single 100-key write batch, even though MembershipVersion, hint queues,
+  merkle counters, and the `WriteApplyRefused` guard were all quiet. The fix is one `strings.Clone(item.Key)`
+  call in [`applySet`](pkg/backend/dist_memory.go) before recording the originalPrimary and storing: the
+  cloned key has its own backing array, fully detached from the caller's pooled buffer. The `Item.Key` field
+  on the stored clone gets the same stable value so any downstream code observes a coherent shard entry.
+  Post-fix the cluster's rebalance counters stay at exactly zero in steady state across all 5 nodes.
 - **Receiver-side ownership guard breaks the divergent-ring-view rebalance loop.** After the
   `migrateIfNeeded`-side fix (one migration per stuck key, then release) shipped, operators on a 5-node
-  cluster running [`scripts/tests/30-test-cluster-writes.sh`](scripts/tests/30-test-cluster-writes.sh)
-  still saw `RebalancedPrimary` climb at ~60/s post-script with no membership, hint, or merkle activity.
-  Root cause: when the migration target's ring view still treated the original source as a replica, the
-  target's `applySet` fan-out re-planted the key on the source. The source released it (per the earlier
-  fix), then received it back on the next gossip tick, then migrated again — perpetual cycle even though
-  no state was actually transitioning. New [`applyForwardedSet`](pkg/backend/dist_memory.go) is the entry
-  point used by the transport-receiver paths (`InProcessTransport.ForwardSet` and the HTTP
-  `/internal/set` handler) and applies an ownership guard: if the receiver's ring view says it isn't an
-  owner of the key, the write is silently dropped. The sender's transport call still returns nil (no
-  behavioral break — best-effort semantics already governed the hot path), but the receiver's shard
-  stays clean. Merkle anti-entropy is the convergence safety net for any write refused here. The guard
-  is deliberately NOT in `applySet` itself: legitimate internal callers (setImpl primary path,
-  `migrateIfNeeded` forwarder, merkle pull, read-repair) have either already verified ownership or
-  explicitly want to plant regardless — moving the guard would have broken `TestHTTPFetchMerkle`. New
-  `dist.write.apply_refused` counter exposes how often the guard fires (zero on healthy views;
-  non-zero indicates divergence operators may want to investigate). New test
+  cluster running [`scripts/tests/30-test-cluster-writes.sh`](scripts/tests/30-test-cluster-writes.sh) still
+  saw `RebalancedPrimary` climb at ~60/s post-script with no membership, hint, or merkle activity. Root cause:
+  when the migration target's ring view still treated the original source as a replica, the target's
+  `applySet` fan-out re-planted the key on the source. The source released it (per the earlier fix), then
+  received it back on the next gossip tick, then migrated again — perpetual cycle even though no state was
+  actually transitioning. New [`applyForwardedSet`](pkg/backend/dist_memory.go) is the entry point used by the
+  transport-receiver paths (`InProcessTransport.ForwardSet` and the HTTP `/internal/set` handler) and applies
+  an ownership guard: if the receiver's ring view says it isn't an owner of the key, the write is silently
+  dropped. The sender's transport call still returns nil (no behavioral break — best-effort semantics already
+  governed the hot path), but the receiver's shard stays clean. Merkle anti-entropy is the convergence safety
+  net for any write refused here. The guard is deliberately NOT in `applySet` itself: legitimate internal
+  callers (setImpl primary path, `migrateIfNeeded` forwarder, merkle pull, read-repair) have either already
+  verified ownership or explicitly want to plant regardless — moving the guard would have broken
+  `TestHTTPFetchMerkle`. New `dist.write.apply_refused` counter exposes how often the guard fires (zero on
+  healthy views; non-zero indicates divergence operators may want to investigate). New test
   [`TestDistRebalance_ApplyOwnershipGuardRefusesForeignWrites`](tests/hypercache_distmemory_rebalance_steady_test.go)
-  drives a direct `ForwardSet` to a non-owner and asserts the shard stays clean and the refused-counter
-  ticks up.
+  drives a direct `ForwardSet` to a non-owner and asserts the shard stays clean and the refused-counter ticks
+  up.
 - **Rebalance counters no longer climb in a steady-state cluster.** When a key was no longer owned by the
-  current node — because the ring had shifted away from it (typical after a node joins or a singleton
-  cluster gains peers) — [`migrateIfNeeded`](pkg/backend/dist_memory.go) forwarded the value to the new
-  primary but only scheduled the LOCAL copy for deletion when `WithDistRemovalGrace > 0`. The default
-  removal-grace setting is zero, which meant the local item was never released; on every subsequent
-  rebalance tick `shouldRebalance` re-flagged the same key via its `!ownsKeyInternal` branch, and
-  `migrateIfNeeded` re-emitted the migration. Operators saw `RebalancedKeys` and `RebalancedPrimary`
-  climb at the scan-tick rate forever — e.g. 5,326 keys / 5,102 primary migrations on a 5-node cluster
-  with ~14 stuck keys and a 100ms ticker, even though no membership had actually changed. Migration now
-  releases the local copy immediately when `removalGracePeriod == 0` (and continues to schedule a
-  deferred delete via `shedRemovedKeys` when a grace period is configured), so each stuck key produces
-  exactly one migration and the loop quiesces. Two new integration tests in
+  current node — because the ring had shifted away from it (typical after a node joins or a singleton cluster
+  gains peers) — [`migrateIfNeeded`](pkg/backend/dist_memory.go) forwarded the value to the new primary but
+  only scheduled the LOCAL copy for deletion when `WithDistRemovalGrace > 0`. The default removal-grace
+  setting is zero, which meant the local item was never released; on every subsequent rebalance tick
+  `shouldRebalance` re-flagged the same key via its `!ownsKeyInternal` branch, and `migrateIfNeeded`
+  re-emitted the migration. Operators saw `RebalancedKeys` and `RebalancedPrimary` climb at the scan-tick rate
+  forever — e.g. 5,326 keys / 5,102 primary migrations on a 5-node cluster with ~14 stuck keys and a 100ms
+  ticker, even though no membership had actually changed. Migration now releases the local copy immediately
+  when `removalGracePeriod == 0` (and continues to schedule a deferred delete via `shedRemovedKeys` when a
+  grace period is configured), so each stuck key produces exactly one migration and the loop quiesces. Two new
+  integration tests in
   [`tests/hypercache_distmemory_rebalance_steady_test.go`](tests/hypercache_distmemory_rebalance_steady_test.go)
   pin both contracts: `TestDistRebalance_IdleClusterIsSilent` asserts a 5-node RF=3 cluster with no
   out-of-place keys produces zero counter bumps across many ticks, and
-  `TestDistRebalance_LostOwnershipDrainsOnce` plants one stuck key per node via `DebugInject` and asserts
-  the counters reach exactly one bump per stuck key and never advance after that.
-- **Incarnation and MembershipVersion no longer churn on every heartbeat.** SWIM-style incarnation
-  numbers and the membership version vector were both inflating roughly in lock-step with elapsed-probes —
-  a 5-node cluster running for a few hours showed incarnations near 2,378 per peer and a MembershipVersion
-  past 4,800, even though no nodes had actually changed state. [`Membership.Mark`](internal/cluster/membership.go)
-  was unconditionally incrementing incarnation, advancing the version counter, AND firing observers on
-  every call; the heartbeat-success path in `evaluateLiveness` calls `Mark(peer, NodeAlive)` once per probe
-  per peer. Three downstream effects: (i) operators couldn't read incarnation as a state-change signal,
-  (ii) gossip-merge fanned out spurious "version went up" deltas, (iii) SSE consumers received constant
-  no-op `members` events. Mark now treats same-state as a full no-op — LastSeen still refreshes (the
-  suspect-after timeout machinery needs that), but incarnation, version, and observers all stay quiet.
-  Genuine state transitions (Alive↔Suspect) still bump all three, so the "higher incarnation wins" gossip
-  merge continues to propagate real changes. New [`Membership.Refute`](internal/cluster/membership.go) is
-  the explicit SWIM self-refute primitive: it always bumps incarnation and sets state to NodeAlive, even
-  when the local view is already Alive — the one path that legitimately needs to publish a
-  higher-incarnation refutation packet regardless of local-view state. `refuteIfSuspected` in
+  `TestDistRebalance_LostOwnershipDrainsOnce` plants one stuck key per node via `DebugInject` and asserts the
+  counters reach exactly one bump per stuck key and never advance after that.
+- **Incarnation and MembershipVersion no longer churn on every heartbeat.** SWIM-style incarnation numbers and
+  the membership version vector were both inflating roughly in lock-step with elapsed-probes — a 5-node
+  cluster running for a few hours showed incarnations near 2,378 per peer and a MembershipVersion past 4,800,
+  even though no nodes had actually changed state. [`Membership.Mark`](internal/cluster/membership.go) was
+  unconditionally incrementing incarnation, advancing the version counter, AND firing observers on every call;
+  the heartbeat-success path in `evaluateLiveness` calls `Mark(peer, NodeAlive)` once per probe per peer.
+  Three downstream effects: (i) operators couldn't read incarnation as a state-change signal, (ii)
+  gossip-merge fanned out spurious "version went up" deltas, (iii) SSE consumers received constant no-op
+  `members` events. Mark now treats same-state as a full no-op — LastSeen still refreshes (the suspect-after
+  timeout machinery needs that), but incarnation, version, and observers all stay quiet. Genuine state
+  transitions (Alive↔Suspect) still bump all three, so the "higher incarnation wins" gossip merge continues to
+  propagate real changes. New [`Membership.Refute`](internal/cluster/membership.go) is the explicit SWIM
+  self-refute primitive: it always bumps incarnation and sets state to NodeAlive, even when the local view is
+  already Alive — the one path that legitimately needs to publish a higher-incarnation refutation packet
+  regardless of local-view state. `refuteIfSuspected` in
   [`pkg/backend/dist_memory.go`](pkg/backend/dist_memory.go) switched from `Mark(localID, NodeAlive)` to
   `Refute(localID)` so the divergent semantic is obvious at the call site. Five new unit tests in
   [`internal/cluster/membership_test.go`](internal/cluster/membership_test.go) pin: no-incarnation-bump on
-  same-state Mark, no-version-bump and no-observer-fire on same-state Mark, bump-on-transition, refute
-  always bumps, and the ghost-node guard. The existing `TestDistSWIM_SelfRefute` integration test
-  continues to pass byte-identical.
-- **Remove path no longer silently succeeds when the primary is unreachable.**
-  Symmetric audit-fix to the Set-forward change: [`removeImpl`](pkg/backend/dist_memory.go) used to
-  swallow the `ForwardRemove` error with `_ = transport.ForwardRemove(...)` and return `nil`, so a
-  Remove against a downed primary "succeeded" while the stale value lingered on every owner. Promotion
-  is now extracted into `forwardOrPromoteRemove`, mirroring `handleForwardPrimary`'s contract: on any
-  non-nil error, if the local node is a replica owner, apply the remove locally + fan out to peer
-  replicas via the existing `applyRemove(replicate=true)` path; otherwise return the error. The
-  promotion path bumps the shared `dist.write.forward_promotion` counter, so operators see Set + Remove
-  promotions on the same observable instrument. The dead primary catches up via merkle anti-entropy on
-  restart — the same convergence mechanism that already handles replica-side tombstones in
-  `replicateRemoveWithSpan`. New test [`TestDistRemove_PromotesOnGenericForwardError`](tests/hypercache_distmemory_audit_fixes_test.go)
-  drives chaos at `DropRate=1.0` and asserts the Remove returns `nil` (promotion succeeded), the local
-  copy is cleared, and the promotion counter bumped.
+  same-state Mark, no-version-bump and no-observer-fire on same-state Mark, bump-on-transition, refute always
+  bumps, and the ghost-node guard. The existing `TestDistSWIM_SelfRefute` integration test continues to pass
+  byte-identical.
+- **Remove path no longer silently succeeds when the primary is unreachable.** Symmetric audit-fix to the
+  Set-forward change: [`removeImpl`](pkg/backend/dist_memory.go) used to swallow the `ForwardRemove` error
+  with `_ = transport.ForwardRemove(...)` and return `nil`, so a Remove against a downed primary "succeeded"
+  while the stale value lingered on every owner. Promotion is now extracted into `forwardOrPromoteRemove`,
+  mirroring `handleForwardPrimary`'s contract: on any non-nil error, if the local node is a replica owner,
+  apply the remove locally + fan out to peer replicas via the existing `applyRemove(replicate=true)` path;
+  otherwise return the error. The promotion path bumps the shared `dist.write.forward_promotion` counter, so
+  operators see Set + Remove promotions on the same observable instrument. The dead primary catches up via
+  merkle anti-entropy on restart — the same convergence mechanism that already handles replica-side tombstones
+  in `replicateRemoveWithSpan`. New test
+  [`TestDistRemove_PromotesOnGenericForwardError`](tests/hypercache_distmemory_audit_fixes_test.go) drives
+  chaos at `DropRate=1.0` and asserts the Remove returns `nil` (promotion succeeded), the local copy is
+  cleared, and the promotion counter bumped.
 - **Hint replay retains the queue on any transient transport error.**
   [`processHint`](pkg/backend/dist_memory.go) used to drop the hint unless the in-process
-  `errors.Is(err, sentinel.ErrBackendNotFound)` matched. Production HTTP/gRPC transports surface
-  `net.OpError` / `io.EOF` / `context.DeadlineExceeded` for a peer that's mid-restart or briefly
-  unreachable — none of which matched the gate, so the hint was abandoned on its very first replay
-  attempt instead of being retained through the outage. The exact failure mode behind the
-  `recovery on :8083 timed out after 60s: pre=50/50, during=43/50` symptom in the cluster-resilience
-  workflow: even with the Set-forward promotion in place, the hint queue lost the writes to the dead
-  primary before it came back. Now any non-nil error retains the hint; the configured `WithDistHintTTL`
-  bounds total retry time, so a permanently-broken target still drains. The deprecated `HintedDropped`
-  / `MigrationHintDropped` OTel counters remain registered for stability but now only bump on
-  queue-capacity overflow, not replay errors. New test
-  [`TestDistHintReplay_RetainsOnGenericReplayError`](tests/hypercache_distmemory_audit_fixes_test.go)
-  forces a 150ms window of failed replays under chaos, heals chaos, and asserts the hint still replays
-  onto the recovered peer.
+  `errors.Is(err, sentinel.ErrBackendNotFound)` matched. Production HTTP/gRPC transports surface `net.OpError`
+  / `io.EOF` / `context.DeadlineExceeded` for a peer that's mid-restart or briefly unreachable — none of which
+  matched the gate, so the hint was abandoned on its very first replay attempt instead of being retained
+  through the outage. The exact failure mode behind the
+  `recovery on :8083 timed out after 60s: pre=50/50, during=43/50` symptom in the cluster-resilience workflow:
+  even with the Set-forward promotion in place, the hint queue lost the writes to the dead primary before it
+  came back. Now any non-nil error retains the hint; the configured `WithDistHintTTL` bounds total retry time,
+  so a permanently-broken target still drains. The deprecated `HintedDropped` / `MigrationHintDropped` OTel
+  counters remain registered for stability but now only bump on queue-capacity overflow, not replay errors.
+  New test [`TestDistHintReplay_RetainsOnGenericReplayError`](tests/hypercache_distmemory_audit_fixes_test.go)
+  forces a 150ms window of failed replays under chaos, heals chaos, and asserts the hint still replays onto
+  the recovered peer.
 - **Set-forward promotion no longer requires the in-process `ErrBackendNotFound` sentinel, and the dead
   primary now converges via the hint queue (not just the next merkle tick).**
-  [`handleForwardPrimary`](pkg/backend/dist_memory.go) used to gate "primary unreachable → promote to
-  replica" on `errors.Is(errFwd, sentinel.ErrBackendNotFound)`, the error the in-process transport returns
-  for an unregistered peer. HTTP/gRPC transports against a stopped container surface
-  `net.OpError` / `io.EOF` / `context.DeadlineExceeded` instead — none of which matched the condition.
-  Result: when a cluster node was killed (e.g. `docker stop` in
+  [`handleForwardPrimary`](pkg/backend/dist_memory.go) used to gate "primary unreachable → promote to replica"
+  on `errors.Is(errFwd, sentinel.ErrBackendNotFound)`, the error the in-process transport returns for an
+  unregistered peer. HTTP/gRPC transports against a stopped container surface `net.OpError` / `io.EOF` /
+  `context.DeadlineExceeded` instead — none of which matched the condition. Result: when a cluster node was
+  killed (e.g. `docker stop` in
   [`scripts/tests/20-test-cluster-resilience.sh`](scripts/tests/20-test-cluster-resilience.sh)), writes for
-  keys whose primary was the dead node failed immediately at the forwarding hop, no hint was queued, and
-  the data never landed anywhere — the same 7 of 50 "during-*" writes failed reproducibly in CI's cluster
+  keys whose primary was the dead node failed immediately at the forwarding hop, no hint was queued, and the
+  data never landed anywhere — the same 7 of 50 "during-\*" writes failed reproducibly in CI's cluster
   workflow. Promotion now triggers on **any** non-nil forward error when the local node is in `owners[1:]`,
   matching the in-process and production transport behavior under the same resilience contract. Spurious
   promotion on a transient blip is benign — `applySet` version-compares on the receiver, and merkle
@@ -439,14 +432,14 @@ All notable changes to HyperCache are recorded here. The format follows
   last-write-wins rule. Defense-in-depth follow-up: when promotion fires, `setImpl` now widens the replica
   fan-out from `owners[1:]` to the full `owners` list, so `replicateTo`'s existing best-effort hint queueing
   catches the failed forward to the dead primary. Its post-restart convergence window is bounded by
-  hint-replay (`WithDistHintReplayInterval`, ~200ms in the default cluster config) rather than waiting for
-  the next merkle tick. New OTel counter `dist.write.forward_promotion` exposes how often promotion fired —
-  a flapping primary surfaces as a steady rise here, well before any read- or write-side error spikes.
-  Test [`TestDistSet_PromotesOnGenericForwardError`](tests/hypercache_distmemory_forward_primary_promotion_test.go)
-  uses the chaos hooks at `DropRate=1.0` to deterministically force a generic forward error, asserts the
-  Set succeeds via promotion, that `HintedQueued` bumps, and — after chaos clears — that the original
-  primary receives the write through the natural hint-replay loop. The existing `TestDistFailureRecovery`
-  continues to pass byte-identical (the change widens the promotion gate, doesn't narrow it).
+  hint-replay (`WithDistHintReplayInterval`, ~200ms in the default cluster config) rather than waiting for the
+  next merkle tick. New OTel counter `dist.write.forward_promotion` exposes how often promotion fired — a
+  flapping primary surfaces as a steady rise here, well before any read- or write-side error spikes. Test
+  [`TestDistSet_PromotesOnGenericForwardError`](tests/hypercache_distmemory_forward_primary_promotion_test.go)
+  uses the chaos hooks at `DropRate=1.0` to deterministically force a generic forward error, asserts the Set
+  succeeds via promotion, that `HintedQueued` bumps, and — after chaos clears — that the original primary
+  receives the write through the natural hint-replay loop. The existing `TestDistFailureRecovery` continues to
+  pass byte-identical (the change widens the promotion gate, doesn't narrow it).
 - **`TestDistRebalanceReplicaDiffThrottle` no longer flakes under `make test-race`.** The test's 900ms hard
   sleep wasn't enough wall-clock budget for the rebalancer's 80ms-tick loop to actually fire 11 ticks under
   `-race` + `-shuffle=on`'s scheduler pressure. Replaced the sleep with a 5-second polling loop that exits as
@@ -830,7 +823,7 @@ Worth surfacing for contributors:
   `tests/merkle_node_helper.go`, `pkg/backend/dist_memory_test_helpers.go::EnableHTTPForTest` (build tag
   `test`).
 - **Lint discipline:** 35 `nolint` directives total across the repo, each with a one-line justification.
-  golangci-lint v2.12.2 runs clean with `--build-tags test`.
+  golangci-lint v2.13.1 runs clean with `--build-tags test`.
 
 ### Removed
 
