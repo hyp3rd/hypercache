@@ -823,7 +823,7 @@ Worth surfacing for contributors:
   `tests/merkle_node_helper.go`, `pkg/backend/dist_memory_test_helpers.go::EnableHTTPForTest` (build tag
   `test`).
 - **Lint discipline:** 35 `nolint` directives total across the repo, each with a one-line justification.
-  golangci-lint v2.13.1 runs clean with `--build-tags test`.
+  golangci-lint v2.13.2 runs clean with `--build-tags test`.
 
 ### Removed
 

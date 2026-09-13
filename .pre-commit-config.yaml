@@ -37,11 +37,11 @@ repos:
         types: [ file, yaml ]
         entry: yamllint --strict -f parsable
   - repo: https://github.com/hadolint/hadolint
-    rev: v2.14.0
+    rev: v2.15.1
     hooks:
       - id: hadolint-docker
   - repo: https://github.com/streetsidesoftware/cspell-cli
-    rev: v10.0.1
+    rev: v10.2.0
     hooks:
       # Spell check changed files
       - id: cspell
@@ -57,7 +57,7 @@ repos:
         stages: [ commit-msg ]
         always_run: true
   - repo: https://github.com/markdownlint/markdownlint.git
-    rev: v0.17.0
+    rev: v0.18.1
     hooks:
       - id: markdownlint
         name: Markdownlint
