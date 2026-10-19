@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/go-jose/go-jose/v4 v4.1.5
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/goccy/go-json v0.11.2
 	github.com/gofiber/fiber/v3 v3.5.0
 	github.com/hyp3rd/ewrap v1.5.2
