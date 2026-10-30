@@ -9,7 +9,7 @@ require (
 	github.com/goccy/go-json v0.12.0
 	github.com/gofiber/fiber/v3 v3.6.1
 	github.com/hyp3rd/ewrap v1.5.2
-	github.com/hyp3rd/sectools v1.2.9
+	github.com/hyp3rd/sectools v1.3.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/stretchr/testify v1.12.1
 	github.com/ugorji/go/codec v1.3.2
@@ -27,7 +27,7 @@ require (
 require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/gofiber/schema v1.9.1 // indirect
+	github.com/gofiber/schema v1.9.2 // indirect
 	github.com/gofiber/utils/v2 v2.6.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
