@@ -640,6 +640,7 @@ func (t *DistHTTPTransport) newNodeRequest(
 		return nil, err
 	}
 
+	//gosec:disable CWE-22 - path traversal is not possible here because the base URL is resolved from a trusted nodeID and the endpointPath is hardcoded in the caller, not user-supplied.
 	target, err := url.JoinPath(base.String(), strings.TrimPrefix(endpointPath, "/"))
 	if err != nil {
 		return nil, ewrap.Wrap(err, "join base url path")
