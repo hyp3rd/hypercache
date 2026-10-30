@@ -1,8 +1,8 @@
 include .project-settings.env
 
-GOLANGCI_LINT_VERSION ?= v2.13.2
-BUF_VERSION ?= v1.73.0
-GO_VERSION ?= 1.27.1
+GOLANGCI_LINT_VERSION ?= v2.15.0
+BUF_VERSION ?= v1.75.0
+GO_VERSION ?= 1.27.3
 GCI_PREFIX ?= github.com/hyp3rd/hypercache
 PROTO_ENABLED ?= true
 
@@ -113,7 +113,6 @@ prepare-toolchain: prepare-base-tools
 
 prepare-base-tools:
 	$(call check_command_exists,docker) || (echo "Docker is missing, install it before starting to code." && exit 1)
-
 	$(call check_command_exists,git) || (echo "git is not present on the system, install it before starting to code." && exit 1)
 
 	$(call check_command_exists,go) || (echo "golang is not present on the system, download and install it at https://go.dev/dl" && exit 1)
